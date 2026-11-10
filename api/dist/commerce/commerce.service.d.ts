@@ -1,0 +1,74 @@
+import { DatabaseService } from '../common/database.service';
+import type { AuthUser, CreatePurchaseRequestInput, CreateQuotationInput } from './commerce.types';
+export declare class CommerceService {
+    private readonly db;
+    constructor(db: DatabaseService);
+    createQuotation(user: AuthUser, input: CreateQuotationInput): Promise<{
+        id: string;
+        quotationNumber: string;
+        status: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+    }>;
+    listQuotations(user: AuthUser): Promise<{
+        id: string;
+        quotation_number: string;
+        status: string;
+        subtotal: string;
+        tax_total: string;
+        grand_total: string;
+        customer_id: string;
+    }[]>;
+    confirmQuotation(user: AuthUser, quotationId: string, orderNumber: string): Promise<{
+        quotationId: string;
+        orderId: string;
+        orderNumber: string;
+        status: string;
+    }>;
+    issueInvoice(user: AuthUser, salesOrderId: string, invoiceNumber: string): Promise<{
+        salesOrderId: string;
+        invoiceId: string;
+        invoiceNumber: string;
+        status: string;
+    }>;
+    createPurchaseRequest(user: AuthUser, input: CreatePurchaseRequestInput): Promise<{
+        id: string;
+        requestNumber: string;
+        status: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+    }>;
+    listPurchaseRequests(user: AuthUser): Promise<{
+        id: string;
+        request_number: string;
+        status: string;
+        subtotal: string;
+        tax_total: string;
+        grand_total: string;
+        supplier_id: string;
+    }[]>;
+    approvePurchaseRequest(user: AuthUser, requestId: string, orderNumber: string): Promise<{
+        requestId: string;
+        purchaseOrderId: string;
+        purchaseOrderNumber: string;
+        status: string;
+    }>;
+    receivePurchaseOrder(user: AuthUser, purchaseOrderId: string, receiptNumber: string): Promise<{
+        purchaseOrderId: string;
+        receiptId: string;
+        receiptNumber: string;
+        status: string;
+    }>;
+    private validateSalesInput;
+    private validatePurchaseInput;
+    private resolveTaxRatePercent;
+    private calculateTotals;
+    private calculateSalesLines;
+    private calculatePurchaseLines;
+    private assertCustomerOwnership;
+    private assertSupplierOwnership;
+    private insertAudit;
+    private insertAuditDirect;
+}

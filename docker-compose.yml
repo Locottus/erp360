@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16
+    container_name: erp360-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-erp360}
+      POSTGRES_USER: ${POSTGRES_USER:-erp360}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp360_dev_password}
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - erp360_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-erp360} -d ${POSTGRES_DB:-erp360}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  erp360_db_data:
