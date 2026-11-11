@@ -1,0 +1,135 @@
+{
+  "capturedAt": "2026-11-11T16:42:19.349Z",
+  "companyCode": "GUIA-20261111104218-69cddb",
+  "flows": [
+    "Invited user through UI; hid private key, revised roles/name with reason and verified revision1 audit",
+    "Updated only current company profile through UI and refreshed tenant header; immutable code and revision1 verified",
+    "UI rule shows company-wide5.0001 pending, then3.0001 after partial receipt elsewhere; detail shows supplier, order and quantities; suggestion4.0001 unchanged",
+    "Created reviewed replenishment draft1.2345 at2.0001; inspected exact2.4691 and approved separately",
+    "Reviewed product, exact quantity and total, then rejected draft purchase in UI with audit reason; no order or approval action",
+    "Posted invoice and partial payment fixture; UI ledger shows two sources and exact closing12.3455"
+  ],
+  "responsive": [
+    {
+      "route": "/users",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/users",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/users",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/users",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/company",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/company",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/company",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/company",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/inventory",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/inventory",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/inventory",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/inventory",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/inventory-propuesta",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/inventory-propuesta",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/inventory-propuesta",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/inventory-propuesta",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/accounting",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/accounting",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/accounting",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/accounting",
+      "width": 1440,
+      "scroll": 1440
+    }
+  ],
+  "pageErrors": 0
+}

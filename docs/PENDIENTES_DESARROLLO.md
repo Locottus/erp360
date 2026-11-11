@@ -1,6 +1,6 @@
 # ERP360: continuidad del desarrollo
 
-Fecha de corte: 10 de noviembre de 2026. Repositorio de trabajo:
+Fecha de corte: 11 de noviembre de 2026. Repositorio de trabajo:
 `C:\angular\erp360\erp360-modernizado`.
 
 Este documento permite retomar el desarrollo. No afirma que el ERP esté
@@ -15,10 +15,99 @@ Angular, NestJS y PostgreSQL 16. API local `http://127.0.0.1:3001`,
 frontend `http://127.0.0.1:4201`, proxy frontend `/api`.
 Contenedor de datos `erp360-db`: conservar su volumen.
 
-Migraciones incrementales hasta `0023_saas_billing.sql`.
+Migraciones incrementales hasta `0026_replenishment_proposals.sql`.
 Respaldar antes de migrar; no volver a inicializar datos existentes.
 El directorio padre contiene Odoo como referencia de lógica, no es la aplicación
 que se está ejecutando.
+
+### Avance actual: compromisos de compra visibles
+
+Actualización 0026: desde una regla se crea una solicitud de compra en
+borrador con proveedor, cantidad y costo explícitos, sin impuesto y con motivo.
+Se impide más de una propuesta abierta por regla, incluyendo solicitudes
+concurrentes. Al aprobar/rechazar se libera la regla. No detecta solicitudes
+manuales u otras ubicaciones; revisar compromisos antes de proponer y aprobar.
+La ubicación describe el origen, no obliga el destino. No hay segregación de
+creador y aprobador ni política automática de impuestos o costos.
+Verificado: builds, 36 unitarias y 78 e2e API, 61 frontend; seis flujos de
+navegador y 24 combinaciones ruta/ancho sin errores. Manual 3.12.
+
+Se añadió consulta de líneas y totales de solicitudes antes de decidir.
+Es una lectura informativa y no bloquea la solicitud ni garantiza que no
+cambie después. Sigue pendiente segregar creación de aprobación y ampliar la
+protección de duplicados a compras manuales y otras ubicaciones.
+Manual 3.11; 36 unitarias API, 77 e2e, 59 frontend; cinco flujos reales y
+20 combinaciones ruta/ancho sin errores.
+
+En el cierre anterior: en Operaciones → Compras se puede rechazar una
+solicitud abierta con motivo auditado; aprobación y rechazo concurrentes se
+serializan. El rechazo no anula una orden ya aprobada. No implementa todavía
+propuestas generadas desde reposición ni segregación de quien crea y aprueba.
+Verificado: 36 unitarias API, 77 e2e y 57 frontend; cinco flujos reales y
+20 combinaciones ruta/ancho sin errores. Manual 3.10; sin migración.
+
+Actualización posterior: el botón **Ver órdenes** desglosa proveedor, estado,
+pedido, recepción documentada y pendiente verificable o motivo de exclusión.
+El resumen y el detalle se consultan por separado y pueden diferir si hay
+movimientos entre ambas consultas; actualiza antes de decidir. La lectura
+requiere administrador y está aislada por empresa. Verificado: builds,
+36 unitarias y 75 e2e API, 55 frontend; cuatro flujos reales, 16 anchos,
+sin errores. Manual 3.9. No hubo migración ni se crearon propuestas aprobables.
+
+Reposición muestra por producto el total empresarial pendiente de órdenes
+aprobadas menos recepciones parciales, con total de órdenes. Una cancelación
+deja de contarse; devoluciones no reabren órdenes. Recibos históricos sin
+líneas y sobre-recepciones se señalan y excluyen del total. No se asigna
+destino ni fecha inexistentes; el total se repite por ubicación y no debe
+sumarse. La sugerencia por ubicación no se recalcula descontándolo.
+En ese cierre no se había creado propuesta aprobable ni se modificó contabilidad, política de costos,
+permisos o membresías multiempresa. Referencia y diferencias:
+[adaptación Odoo](ADAPTACION_ODOO.md).
+En el cierre anterior: API 36 unitarias y 75 e2e, frontend 52; cuatro flujos
+de navegador y 16 combinaciones ruta/ancho sin errores. Manual 3.8.
+
+### Usuarios, empresas, inventario y contabilidad: avance 0025
+
+- Usuarios: edición con `management_revision`, motivo y auditoría antes/después;
+  conflicto 409 al intentar sobrescribir otra edición. Se conserva la protección
+  del último administrador y la revocación de sesiones.
+- Mi empresa (`/company`): perfil con revisión, nombre e identificación tributaria
+  de la empresa autenticada. Código, actividad, moneda y contrato no se editan.
+  Facturas con snapshot conservan emisor; PDF legados sin snapshot siguen
+  mostrando datos descriptivos actuales con aviso.
+- Inventario: mínimo/objetivo por producto y ubicación, sugerencia exacta sobre
+  físico menos reservado. Mínimo cero desactiva; producto inactivo no sugiere.
+  Incluye reglas sin saldo; no crea compras ni resta mercancía en tránsito.
+- Contabilidad (`/accounting`): plan consultable sin recalcular el balance y
+  libro mayor publicado con apertura, movimientos, cierre y acumulado previo
+  a paginación. Cálculo monetario SQL exacto, respuesta como cadenas decimales.
+- Cierre verificado: builds, 36 unitarias API, 73 e2e y 52 frontend.
+  Navegador real: cuatro flujos y 16 combinaciones ruta/ancho, cero errores.
+  Evidencia `docs/manual/management-evidence.json`; manual actualizado a 3.7.
+
+Siguientes puntos concretos:
+
+1. Identidad: permisos de escritura granulares, MFA, correo seguro y
+   recuperación autoservicio, antes de delegar finanzas o inventario sin admin.
+2. Empresa: membresías autorizadas multiempresa, política monetaria/zonas y
+   cambios legales de razón social; no ampliar este perfil como selector global.
+3. Reposición: destino y fecha comprometidos, plazos y deduplicación frente a
+   solicitudes manuales y otras ubicaciones; no crear pedidos automáticamente.
+4. Finanzas: conciliación parcial, estados por moneda/base aprobada,
+   apertura histórica autorizada y ajustes/asientos manuales con segregación.
+   El libro mayor actual no certifica el estado financiero ni añade COGS.
+
+### Adaptación desde fuente Odoo: vigencia de ofertas
+
+Implementada en esta etapa: fecha opcional, indicador de vencimiento, rechazo
+de confirmación vencida y revisión con motivo/revisión esperada. UI en
+Operaciones → Ventas. Históricos sin fecha siguen sin caducidad; no hay firma
+electrónica ni aceptación pública. Se usa UTC explícitamente.
+Ver [evidencia y diferencias con Odoo](ADAPTACION_ODOO.md).
+
+Pendiente: vigencia predeterminada configurable por empresa, política de zona
+horaria, revisión comercial de precios en una nueva oferta y eventual flujo
+de aceptación/firma autorizado. No asumir que revisar vigencia cambia precios.
 
 ### Entrega SaaS de esta etapa
 
@@ -94,6 +183,10 @@ manual; su ejecución no implica que alguien contactó al cliente.
 | P0 | Identidad y seguridad productiva | MFA, correo seguro, recuperación autoservicio, permisos finos, HTTPS/CSP, secretos y rate limit distribuido |
 | P0 | Operación y restauración | Ledger de migraciones, backups cifrados/retención, restauración probada y monitoreo |
 
+Los cobros nuevos de venta no liquidan residuos de 0,0001; revisar facturas
+anteriores que figuren pagadas con saldo positivo. La corrección no altera el
+histórico ni sustituye una política monetaria aprobada.
+
 ## 4. eCommerce, RRHH y asistencia
 
 - **eCommerce:** pasarela y reembolso real; fletes/tarifas; cuenta de cliente con
@@ -103,13 +196,38 @@ manual; su ejecución no implica que alguien contactó al cliente.
 - **RRHH:** zona laboral, turnos, feriados, saldos/devengo de vacaciones,
   corrección de fechas con historial y datos antiguos paginados. Hoy se puede
   cancelar una ausencia y solicitar otra. Nómina exige jurisdicción y homologación.
+- **Jornadas abiertas:** Operaciones consulta todas las entradas abiertas de la
+  empresa, independientemente del límite de 500 registros del historial. Esa
+  consulta aún no está paginada; la consulta histórica tampoco ofrece paginación.
 - **Permisos de personas:** vínculo cuenta/empleado antes de autoservicio;
-  no exponer expedientes de compañeros.
+  no exponer expedientes de compañeros. Las lecturas HTTP de empleados,
+  asistencias y ausencias y `hr.employee.search_read` por RPC requieren admin;
+  esto no implementa acceso a datos propios ni roles específicos de RRHH.
 - **IA futura:** mantener mock hasta aprobar proveedor, privacidad y retención;
   herramientas allowlist, lectura tenant-scoped, redacción, consentimiento y
   aprobación humana en escrituras. Nunca dar a una IA secretos ni acceso SQL libre.
 - **Accesibilidad:** lectores de pantalla, zoom, contraste, teclado y pruebas con
   usuarios. Pruebas de ancho no son certificación WCAG.
+
+## 4.1 Revisión de módulos y prioridades
+
+Revisión inicial de rutas, controles y bitácora; no es una auditoría exhaustiva
+de la lógica ni una certificación de paridad con Odoo.
+
+| Área | Siguiente trabajo |
+|---|---|
+| Identidad y empresa | MFA, recuperación segura y permisos por recurso; mantener aislamiento tenant y revocación en HTTP/RPC. |
+| Maestros y ventas | Lecturas de clientes/ventas/PDF/RPC para admin o sales y proveedores/compras para admin o purchases; falta alcance por vendedor y créditos/retornos parciales. |
+| Compras e inventario | Recepción parcial con devengo, remanentes, valoración aprobada y trazabilidad histórica. |
+| Contabilidad y fiscal | Balance y documentos fiscales requieren admin; falta rol contable independiente, conciliación, estados financieros y homologación externa. |
+| Portal y tienda | Permisos y privacidad, expiración de reservas, cuenta verificada, pagos y envíos reales. |
+| Personas | Roles RRHH, acceso a datos propios vinculado a cuenta, paginación y zona laboral aprobada. |
+| Dashboard y SaaS | Armonizar visibilidad de métricas y APIs; política comercial, MFA y facturación segura. |
+
+Productos, impuestos, saldos y movimientos de inventario siguen disponibles a
+usuarios autenticados de la empresa. No existe alcance por documento o vendedor,
+ni rol contable o de inventario independiente. Completar y aprobar la matriz de
+permisos antes de habilitar datos sensibles a usuarios de producción.
 
 ## 5. Cómo retomar
 
@@ -159,6 +277,19 @@ cancelación/gracia/reembolso. Hasta entonces, mostrar integraciones como
 **sin configurar**, no como operaciones exitosas simuladas.
 
 ## 7. Evidencia de cierre de esta etapa
+
+Último cierre, gestión 0025 (11 de noviembre): 36 unitarias API, 73 e2e
+(15 suites) y 52 frontend; builds correctos. Cuatro flujos reales en 16
+combinaciones ruta/ancho sin errores. Manual 3.7: 26 capítulos/anexos,
+41 figuras, 63 tablas y 135 endpoints. Respaldo previo legible; no se ensayó
+restauración. Los cierres siguientes son antecedentes, no pruebas repetidas.
+
+Actualización por adaptación Odoo (11 de noviembre): migración 0024 aplicada
+tras respaldo; builds correctos, 36 unitarias API, 65 e2e y 42 frontend.
+Prueba real de vigencia: dos flujos, cuatro anchos, cero errores.
+Manual 3.6: 26 capítulos/anexos, 36 figuras, 63 tablas y 130 endpoints.
+Las métricas SaaS de la entrega anterior que siguen debajo conservan su fecha
+y no representan una repetición de ese navegador en esta actualización.
 
 - API build correcto, 36 unitarias y 57 e2e aprobadas.
 - Frontend build correcto, 34 pruebas ChromeHeadless aprobadas.

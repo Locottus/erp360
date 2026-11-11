@@ -2,12 +2,194 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { DatabaseService } from '../common/database.service';
 import type { AuthUser, StockAdjustmentInput } from './inventory.types';
 import { normalizeQuantityDocument, type QuantityDocument } from '../common/quantity-document';
+import { requiredDecimal } from '../common/decimal-input';
+import { changeReason, expectedRevision } from '../common/management-input';
 
 type DbClient = Awaited<ReturnType<DatabaseService['connect']>>;
+
+const purchaseCommitmentCtes = `open_lines AS (
+  SELECT l.product_id,l.order_id,l.quantity,
+    EXISTS (SELECT 1 FROM purchase_receipts pr
+            WHERE pr.company_id=po.company_id AND pr.purchase_order_id=po.id AND pr.payload IS NULL) AS has_legacy,
+    COALESCE((SELECT SUM(rl.quantity) FROM purchase_receipt_lines rl
+              JOIN purchase_receipts pr ON pr.id=rl.receipt_id
+              WHERE rl.order_line_id=l.id AND pr.company_id=po.company_id AND pr.purchase_order_id=po.id),0) AS received
+  FROM purchase_orders po JOIN purchase_order_lines l ON l.order_id=po.id
+  WHERE po.company_id=$1 AND po.status IN ('ordered','partially_received')
+), order_products AS (
+  SELECT product_id,order_id,SUM(quantity) AS ordered,SUM(received) AS received,
+    SUM(quantity-received) AS pending,BOOL_OR(has_legacy) AS has_legacy,
+    BOOL_OR(received>quantity) AS over_received,
+    BOOL_OR(has_legacy OR received>quantity) AS requires_review
+  FROM open_lines GROUP BY product_id,order_id
+)`;
 
 @Injectable()
 export class InventoryService {
   constructor(private readonly db: DatabaseService) {}
+
+  async listReplenishment(user: AuthUser, locationCode?: string) {
+    const location = locationCode === undefined || locationCode === '' ? null : this.normalizeLocation(locationCode);
+    const result = await this.db.query(
+      `WITH ${purchaseCommitmentCtes}, commitments AS (
+        SELECT product_id,
+          COALESCE(SUM(pending) FILTER (WHERE NOT requires_review),0)::text AS pending_quantity,
+          COUNT(*) FILTER (WHERE NOT requires_review AND pending>0)::integer AS pending_orders,
+          COUNT(*) FILTER (WHERE requires_review)::integer AS review_orders
+        FROM order_products GROUP BY product_id
+      )
+      SELECT r.product_id,p.sku,p.name AS product_name,p.is_active,r.location_code,
+        r.minimum_quantity::text,r.target_quantity::text,r.revision,
+        COALESCE(s.on_hand,0)::text AS on_hand,COALESCE(s.reserved,0)::text AS reserved,
+        (COALESCE(s.on_hand,0)-COALESCE(s.reserved,0))::text AS available,
+        COALESCE(c.pending_quantity,'0') AS pending_purchase_quantity,
+        COALESCE(c.pending_orders,0) AS pending_purchase_orders,
+        COALESCE(c.review_orders,0) AS purchase_orders_requiring_review,
+        (SELECT pr.request_number FROM replenishment_purchase_proposals rp
+         JOIN purchase_requests pr ON pr.id=rp.request_id AND pr.company_id=rp.company_id
+         WHERE rp.company_id=r.company_id AND rp.rule_id=r.id AND pr.status IN ('draft','submitted')
+         ORDER BY rp.created_at DESC LIMIT 1) AS open_proposal_number,
+        (p.is_active AND r.minimum_quantity>0 AND COALESCE(s.on_hand,0)-COALESCE(s.reserved,0)<r.minimum_quantity) AS needs_replenishment,
+        CASE WHEN p.is_active AND r.minimum_quantity>0 AND COALESCE(s.on_hand,0)-COALESCE(s.reserved,0)<r.minimum_quantity
+          THEN GREATEST(r.target_quantity-(COALESCE(s.on_hand,0)-COALESCE(s.reserved,0)),0)
+          ELSE 0 END::text AS suggested_quantity
+       FROM inventory_reorder_rules r JOIN products p ON p.id=r.product_id AND p.company_id=r.company_id
+       LEFT JOIN inventory_stock_balances s ON s.company_id=r.company_id AND s.product_id=r.product_id AND s.location_code=r.location_code
+       LEFT JOIN commitments c ON c.product_id=r.product_id
+       WHERE r.company_id=$1 AND ($2::text IS NULL OR r.location_code=$2)
+       ORDER BY needs_replenishment DESC,p.name,r.location_code`, [user.companyId, location]);
+    return result.rows;
+  }
+
+  async purchaseCommitments(user: AuthUser, productId: string) {
+    const product = await this.db.query('SELECT id FROM products WHERE id=$1 AND company_id=$2', [productId, user.companyId]);
+    if (!product.rows[0]) throw new NotFoundException('Product not found.');
+    const result = await this.db.query(
+      `WITH ${purchaseCommitmentCtes}
+       SELECT po.id AS order_id,po.order_number,po.status,s.name AS supplier_name,
+         op.ordered::text AS ordered_quantity,op.received::text AS documented_received_quantity,
+         CASE WHEN op.requires_review THEN NULL ELSE op.pending::text END AS pending_quantity,
+         op.has_legacy,op.over_received
+       FROM order_products op
+       JOIN purchase_orders po ON po.id=op.order_id AND po.company_id=$1
+       JOIN suppliers s ON s.id=po.supplier_id AND s.company_id=po.company_id
+       WHERE op.product_id=$2 AND (op.requires_review OR op.pending>0)
+       ORDER BY po.created_at DESC,po.id`, [user.companyId, productId]);
+    return result.rows;
+  }
+
+  async createReplenishmentProposal(user: AuthUser, productId: string, input: {
+    locationCode: string; expectedRevision: number; supplierId: string; requestNumber: string;
+    quantity: string; unitCost: string; reason: string; reviewedCommitments: boolean;
+  }) {
+    if (!input || typeof input.locationCode !== 'string' || !input.locationCode.trim()) {
+      throw new BadRequestException('An explicit locationCode is required.');
+    }
+    const location = this.normalizeLocation(input.locationCode);
+    const revision = expectedRevision(input.expectedRevision);
+    const reason = changeReason(input.reason);
+    const quantity = requiredDecimal(input.quantity, 'quantity');
+    const unitCost = requiredDecimal(input.unitCost, 'unitCost', true);
+    if (typeof input.requestNumber !== 'string' || !input.requestNumber.trim() || input.requestNumber.trim().length > 64 ||
+        /[\u0000-\u001f]/.test(input.requestNumber)) throw new BadRequestException('A request number of at most 64 characters is required.');
+    if (typeof input.supplierId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.supplierId)) {
+      throw new BadRequestException('A valid supplierId is required.');
+    }
+    if (input.reviewedCommitments !== true) throw new BadRequestException('Review existing purchases before creating a proposal.');
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`reorder:${user.companyId}:${productId}:${location}`]);
+      const rule = await client.query<{ id: string; revision: number }>(
+        `SELECT r.id,r.revision FROM inventory_reorder_rules r JOIN products p ON p.id=r.product_id AND p.company_id=r.company_id
+         WHERE r.company_id=$1 AND r.product_id=$2 AND r.location_code=$3 AND p.is_active FOR UPDATE OF r`,
+        [user.companyId, productId, location]);
+      if (!rule.rows[0]) throw new NotFoundException('Active product and replenishment rule not found.');
+      if (rule.rows[0].revision !== revision) throw new ConflictException('Replenishment rule changed. Reload before proposing.');
+      const supplier = await client.query('SELECT id FROM suppliers WHERE id=$1 AND company_id=$2 AND is_active', [input.supplierId, user.companyId]);
+      if (!supplier.rows[0]) throw new BadRequestException('Active supplier not found for this company.');
+      const existing = await client.query(
+        `SELECT pr.id FROM replenishment_purchase_proposals rp
+         JOIN purchase_requests pr ON pr.id=rp.request_id AND pr.company_id=rp.company_id
+         WHERE rp.company_id=$1 AND rp.rule_id=$2 AND pr.status IN ('draft','submitted') LIMIT 1`,
+        [user.companyId, rule.rows[0].id]);
+      if (existing.rows[0]) throw new ConflictException('An open proposal already exists for this rule.');
+      const amount = await client.query<{ total: string; valid: boolean }>(
+        `SELECT ROUND($1::numeric*$2::numeric,4)::text AS total,
+          ROUND($1::numeric*$2::numeric,4)<100000000000000::numeric AS valid`, [quantity, unitCost]);
+      if (!amount.rows[0].valid) throw new BadRequestException('Purchase amount exceeds supported precision.');
+      const request = await client.query<{ id: string; request_number: string }>(
+        `INSERT INTO purchase_requests(company_id,supplier_id,request_number,status,subtotal,tax_total,grand_total,created_by,currency_code)
+         VALUES($1,$2,$3,'draft',$4,0,$4,$5,(SELECT currency_code FROM companies WHERE id=$1)) RETURNING id,request_number`,
+        [user.companyId, input.supplierId, input.requestNumber.trim(), amount.rows[0].total, user.sub]);
+      await client.query(
+        `INSERT INTO purchase_request_lines(request_id,product_id,quantity,unit_cost,line_total) VALUES($1,$2,$3,$4,$5)`,
+        [request.rows[0].id, productId, quantity, unitCost, amount.rows[0].total]);
+      await client.query(
+        `INSERT INTO replenishment_purchase_proposals(request_id,company_id,rule_id,rule_revision,location_code,reason)
+         VALUES($1,$2,$3,$4,$5,$6)`, [request.rows[0].id, user.companyId, rule.rows[0].id, revision, location, reason]);
+      await client.query(
+        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'inventory.replenishment.proposal.create','purchase_requests',$3,$4)`,
+        [user.companyId, user.sub, request.rows[0].id, JSON.stringify({
+          product_id: productId, location_code: location, rule_revision: revision, supplier_id: input.supplierId,
+          quantity, unit_cost: unitCost, reason, reviewed_commitments: true,
+        })]);
+      await client.query('COMMIT');
+      return { id: request.rows[0].id, requestNumber: request.rows[0].request_number, status: 'draft' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if (String(error).includes('purchase_requests_company_id_request_number_key')) {
+        throw new ConflictException('Purchase request number already exists for this company.');
+      }
+      throw error;
+    } finally { client.release(); }
+  }
+
+  async setReplenishment(user: AuthUser, productId: string,
+    input: { locationCode: string; minimumQuantity: string; targetQuantity: string; expectedRevision: number; reason: string }) {
+    if (typeof input.locationCode !== 'string' || !input.locationCode.trim()) {
+      throw new BadRequestException('An explicit locationCode is required.');
+    }
+    const location = this.normalizeLocation(input.locationCode);
+    const minimum = requiredDecimal(input.minimumQuantity, 'minimumQuantity', true);
+    const target = requiredDecimal(input.targetQuantity, 'targetQuantity', true);
+    const revision = expectedRevision(input.expectedRevision);
+    const reason = changeReason(input.reason);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`reorder:${user.companyId}:${productId}:${location}`]);
+      const product = await client.query('SELECT id FROM products WHERE id=$1 AND company_id=$2', [productId, user.companyId]);
+      if (!product.rows[0]) throw new NotFoundException('Product not found.');
+      const valid = await client.query<{ valid: boolean }>('SELECT $1::numeric <= $2::numeric AS valid', [minimum, target]);
+      if (!valid.rows[0].valid) throw new BadRequestException('targetQuantity must be greater than or equal to minimumQuantity.');
+      const before = await client.query<{ minimum_quantity: string; target_quantity: string; revision: number }>(
+        `SELECT minimum_quantity::text,target_quantity::text,revision FROM inventory_reorder_rules
+         WHERE company_id=$1 AND product_id=$2 AND location_code=$3 FOR UPDATE`, [user.companyId, productId, location]);
+      if ((before.rows[0]?.revision ?? 0) !== revision) throw new ConflictException('Replenishment rule changed. Reload before editing.');
+      if (before.rows[0]?.minimum_quantity === minimum && before.rows[0]?.target_quantity === target) {
+        throw new ConflictException('No replenishment changes.');
+      }
+      const result = await client.query(
+        `INSERT INTO inventory_reorder_rules(company_id,product_id,location_code,minimum_quantity,target_quantity,updated_by)
+         VALUES($1,$2,$3,$4,$5,$6)
+         ON CONFLICT(company_id,product_id,location_code) DO UPDATE
+         SET minimum_quantity=EXCLUDED.minimum_quantity,target_quantity=EXCLUDED.target_quantity,
+             updated_by=EXCLUDED.updated_by,updated_at=NOW(),revision=inventory_reorder_rules.revision+1
+         RETURNING id,revision`, [user.companyId, productId, location, minimum, target, user.sub]);
+      await client.query(
+        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'inventory.replenishment.update','inventory_reorder_rules',$3,$4)`,
+        [user.companyId, user.sub, result.rows[0].id, JSON.stringify({
+          product_id: productId, location_code: location, before: before.rows[0] ?? null,
+          after: { minimum_quantity: minimum, target_quantity: target, revision: revision + 1 }, reason,
+        })]);
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
 
   async purchaseReceiptDetails(user: AuthUser, id: string) {
     const order = await this.db.query(

@@ -4,6 +4,8 @@ export const routes: Routes = [
   { path: '', title: 'Inicio · ERP360', loadComponent: () => import('./home.component').then(m => m.HomeComponent) },
   { path: 'login', title: 'Acceso · ERP360', loadComponent: () => import('./auth-console.component').then(m => m.AuthConsoleComponent) },
   { path: 'users', title: 'Usuarios · ERP360', loadComponent: () => import('./users.component').then(m => m.UsersComponent) },
+  { path: 'company', title: 'Mi empresa · ERP360', loadComponent: () => import('./company.component').then(m => m.CompanyComponent) },
+  { path: 'accounting', title: 'Contabilidad · ERP360', loadComponent: () => import('./accounting.component').then(m => m.AccountingComponent) },
   { path: 'catalogs', title: 'Catálogos · ERP360', loadComponent: () => import('./catalogs.component').then(m => m.CatalogsComponent) },
   { path: 'controls', title: 'Control operativo · ERP360', loadComponent: () => import('./operational-controls.component').then(m => m.OperationalControlsComponent) },
   { path: 'receiving', title: 'Recepciones y devoluciones · ERP360', loadComponent: () => import('./purchase-receiving.component').then(m => m.PurchaseReceivingComponent) },

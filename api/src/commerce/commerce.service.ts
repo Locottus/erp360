@@ -1,6 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../common/database.service';
 import { nextDocumentNumber } from '../common/document-sequence';
+import { requiredDate } from '../common/iso-date';
+import { changeReason } from '../common/management-input';
 import PDFDocument from 'pdfkit';
 import type {
   AuthUser,
@@ -115,18 +117,25 @@ export class CommerceService {
 
   async createQuotation(user: AuthUser, input: CreateQuotationInput) {
     this.validateSalesInput(input.quotationNumber, input.customerId, input.lines);
+    const validUntil = input.validUntil == null ? null : requiredDate(input.validUntil, 'validUntil');
     if (/^WEBQ-/i.test(input.quotationNumber.trim())) throw new BadRequestException('WEBQ- is reserved for automatic storefront numbering.');
     const taxRate = await this.resolveTaxRatePercent(user.companyId, input.taxRateCode);
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      if (validUntil) {
+        const valid = await client.query<{ valid: boolean }>(
+          `SELECT $1::date >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AS valid`, [validUntil],
+        );
+        if (!valid.rows[0].valid) throw new BadRequestException('Quotation validity cannot start in the past.');
+      }
       await this.assertCustomerOwnership(client, user.companyId, input.customerId);
       const lineCalc = await this.calculateSalesLines(client, user.companyId, input.lines);
       const { subtotal, taxTotal, grandTotal } = this.calculateTotals(lineCalc.subtotal, taxRate);
       const quotation = await client.query<{ id: string; quotation_number: string }>(
         `INSERT INTO sales_quotations
-          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by, currency_code)
-         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,(SELECT currency_code FROM companies WHERE id=$1))
+          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by, currency_code, valid_until)
+         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,(SELECT currency_code FROM companies WHERE id=$1),$9::date)
          RETURNING id, quotation_number`,
         [
           user.companyId,
@@ -137,6 +146,7 @@ export class CommerceService {
           grandTotal,
           input.notes ?? null,
           user.sub,
+          validUntil,
         ],
       );
       for (const line of lineCalc.lines) {
@@ -151,7 +161,7 @@ export class CommerceService {
         user,
         'commerce.sales.quotation.create',
         quotation.rows[0].id,
-        { quotation_number: input.quotationNumber, line_count: lineCalc.lines.length },
+        { quotation_number: input.quotationNumber, line_count: lineCalc.lines.length, valid_until: validUntil },
       );
       await client.query('COMMIT');
       return {
@@ -161,6 +171,8 @@ export class CommerceService {
         subtotal,
         taxTotal,
         grandTotal,
+        validUntil,
+        revision: 0,
       };
     } catch (error) {
       await client.query('ROLLBACK');
@@ -182,8 +194,13 @@ export class CommerceService {
       tax_total: string;
       grand_total: string;
       customer_id: string;
+      valid_until: string | null;
+      revision: number;
+      is_expired: boolean;
     }>(
-      `SELECT id, quotation_number, status, subtotal, tax_total, grand_total, customer_id
+      `SELECT id, quotation_number, status, subtotal, tax_total, grand_total, customer_id,
+              valid_until::text, revision,
+              COALESCE(status = 'draft' AND valid_until < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date, FALSE) AS is_expired
        FROM sales_quotations
        WHERE company_id = $1
        ORDER BY created_at DESC`,
@@ -252,8 +269,10 @@ export class CommerceService {
         subtotal: string;
         tax_total: string;
         grand_total: string;
+        is_expired: boolean;
       }>(
-        `SELECT id, customer_id, status, subtotal, tax_total, grand_total
+        `SELECT id, customer_id, status, subtotal, tax_total, grand_total,
+                COALESCE(valid_until < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date, FALSE) AS is_expired
          FROM sales_quotations
          WHERE id = $1 AND company_id = $2
          LIMIT 1
@@ -268,6 +287,9 @@ export class CommerceService {
       }
       if (quote.rows[0].status === 'rejected') {
         throw new BadRequestException('Rejected quotation cannot be confirmed.');
+      }
+      if (quote.rows[0].is_expired) {
+        throw new ConflictException('Quotation expired. Review prices and revise validity before confirming.');
       }
 
       const order = await client.query<{ id: string; order_number: string }>(
@@ -306,7 +328,7 @@ export class CommerceService {
         );
       }
 
-      await client.query(`UPDATE sales_quotations SET status = 'approved', updated_at = NOW() WHERE id = $1`, [
+      await client.query(`UPDATE sales_quotations SET status = 'approved', revision = revision + 1, updated_at = NOW() WHERE id = $1`, [
         quote.rows[0].id,
       ]);
 
@@ -334,6 +356,52 @@ export class CommerceService {
     } finally {
       client.release();
     }
+  }
+
+  async reviseQuotationValidity(
+    user: AuthUser, id: string,
+    input: { validUntil: string | null; expectedRevision: number; reason: string },
+  ) {
+    if (!input || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0) {
+      throw new BadRequestException('A nonnegative expectedRevision is required.');
+    }
+    if (typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) {
+      throw new BadRequestException('A reason of 10 to 1000 characters is required.');
+    }
+    const validUntil = input.validUntil === null ? null : requiredDate(input.validUntil, 'validUntil');
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query<{ status: string; valid_until: string | null; revision: number }>(
+        `SELECT status, valid_until::text, revision FROM sales_quotations
+         WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, user.companyId],
+      );
+      const quote = current.rows[0];
+      if (!quote) throw new NotFoundException('Quotation not found.');
+      if (quote.status !== 'draft') throw new ConflictException('Only a draft quotation can have its validity revised.');
+      if (quote.revision !== input.expectedRevision) throw new ConflictException('Quotation changed. Reload before revising validity.');
+      if (validUntil) {
+        const valid = await client.query<{ valid: boolean }>(
+          `SELECT $1::date >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AS valid`, [validUntil],
+        );
+        if (!valid.rows[0].valid) throw new BadRequestException('New validity must be today or later (UTC).');
+      }
+      if (validUntil === quote.valid_until) throw new ConflictException('Quotation already has this validity.');
+      const result = await client.query(
+        `UPDATE sales_quotations SET valid_until=$3::date, revision=revision+1, updated_at=NOW()
+         WHERE id=$1 AND company_id=$2 RETURNING id, valid_until::text, revision`,
+        [id, user.companyId, validUntil],
+      );
+      await this.insertAudit(client, user, 'commerce.sales.quotation.validity', id, {
+        before: { valid_until: quote.valid_until, revision: quote.revision },
+        after: result.rows[0], reason: input.reason.trim(),
+      });
+      await client.query('COMMIT');
+      return result.rows[0];
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
   }
 
   async issueInvoice(user: AuthUser, salesOrderId: string, invoiceNumber: string) {
@@ -487,6 +555,10 @@ export class CommerceService {
     }>(
       `SELECT pr.id, pr.request_number, pr.status, pr.subtotal, pr.tax_total, pr.grand_total,
               pr.supplier_id, s.name AS supplier_name,
+              (SELECT a.payload->>'reason' FROM audit_log a
+               WHERE a.company_id=pr.company_id AND a.entity_id=pr.id::text
+                 AND a.event_name='commerce.purchase.request.reject'
+               ORDER BY a.created_at DESC,a.id DESC LIMIT 1) AS rejection_reason,
               po.id AS purchase_order_id, po.order_number AS purchase_order_number,
               po.status AS purchase_order_status,
               (po.id IS NOT NULL AND EXISTS (
@@ -515,6 +587,50 @@ export class CommerceService {
       total: result.rows.length,
     });
     return result.rows;
+  }
+
+  async purchaseRequestDetails(user: AuthUser, id: string) {
+    const result = await this.db.query(
+      `SELECT pr.id,pr.request_number,pr.status,pr.currency_code,
+        pr.subtotal::text,pr.tax_total::text,pr.grand_total::text,
+        s.name AS supplier_name,
+        rp.location_code AS replenishment_location,rp.rule_revision AS replenishment_rule_revision,
+        rp.reason AS replenishment_reason,
+        COALESCE(json_agg(json_build_object(
+          'id',l.id,'product_id',l.product_id,'sku',p.sku,'product_name',p.name,
+          'quantity',l.quantity::text,'unit_cost',l.unit_cost::text,'line_total',l.line_total::text
+        ) ORDER BY l.id) FILTER (WHERE l.id IS NOT NULL),'[]'::json) AS lines
+       FROM purchase_requests pr
+       JOIN suppliers s ON s.id=pr.supplier_id AND s.company_id=pr.company_id
+       LEFT JOIN replenishment_purchase_proposals rp ON rp.request_id=pr.id AND rp.company_id=pr.company_id
+       LEFT JOIN purchase_request_lines l ON l.request_id=pr.id
+       LEFT JOIN products p ON p.id=l.product_id AND p.company_id=pr.company_id
+       WHERE pr.id=$1 AND pr.company_id=$2
+       GROUP BY pr.id,s.name,rp.location_code,rp.rule_revision,rp.reason`, [id, user.companyId]);
+    if (!result.rows[0]) throw new NotFoundException('Purchase request not found.');
+    return result.rows[0];
+  }
+
+  async rejectPurchaseRequest(user: AuthUser, id: string, input: { reason: string }) {
+    const reason = changeReason(input?.reason);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query<{ status: string }>(
+        'SELECT status FROM purchase_requests WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+      if (!current.rows[0]) throw new NotFoundException('Purchase request not found.');
+      if (current.rows[0].status !== 'draft' && current.rows[0].status !== 'submitted') {
+        throw new ConflictException('Only open purchase requests can be rejected.');
+      }
+      await client.query(`UPDATE purchase_requests SET status='rejected',updated_at=NOW() WHERE id=$1 AND company_id=$2`,
+        [id, user.companyId]);
+      await this.insertAudit(client, user, 'commerce.purchase.request.reject', id, {
+        reason, previous_status: current.rows[0].status,
+      });
+      await client.query('COMMIT');
+      return { id, status: 'rejected' };
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
   }
 
   async approvePurchaseRequest(user: AuthUser, requestId: string, orderNumber: string) {

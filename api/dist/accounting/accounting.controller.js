@@ -22,6 +22,12 @@ let AccountingController = class AccountingController {
     constructor(accountingService) {
         this.accountingService = accountingService;
     }
+    accounts(request) {
+        return this.accountingService.listAccounts(request.user);
+    }
+    generalLedger(request, accountCode, fromDate, toDate, page, pageSize) {
+        return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
+    }
     returnToSupplier(request, id, input) {
         return this.accountingService.returnToSupplier(request.user, id, input);
     }
@@ -69,6 +75,27 @@ let AccountingController = class AccountingController {
     }
 };
 exports.AccountingController = AccountingController;
+__decorate([
+    (0, common_1.Get)('accounts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "accounts", null);
+__decorate([
+    (0, common_1.Get)('reports/general-ledger'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('accountCode')),
+    __param(2, (0, common_1.Query)('fromDate')),
+    __param(3, (0, common_1.Query)('toDate')),
+    __param(4, (0, common_1.Query)('page')),
+    __param(5, (0, common_1.Query)('pageSize')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "generalLedger", null);
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/returns'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -209,6 +236,7 @@ __decorate([
 ], AccountingController.prototype, "postPurchaseOrder", null);
 __decorate([
     (0, common_1.Get)('reports/trial-balance'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('fromDate')),
     __param(2, (0, common_1.Query)('toDate')),

@@ -54,4 +54,46 @@ describe('Leave cancellation UI', () => {
     expect(component.leaveCancellation.reason).toBe('');
     expect(component.busy).toBe(false);
   });
+  it('preserves timestamp precision and converts offsets to UTC when correcting attendance', async () => {
+    const fixture = TestBed.createComponent(PeopleComponent);
+    fixture.detectChanges(); flushLists(); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.attendance = { id: 'attendance', full_name: 'Employee', check_in_at: '2026-03-01T08:15:23.456-06:00',
+      check_out_at: '2026-03-01T09:45:59.123-06:00', status: 'closed', revision: 2, total_minutes: 91 };
+    component.selectAttendance();
+    expect(component.correction.checkInAt).toBe('2026-03-01T14:15:23.456');
+    expect(component.correction.checkOutAt).toBe('2026-03-01T15:45:59.123');
+    component.correction.reason = 'Authorized correction';
+    const correction = component.saveAttendance();
+    const req = http.expectOne(`${API_BASE_URL}/hr/attendance/attendance`);
+    expect(req.request.body).toEqual({ checkInAt: '2026-03-01T14:15:23.456Z', checkOutAt: '2026-03-01T15:45:59.123Z', reason: 'Authorized correction', expectedRevision: 2 });
+    req.flush({ revision: 3 }); await Promise.resolve();
+    flushLists(); await correction;
+  });
+  it('discards a late attendance correction response after session loss', async () => {
+    const fixture = TestBed.createComponent(PeopleComponent);
+    fixture.detectChanges(); flushLists(); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.attendance = { id: 'attendance', full_name: 'Employee', check_in_at: '2026-03-01T08:00:00Z',
+      check_out_at: '2026-03-01T09:00:00Z', status: 'closed', revision: 1, total_minutes: 60 };
+    component.selectAttendance(); component.correction.reason = 'Authorized correction';
+    const correction = component.saveAttendance();
+    const req = http.expectOne(`${API_BASE_URL}/hr/attendance/attendance`);
+    user.set(null); fixture.detectChanges(); req.flush({ revision: 2 }); await correction;
+    expect(component.message).toBe('');
+    expect(component.attendances).toEqual([]);
+  });
+  it('discards a late employee update response after session loss', async () => {
+    const fixture = TestBed.createComponent(PeopleComponent);
+    fixture.detectChanges(); flushLists(); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.employee = { id: 'employee', employee_code: 'EMP', full_name: 'Employee', email: null,
+      job_title: null, hire_date: '2026-01-01', status: 'active', revision: 0 };
+    component.selectEmployee(); component.person.reason = 'Authorized update';
+    const update = component.saveEmployee();
+    const req = http.expectOne(`${API_BASE_URL}/hr/employees/employee`);
+    user.set(null); fixture.detectChanges(); req.flush({ revision: 1 }); await update;
+    expect(component.message).toBe('');
+    expect(component.employees).toEqual([]);
+  });
 });

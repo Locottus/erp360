@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from '../auth/auth.service';
 import { DatabaseService } from '../common/database.service';
 
@@ -70,6 +70,9 @@ export class RpcLegacyService {
     }
 
     if (model === 'hr.employee' && method === 'search_read') {
+      if (!auth.roles.includes('admin')) {
+        throw new ForbiddenException('Insufficient role permissions.');
+      }
       const employees = await this.db.query(
         `SELECT id, employee_code, full_name, email, job_title, hire_date, status
          FROM hr_employees
@@ -81,6 +84,9 @@ export class RpcLegacyService {
     }
 
     if (model === 'sale.order' && method === 'search_read') {
+      if (!auth.roles.some((role) => ['admin', 'sales'].includes(role))) {
+        throw new ForbiddenException('Insufficient role permissions.');
+      }
       const limitRaw = payload['limit'];
       const parsedLimit = Number(limitRaw);
       const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;

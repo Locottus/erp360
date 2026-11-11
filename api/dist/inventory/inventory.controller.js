@@ -22,6 +22,18 @@ let InventoryController = class InventoryController {
     constructor(inventoryService) {
         this.inventoryService = inventoryService;
     }
+    replenishment(request, locationCode) {
+        return this.inventoryService.listReplenishment(request.user, locationCode);
+    }
+    purchaseCommitments(request, productId) {
+        return this.inventoryService.purchaseCommitments(request.user, productId);
+    }
+    createReplenishmentProposal(request, productId, input) {
+        return this.inventoryService.createReplenishmentProposal(request.user, productId, input);
+    }
+    setReplenishment(request, productId, input) {
+        return this.inventoryService.setReplenishment(request.user, productId, input);
+    }
     receiptDetails(request, id) {
         return this.inventoryService.purchaseReceiptDetails(request.user, id);
     }
@@ -57,6 +69,44 @@ let InventoryController = class InventoryController {
     }
 };
 exports.InventoryController = InventoryController;
+__decorate([
+    (0, common_1.Get)('replenishment'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('locationCode')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "replenishment", null);
+__decorate([
+    (0, common_1.Get)('replenishment/:productId/purchase-commitments'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "purchaseCommitments", null);
+__decorate([
+    (0, common_1.Post)('replenishment/:productId/proposals'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "createReplenishmentProposal", null);
+__decorate([
+    (0, common_1.Patch)('replenishment/:productId'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "setReplenishment", null);
 __decorate([
     (0, common_1.Get)('purchases/orders/:id/receipts'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -154,6 +204,7 @@ __decorate([
 ], InventoryController.prototype, "listMovements", null);
 __decorate([
     (0, common_1.Get)('sales-orders'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),

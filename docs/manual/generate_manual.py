@@ -31,7 +31,7 @@ for name in ["Title", "Heading 1", "Heading 2", "Heading 3"]:
     doc.styles[name].paragraph_format.keep_with_next = True
 doc.styles["Heading 1"].paragraph_format.page_break_before = True
 header = section.header.paragraphs[0]
-header.text = "ERP360  |  Operación y configuración  |  Edición 3.3"
+header.text = "ERP360  |  Operación y configuración  |  Edición 3.12"
 header.style = doc.styles["Caption"]
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -140,7 +140,7 @@ def flow(title, purpose, prerequisites, operations, result, controls):
 doc.add_heading("ERP360", 0)
 p("MANUAL DE OPERACIÓN Y CONFIGURACIÓN", "Subtitle")
 p("Guía de usuario, administración funcional e integración")
-p(f"Edición 3.3 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
+p(f"Edición 3.12 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
 p("Audiencia: usuarios, responsables de empresa, integradores y soporte.")
 note("Este manual describe la implementación existente, no una promesa de paridad con otro ERP. "
      "Distingue pantallas web de operaciones disponibles solo por API. Fiscal es simulación sandbox; "
@@ -156,12 +156,12 @@ p("ERP360 utiliza Angular para experiencia web, NestJS para servicios y PostgreS
   "Varias empresas comparten esquema con separación lógica por company_id. La empresa administrativa "
   "proviene de la sesión JWT; el código de tienda identifica un catálogo público, no concede permisos.")
 table(["Área", "Canal existente", "Límites relevantes"], [
-    ("Inicio, acceso, dashboard", "Pantallas web", "Invitación, activación, roles existentes, recuperación y revocación. Sin MFA ni membresías multiempresa."),
+    ("Empresas y usuarios", "Mi empresa, Usuarios y Acceso", "Perfil e identidad revisionados con motivo/auditoría, invitaciones y revocación. Sin MFA ni membresías multiempresa."),
     ("Maestros", "Catálogos, Operaciones y API", "Alta, edición, desactivación, exportación JSON e importación atómica de hasta 200 altas."),
     ("Ventas / compras", "Operaciones, Recepciones y API", "Recepciones parciales con ingreso físico atómico; devengo al completar y devolución con crédito proporcional."),
-    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias y conteos; sin valoración, lotes ni series."),
+    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias, conteos y reposición sugerida; sin valoración, lotes ni series."),
     ("Facturación comercial", "Facturación, Control operativo y API", "Folio automático opcional, moneda en documentos nuevos, PDF, crédito total y reembolso registrado. Sin certificación fiscal."),
-    ("Contabilidad", "API", "Plan base, asientos por origen, pagos, balance y cierre. No suite financiera completa."),
+    ("Contabilidad", "Libro mayor, Operaciones y API", "Plan base, asientos por origen, pagos, apertura/acumulado exactos por cuenta, balance y cierre. No suite financiera completa."),
     ("Fiscal GT/SV/DO", "API sandbox", "Adaptadores simulados; producción bloqueada, sin certificación legal."),
     ("RRHH", "Operaciones, Personas y API", "Empleados, bajas, jornadas y cancelación auditada de ausencias. No nómina ni saldos legales."),
     ("eCommerce", "Estudio, tienda pública y Control operativo", "Checkout idempotente, reserva MAIN, dirección, seguimiento manual y baja privada. Sin cobro, flete ni transportista externo."),
@@ -251,12 +251,32 @@ steps(["Como administrador abre Usuarios. Introduce nombre, correo y roles exist
        "La persona abre Acceso → activación/restablecimiento, pega la clave y define una contraseña de 12 a 256 caracteres.",
        "La clave de activación vence a las 24 horas y solo sirve una vez. No es una contraseña ni inicia sesión por sí sola.",
        "Para recuperar acceso, genera una nueva clave desde Usuarios: vence en una hora e invalida claves anteriores.",
-       "Edita nombre, estado o roles con autorización. Los cambios revocan sesiones anteriores; invita a volver a entrar.",
+       "Edita nombre, estado o roles con autorización y motivo de 10 a 1000 caracteres. Conserva la revisión cargada; los cambios revocan sesiones anteriores.",
+       "Si aparece conflicto, actualiza la lista y pulsa Editar de nuevo: revisa los cambios ajenos antes de reintentar. No se sobrescriben ediciones simultáneas.",
        "Para una incidencia usa Revocar sesiones. No se permite quitar o desactivar al último administrador activo."])
-note("Los roles sales/purchases controlan indicadores, pero no conceden automáticamente escrituras "
-     "en todos los módulos: muchas operaciones siguen reservadas a admin. Una cuenta no es una membresía multiempresa. "
-     "No hay MFA ni correo transaccional automático.")
+note("El rol sales permite consultar clientes, cotizaciones, pedidos, facturas, PDF comercial y "
+  "pedidos de surtido de la empresa; purchases permite consultar proveedores y solicitudes de compra. "
+  "El balance contable, los documentos fiscales y los datos privados de RRHH requieren admin. "
+  "Las escrituras comerciales, contables y de inventario siguen reservadas a admin. La consulta de "
+  "ventas no distingue por vendedor; no existe aún un rol contable independiente. Productos, "
+  "impuestos y saldos de inventario siguen accesibles a usuarios autenticados de la empresa. "
+  "No hay MFA ni correo transaccional automático.")
 image("12-users.png", "Administración de usuarios de una empresa ficticia")
+image("25-user-revision.png", "Edición de usuario con revisión, motivo y roles; sin clave de activación visible")
+h("3.5 Actualizar el perfil de la empresa", 2)
+steps(["Como administrador abre Mi empresa y verifica el código inmutable de la empresa autenticada.",
+       "Revisa nombre e identificación tributaria. Vaciar identificación la retira de forma explícita; no constituye validación fiscal.",
+       "Introduce motivo de 10 a 1000 caracteres y pulsa Guardar perfil de empresa.",
+       "El nombre actualizado aparece en la barra superior sin cambiar de tenant. Se conserva auditoría antes/después, actor y motivo.",
+       "Ante conflicto pulsa Recargar perfil y revisa la versión actual antes de editar nuevamente."])
+note("Solo se actualizan nombre e identificación tributaria: no código, país, moneda, actividad, usuarios ni contrato SaaS. "
+     "Las facturas con instantánea conservan el nombre de emisión. Los PDF legados sin instantánea muestran datos "
+     "descriptivos actuales con un aviso; no se inventan ni reescriben instantáneas históricas.")
+p("API: PATCH /companies/current requiere name, taxId (texto o null explícito), expectedRevision y reason. "
+  "PATCH /auth/users/:id ahora requiere expectedRevision (management_revision del listado) y reason "
+  "además de fullName, roles e isActive. Los clientes anteriores deben actualizar sus cuerpos; no se admite "
+  "omitir revisión para saltar el control de concurrencia.")
+image("26-company-profile.png", "Perfil empresarial revisionado y alcance explícito de los cambios")
 
 h("4. Navegación, accesibilidad y apariencia")
 steps(["En escritorio utiliza Inicio, Dashboard, Acceso, Tienda, Portal cliente y Procesos desde la barra lateral.",
@@ -466,6 +486,25 @@ note("El retorno físico posterior no crea asiento financiero adicional: registr
 code('POST /commerce/sales/quotations\n'
      '{"quotationNumber":"COT-DEMO-001","customerId":"<UUID cliente>",'
      '"taxRateCode":"IVA13","lines":[{"productId":"<UUID producto>","quantity":2,"unitPrice":25}]}')
+h("10.5 Vigencia y revisión de cotizaciones", 2)
+steps(["En Operaciones → Ventas crea la cotización. Válida hasta es opcional; sin fecha conserva vigencia ilimitada.",
+       "La fecha incluye todo el día en UTC. El servidor rechaza fechas inexistentes y nuevas fechas pasadas.",
+       "En Cotizaciones y pedidos revisa Vigencia UTC. Una vencida sigue siendo borrador, pero ya no permite confirmar.",
+       "Para renovarla abre Revisar vigencia de cotización, selecciona el borrador y revisa precios/condiciones.",
+       "Indica fecha nueva y motivo de 10 a 1000 caracteres. Retirar fecha de caducidad elimina el límite solo si lo eliges explícitamente.",
+       "Marca la revisión de condiciones y pulsa Guardar nueva vigencia. Se conserva auditoría de la fecha anterior.",
+       "Si devuelve conflicto, actualiza: otra persona pudo confirmar o revisar la oferta. No sobrescribas una revisión más reciente.",
+       "Confirma el pedido únicamente después de revisar la oferta vigente. La renovación no cambia precios ni recalcula impuestos."])
+p("API: validUntil opcional en POST /commerce/sales/quotations; GET devuelve valid_until, "
+  "revision e is_expired. PATCH /commerce/sales/quotations/:id/validity recibe "
+  "{validUntil, expectedRevision, reason}; null retira la fecha. Solo admin de la misma "
+  "empresa puede revisar borradores. Confirmar vencidas produce 409 sin crear pedido. "
+  "Un pedido ya aprobado no caduca retroactivamente.")
+note("Adaptación propia basada en el proceso observado en la fuente local de Odoo, no una copia "
+     "de su código. Usamos UTC deliberadamente. No se implementan firma de oferta, aceptación "
+     "pública ni pago del portal. Si cambian precios o líneas, crea una cotización nueva; "
+     "renovar la vigencia no autoriza a cambiar condiciones económicas silenciosamente.")
+image("24-quotation-validity.png", "Vigencia de cotización y revisión auditada desde Operaciones")
 
 h("11. Compras: recepciones parciales y devoluciones")
 flow("11.1 Flujo de compra", "Aprovisionar productos y reconocer el impacto físico/contable en su orden.",
@@ -480,6 +519,17 @@ flow("11.1 Flujo de compra", "Aprovisionar productos y reconocer el impacto fís
      "La recepción nueva actualiza inventario directamente; NO ejecutar después la aplicación total histórica ni un ajuste por el mismo material. "
      "El devengo sigue siendo por la orden completa, no contabilidad de cada entrega parcial.")
 h("11.2 Recibir una entrega parcial desde la pantalla", 2)
+p("En Operaciones → Compras pulsa Ver detalle de la solicitud para revisar proveedor, moneda, productos, "
+  "cantidades, costos y totales antes de aprobar o rechazar. Es una consulta independiente: vuelve a "
+  "cargarla y actualiza la lista si el estado cambia; la revisión no bloquea el documento. "
+  "GET /commerce/purchases/requests/:id está disponible para admin y purchases de la empresa autenticada. "
+  "La pantalla de Operaciones requiere admin. Si faltan líneas, investiga antes de aprobar.")
+p("Antes de aprobar, el administrador puede rechazar una solicitud abierta en Operaciones → Compras: "
+  "escribe un motivo de 10 a 1000 caracteres y pulsa Rechazar solicitud. Se conserva el motivo en auditoría "
+  "y en el listado; no se crea una orden. El rechazo no es reversible ni sustituye la cancelación o devolución "
+  "de una orden ya aprobada. Si otra persona aprueba o rechaza simultáneamente, actualiza el estado antes de continuar. "
+  "API: POST /commerce/purchases/requests/:id/reject con {reason}.")
+image("29-purchase-rejection.png", "Solicitud de compra rechazada con motivo auditado")
 steps(["Crea solicitud con proveedor/productos activos en Operaciones → Compras y apruébala con número de orden único.",
        "Abre Recepciones en el menú, o Recibir por cantidades desde el seguimiento de compras.",
        "Selecciona la orden. Revisa producto, cantidad pedida, recibido acumulado, pendiente y costo unitario.",
@@ -530,7 +580,8 @@ p("Ubicación omitida se normaliza a MAIN; los códigos se convierten a mayúscu
 p("La pantalla Inventario presenta saldos por ubicación y un kardex paginado. Puedes filtrar por "
   "producto; al dejar ubicación vacía se consultan todas. Los ajustes requieren rol administrador "
   "y motivo. Los pedidos confirmados muestran su reserva y ubicación; el despacho solicita una "
-  "confirmación adicional y conserva la ubicación reservada.")
+  "confirmación adicional y conserva la ubicación reservada. Al aplicar filtros se vuelve a la "
+  "primera página del kardex. Transferencias y conteos están en Control operativo.")
 table(["Operación", "Endpoint / entrada", "Control del operador"], [
     ("Consulta", "GET /inventory/stock?locationCode=MAIN", "Revisar on_hand, reserved y disponible por producto/ubicación."),
     ("Kardex", "GET /inventory/movements?productId=<UUID>&locationCode=MAIN&page=1&pageSize=50", "Consultar movimientos con filtros y paginación; cantidades positivas, tipo indica su efecto."),
@@ -547,6 +598,51 @@ steps(["Antes: anota producto/ubicación y saldo esperado.",
        "Ante un descuadre detener el siguiente paso y revisar documentos/auditoría con soporte."])
 note("Los bloqueos transaccionales ayudan a proteger el stock. Antes de alto volumen se necesitan "
      "pruebas simultáneas adicionales de recepción, reserva y despacho e idempotencia transversal.")
+h("12.1 Reposición por producto y ubicación", 2)
+steps(["Como administrador abre Inventario → Reposición por ubicación. Pulsa Actualizar reposición si es necesario.",
+       "Selecciona producto e introduce ubicación; se cargan la regla y su revisión, o revisión cero para una regla nueva.",
+       "Indica mínimo y objetivo (objetivo mayor o igual al mínimo), usando punto decimal y hasta cuatro decimales.",
+       "Introduce un motivo de 10 a 1000 caracteres y guarda. Revisa la sugerencia y las compras ya pendientes antes de comprar.",
+       "Pulsa Ver órdenes del producto para consultar orden, proveedor, estado, cantidad pedida y recepción documentada. Si figura excluida, revisa la causa antes de decidir.",
+       "Para desactivar una alerta guarda mínimo cero. Un producto inactivo no genera sugerencias.",
+       "Ante conflicto actualiza reposición y revisa la regla antes de volver a guardar."])
+p("Disponible = físico menos reservado. Hay alerta solamente cuando disponible es estrictamente menor que mínimo "
+  "y mínimo es positivo; alcanzar exactamente el mínimo no genera alerta. La sugerencia es objetivo menos disponible. "
+  "Incluye productos configurados sin saldo, cuyo disponible inicial es cero. La regla no crea saldos físicos, "
+  "órdenes de compra, reservas, movimientos ni asientos, y no descuenta mercancía en tránsito.")
+p("Compra pendiente de empresa suma, por producto, cantidades de órdenes aprobadas aún no recibidas "
+  "(ordenadas o parcialmente recibidas), restando recepciones por línea. Se actualiza tras recibir o cancelar "
+  "y excluye órdenes completamente recibidas y canceladas. Se calcula en la misma consulta que el saldo de inventario. "
+  "No representa un destino ni fecha: las órdenes actuales no indican ubicación hasta recibir. El total se repite "
+  "para las reglas del mismo producto y no debe sumarse entre ubicaciones. Una devolución a proveedor no reabre la orden.")
+note("Órdenes abiertas con recibo histórico sin líneas o cantidades recibidas inconsistentes se excluyen del total "
+     "y se señalan para revisión. El cero mostrado puede ser incompleto si existe ese aviso. Revisar la orden antes "
+     "de comprar; la sugerencia no descuenta el compromiso y no es una propuesta aprobada.")
+p("Ejemplo exacto: disponible 1.0001, mínimo 2.0001, objetivo 5.0002 → sugerencia 4.0001. "
+  "Las cantidades JSON son cadenas decimales, no números de coma flotante. "
+  "GET /inventory/replenishment admite locationCode; PATCH /inventory/replenishment/:productId exige "
+  "locationCode, minimumQuantity, targetQuantity, expectedRevision y reason. Cada regla tiene revisión independiente por ubicación.")
+p("La lectura agrega pending_purchase_quantity (cadena exacta), pending_purchase_orders y "
+  "purchase_orders_requiring_review (contadores por orden) en cada regla. Es informativa; no cambia estados "
+  "ni asigna el pedido pendiente a la ubicación de la regla.")
+p("El detalle se consulta independientemente y puede cambiar entre lecturas: actualiza reposición y vuelve a abrir "
+  "Ver órdenes para obtener datos recientes. GET /inventory/replenishment/:productId/purchase-commitments "
+  "requiere administrador y producto de la empresa autenticada. En órdenes excluidas pending_quantity es null; "
+  "la recepción documentada puede estar incompleta cuando hay recibos históricos sin detalle.")
+image("27-replenishment.png", "Reglas de reposición y sugerencias exactas, sin compra automática")
+p("Para proponer, pulsa Preparar propuesta en una regla de producto activo. Revisa las compras pendientes "
+  "y las solicitudes manuales de toda la empresa; indica número único, proveedor activo, cantidad, costo "
+  "unitario y motivo. Confirma la revisión y crea la solicitud en borrador sin impuesto. La cantidad sugerida "
+  "es editable y no descuenta compromisos: puede haber cambiado desde la lectura. No se asigna un destino "
+  "a la orden ni se crea movimiento o asiento. En Compras consulta la solicitud y aprueba o rechaza por separado.")
+note("Solo se permite una propuesta abierta generada para la misma regla. La protección no detecta solicitudes "
+     "manuales ni propuestas de otras ubicaciones. Al aprobar o rechazar se libera la regla: antes de crear otra "
+     "revisa la orden pendiente. No existe aún segregación obligatoria de quien crea y aprueba.")
+p("El detalle de la solicitud conserva ubicación de origen, revisión de regla y motivo; la ubicación es informativa "
+  "y no obliga a recibir allí. POST /inventory/replenishment/:productId/proposals exige administrador, "
+  "locationCode, expectedRevision, supplierId, requestNumber, quantity y unitCost decimales como cadenas, "
+  "reason y reviewedCommitments=true. Una revisión obsoleta o propuesta abierta devuelve 409.")
+image("30-replenishment-proposal.png", "Propuesta manual de reposición antes de crear el borrador")
 
 h("13. Contabilidad, cobros y cierre")
 h("13.1 Preparación del plan base", 2)
@@ -565,8 +661,11 @@ flow("13.2 Contabilizar y cobrar", "Registrar partida por origen y cobro de una 
          ("3", "GET /accounting/reports/trial-balance?fromDate=AAAA-MM-DD&toDate=AAAA-MM-DD", "Revisar cuentas, débitos/créditos y totals.isBalanced."),
          ("4", "POST /accounting/purchase-orders/:id/post para devengo de compras", "Asiento de la compra sin duplicar origen."),
      ], "Factura parcial o totalmente cobrada y evidencias contables balanceadas.",
-     "El posteo debe preceder al pago. Una referencia de pago es única por empresa. Saldo cero marca "
-     "factura paid; no confundir con conciliación bancaria automática ni importación de extractos.")
+    "El posteo debe preceder al pago. Una referencia de pago es única por empresa. Los importes "
+    "de cobro aceptan hasta cuatro decimales; solo el saldo cero marca factura paid. Revisa los "
+    "documentos históricos que muestren estado pagado y saldo pendiente: esta actualización no "
+    "modifica registros anteriores. No confundir con conciliación bancaria automática ni "
+    "importación de extractos. La política de redondeo por moneda sigue pendiente.")
 h("13.3 Cierre mensual", 2)
 steps(["Conciliar documentos, cobros y movimientos del mes con el responsable contable.",
        "Consultar balance con rango correcto y revisar también documentos pendientes de contabilizar.",
@@ -575,8 +674,26 @@ steps(["Conciliar documentos, cobros y movimientos del mes con el responsable co
        "Reabre, corrige y vuelve a cerrar desde Operaciones. Los asientos nuevos se rechazan durante el cierre.",
        "Si se rechaza, resolver la causa explícita; no cambiar fechas para saltarse controles."])
 p("Balanceado significa igualdad aritmética de débitos/créditos, no exactitud económica ni cumplimiento legal. "
-  "La contabilidad actual es un núcleo: no incluye toda la planificación, activos, bancos, consolidación "
+  "El balance filtrado presenta movimientos del intervalo, no saldos de apertura; las cuentas sin movimientos "
+  "en el intervalo aparecen con cero. Las fechas deben ser válidas y el inicio no puede superar el fin. "
+  "La consulta requiere administrador. La contabilidad actual es un núcleo: no incluye toda la planificación, activos, bancos, consolidación "
   "y obligaciones de una suite financiera completa.")
+h("13.3.1 Consultar el libro mayor desde Contabilidad", 3)
+steps(["Abre Contabilidad con rol administrador. Las cuentas se cargan sin ejecutar el balance completo.",
+       "Selecciona cuenta, Desde y Hasta (ambas fechas incluidas). Pulsa Consultar libro mayor.",
+       "Revisa saldo inicial anterior a Desde, débitos/créditos del intervalo y saldo final acumulado.",
+       "Rastrea número de asiento, descripción y tipo de origen en cada línea; solo se incluyen asientos publicados.",
+       "Usa Anterior/Siguiente. El acumulado incluye las líneas de páginas anteriores; cambiar filtros exige consultar de nuevo."])
+p("Todos los saldos usan signo débito menos crédito, también para pasivos/ingresos: no se invierte "
+  "automáticamente el signo por naturaleza de cuenta. Saldo inicial + débitos − créditos = saldo final. "
+  "Si no hay movimientos del intervalo, el saldo anterior permanece. Un error muestra alerta, nunca saldos cero ficticios.")
+p("API: GET /accounting/accounts lista el plan de la empresa. "
+  "GET /accounting/reports/general-ledger requiere accountCode, fromDate y toDate; "
+  "page comienza en 1 y pageSize admite 1–100 (por defecto 25). Devuelve account, summary "
+  "(opening/debit/credit/closing), items (con running_balance), total, page, pageSize y fechas. "
+  "Los importes son cadenas decimales exactas y cálculo, totales y página comparten una instantánea SQL. "
+  "No se inventa moneda base ni se ofrece estado financiero certificado o conciliación bancaria.")
+image("28-general-ledger.png", "Libro mayor con factura y abono de 0.0001; cierre exacto de 12.3455")
 h("13.4 Tesorería e inventario en Control operativo", 2)
 steps(["Cuentas por pagar muestra compras, proveedor, total, pagado y saldo. Recibe y contabiliza la compra antes de registrar un pago.",
        "Registra solo el egreso ya realizado, con referencia única y monto no mayor al saldo. Se crea débito a proveedores/crédito a caja.",
@@ -791,7 +908,7 @@ p("No hay pantalla completa de auditoría o restauración. El equipo autorizado 
   "audit_log y registros con mínimo privilegio y redacción, no entregarlos directamente al usuario o a una IA.")
 
 h("20. Criterios de aceptación, límites y recomendaciones")
-p("Se ejecutaron builds de API/Angular, 36 pruebas unitarias API, 57 e2e API y 34 de frontend. "
+p("Se ejecutaron builds de API/Angular, 36 pruebas unitarias API, 78 e2e API y 61 de frontend. "
   "El navegador real comprobó login con Enter, dashboard de DB, carrito, checkout con aumento exacto "
   "de reserva, consentimiento, portal con revocación y diagnóstico sin tokens. También completó desde "
   "formularios dos recepciones parciales, contabilización, devolución a proveedor, retorno físico de venta posterior al crédito, "
@@ -808,6 +925,29 @@ p(f"Consola SaaS: verificación real {billing_evidence['capturedAt']}; "
   "comprobaciones de ruta/ancho. Se verificaron pagos parciales, historial, seguimiento "
   "y aislamiento del contrato de empresa. Las capturas son de datos ficticios; no acreditan "
   "cargos de pasarela, mensajes enviados ni certificación fiscal.")
+quotation_evidence = json.loads((HERE / "quotation-evidence.json").read_text(encoding="utf-8"))
+if quotation_evidence["pageErrors"] or any(
+    check["scroll"] > check["width"] + 1 for check in quotation_evidence["responsive"]
+):
+    raise ValueError("La evidencia de vigencia contiene errores o desbordamiento")
+p(f"Vigencia de cotizaciones: {quotation_evidence['capturedAt']}; "
+  f"{len(quotation_evidence['flows'])} flujos y {len(quotation_evidence['responsive'])} "
+  "anchos comprobados. Se creó una oferta desde UI, se comprobó rechazo 409 al vencer "
+  "y se renovó/confirmó conservando importes. La fixture vencida usa datos ficticios "
+  "y no modifica el reloj del servidor.")
+management_evidence = json.loads((HERE / "management-evidence.json").read_text(encoding="utf-8"))
+if management_evidence["pageErrors"] or any(
+    check["scroll"] > check["width"] + 1 for check in management_evidence["responsive"]
+):
+    raise ValueError("La evidencia de gestión contiene errores o desbordamiento")
+p(f"Gestión de usuarios/empresa, reposición y libro mayor: {management_evidence['capturedAt']}; "
+  f"{len(management_evidence['flows'])} flujos y {len(management_evidence['responsive'])} "
+  "comprobaciones de ruta/ancho sin errores. Formularios reales para usuario, perfil y regla; "
+  "compra/recepción parcial de prueba por API para revisar el pendiente en pantalla y "
+  "propuesta de reposición creada desde UI, revisión de importes y aprobación separada; "
+  "factura y pago de prueba por API para verificar el libro mayor desde pantalla. "
+  "Los e2e además comprueban apertura histórica, acumulado entre páginas, cantidades mínimas, "
+  "conflictos simultáneos y aislamiento. Las evidencias de las etapas anteriores conservan sus propias fechas.")
 p("Los procesos internos sin UI se validan con pruebas de backend y procedimientos API, no "
   "con pantallas inexistentes. npm audit --omit=dev reportó cero avisos conocidos al verificar las "
   "dependencias de producción; no implica ausencia de riesgos ni cubre herramientas de desarrollo.")
@@ -947,12 +1087,15 @@ for source in sorted((ROOT / "api" / "src").rglob("*.controller.ts")):
     # Class decorators occur before `export class`, method decorators after it.
     class_decorators = class_text.split("export class")[0]
     guarded = "@UseGuards(AuthGuard)" in class_decorators
-    class_admin = "@Roles('admin')" in class_decorators
+    class_roles_match = re.search(r"@Roles\(([^)]*)\)", class_decorators)
+    class_roles = re.findall(r"'([^']+)'", class_roles_match.group(1)) if class_roles_match else []
     rows = []
     for index, match in enumerate(matches):
         block = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
-        roles = "admin" if class_admin or "@Roles('admin')" in block else (
-            "JWT" if guarded or "@UseGuards(AuthGuard)" in block else "Público*"
+        method_roles_match = re.search(r"@Roles\(([^)]*)\)", block)
+        declared_roles = re.findall(r"'([^']+)'", method_roles_match.group(1)) if method_roles_match else class_roles
+        roles = " / ".join(declared_roles) if declared_roles else (
+          "JWT" if guarded or "@UseGuards(AuthGuard)" in block else "Público*"
         )
         route = "/" + "/".join(part.strip("/") for part in [prefix, match.group(2) or ""] if part)
         if prefix == "saas":

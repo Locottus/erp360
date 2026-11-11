@@ -105,7 +105,7 @@ correo y restricciones están sin configurar: no ofrece cargos ni envíos reales
 ## Actualización operativa
 
 Respaldar primero. En una base que ya tiene `0012`, aplicar en orden `0013` a
-`0023` usando el mismo control `ON_ERROR_STOP`. No volver a inicializar datos.
+`0025` usando el mismo control `ON_ERROR_STOP`. No volver a inicializar datos.
 `0017` agrega unicidad de jornada abierta: si existen jornadas duplicadas,
 la migración falla y requiere conciliación autorizada antes de continuar.
 
@@ -124,6 +124,17 @@ la migración falla y requiere conciliación autorizada antes de continuar.
 - `0023`: control SaaS separado: operadores de plataforma, pagadores,
   contratos/módulos versionados, facturas internas, pagos/créditos/reversiones,
   cartera y seguimiento.
+- `0024`: vigencia opcional y revisión optimista de cotizaciones. No asigna
+  vencimientos a históricos. Las fechas incluyen todo el día en UTC.
+- `0025`: revisiones de perfil empresarial/usuarios, reglas de reposición e
+  índices para libro mayor. No asigna umbrales, no modifica stock ni asientos.
+
+Desplegar API y frontend juntos: editar usuarios ahora requiere
+`expectedRevision` (`management_revision` del listado) y `reason`. La API
+rechaza cuerpos antiguos incompletos, sin ruta alternativa que salte el control.
+Reiniciar API tras compilar; comprobar `/health/ready` y proxy antes de operar.
+Mi empresa y libro mayor solo admiten admin de su propio tenant. No es una
+habilitación global ni un cambio de facturación SaaS.
 
 Las migraciones no acreditan facturas existentes ni asignan USD a documentos
 históricos. USD es la moneda inicial de empresa para nuevas operaciones;

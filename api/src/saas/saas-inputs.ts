@@ -1,4 +1,7 @@
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { requiredDecimal as requiredMoney } from '../common/decimal-input';
+export { requiredDate } from '../common/iso-date';
+export { requiredMoney };
 
 export const SAAS_MODULES = [
   'base',
@@ -45,41 +48,6 @@ export function requiredText(
     );
   }
   return options.lowerCase ? value.toLowerCase() : value;
-}
-
-export function requiredDate(input: unknown, field: string): string {
-  if (typeof input !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(input)) {
-    throw new BadRequestException(`${field} must be a valid YYYY-MM-DD date.`);
-  }
-  const date = new Date(`${input}T00:00:00.000Z`);
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.toISOString().slice(0, 10) !== input
-  ) {
-    throw new BadRequestException(`${field} must be a valid YYYY-MM-DD date.`);
-  }
-  return input;
-}
-
-export function requiredMoney(
-  input: unknown,
-  field: string,
-  allowZero = false,
-): string {
-  if (
-    typeof input !== 'string' ||
-    !/^(?:0|[1-9]\d{0,11})(?:\.\d{1,4})?$/.test(input)
-  ) {
-    throw new BadRequestException(
-      `${field} must be a decimal string with at most four fractional digits.`,
-    );
-  }
-  const [whole, fraction = ''] = input.split('.');
-  const normalized = `${whole}.${fraction.padEnd(4, '0')}`;
-  if (!allowZero && normalized === '0.0000') {
-    throw new BadRequestException(`${field} must be greater than zero.`);
-  }
-  return normalized;
 }
 
 export function requiredReference(input: unknown): string {

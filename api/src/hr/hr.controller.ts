@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -31,13 +31,15 @@ export class HrController {
   }
 
   @Get('employees')
+  @Roles('admin')
   listEmployees(@Req() request: AuthenticatedRequest) {
     return this.hrService.listEmployees(request.user);
   }
 
   @Get('attendance')
-  listAttendance(@Req() request: AuthenticatedRequest) {
-    return this.hrService.listAttendance(request.user);
+  @Roles('admin')
+  listAttendance(@Req() request: AuthenticatedRequest, @Query('status') status?: string) {
+    return this.hrService.listAttendance(request.user, status);
   }
 
   @Post('attendance/check-in')
@@ -79,6 +81,7 @@ export class HrController {
   }
 
   @Get('leave-requests')
+  @Roles('admin')
   listLeaveRequests(@Req() request: AuthenticatedRequest) {
     return this.hrService.listLeaveRequests(request.user);
   }

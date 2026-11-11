@@ -1,0 +1,31 @@
+{
+  "capturedAt": "2026-11-11T15:04:46.489Z",
+  "companyCode": "GUIA-20261111090444",
+  "flows": [
+    "Created dated quotation via UI; expired fixture is visible and confirmation API409 creates no order",
+    "Reviewed and renewed through form then confirmed; revision2 and original prices preserved"
+  ],
+  "responsive": [
+    {
+      "route": "/operations?tab=sales",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 1440,
+      "scroll": 1440
+    }
+  ],
+  "pageErrors": 0
+}

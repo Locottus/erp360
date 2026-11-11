@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, effect, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink, ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -11,12 +11,19 @@ type Customer = { id: string; code: string; name: string; email: string | null; 
 type Product = { id: string; sku: string; name: string; unit_price: string; description?: string; is_active: boolean };
 type Supplier = { id: string; code: string; name: string; email: string | null; tax_id: string | null; is_active: boolean };
 type TaxRate = { id: string; code: string; name: string; rate: string; tax_type: string; is_active: boolean };
-type Quotation = { id: string; quotation_number: string; status: string; subtotal: string; grand_total: string; customer_id: string };
+type Quotation = { id: string; quotation_number: string; status: string; subtotal: string; grand_total: string; customer_id: string; valid_until: string | null; is_expired: boolean; revision: number };
 type SalesOrder = { id: string; order_number: string; status: string; grand_total: string; customer_name: string };
 type PurchaseRequest = {
   id: string; request_number: string; status: string; grand_total: string; supplier_id: string;
   supplier_name: string; purchase_order_id: string | null; purchase_order_number: string | null;
   purchase_order_status: string | null; inventory_received: boolean; is_posted: boolean;
+  rejection_reason: string | null;
+};
+type PurchaseRequestDetails = {
+  id: string; request_number: string; status: string; currency_code: string | null;
+  supplier_name: string; subtotal: string; tax_total: string; grand_total: string;
+  replenishment_location: string | null; replenishment_rule_revision: number | null; replenishment_reason: string | null;
+  lines: Array<{ id: string; sku: string | null; product_name: string | null; quantity: string; unit_cost: string; line_total: string }>;
 };
 type Employee = { id: string; employee_code: string; full_name: string; email: string | null; job_title: string | null; status: string };
 type Attendance = { id: string; employee_id: string; employee_code: string; full_name: string; check_in_at: string; check_out_at: string | null; status: string; total_minutes: number | null };
@@ -117,7 +124,9 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
                 <label>Número<input name="quotationNumber" [(ngModel)]="quotation.quotationNumber" maxlength="64" required /></label>
                 <label>Cliente<select name="customerId" [(ngModel)]="quotation.customerId" required><option value="">Selecciona</option>@for (item of customers; track item.id) { <option [value]="item.id">{{ item.code }} · {{ item.name }}</option> }</select></label>
                 <label>Impuesto<select name="quotationTax" [(ngModel)]="quotation.taxRateCode"><option value="">Sin impuesto</option>@for (item of taxes; track item.id) { <option [value]="item.code">{{ item.code }} · {{ item.rate }}%</option> }</select></label>
+                <label>Válida hasta (UTC, opcional)<input name="quotationValidity" type="date" [(ngModel)]="quotation.validUntil" /></label>
               </div>
+              <p>La vigencia incluye todo el día indicado en UTC. Sin fecha no caduca automáticamente. Revisa precios antes de renovar una oferta.</p>
               @for (line of salesLines; track $index; let i = $index) {
                 <div class="toolbar-grid line-editor">
                   <label>Producto<select [name]="'sale-product-' + i" [(ngModel)]="line.productId" required><option value="">Selecciona</option>@for (item of products; track item.id) { <option [value]="item.id">{{ item.sku }} · {{ item.name }}</option> }</select></label>
@@ -132,11 +141,26 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
           </article>
           <article class="surface-card"><div class="header-with-action"><h2>Cotizaciones y pedidos</h2><button class="btn btn-secondary" type="button" (click)="refresh()" [disabled]="loading">Actualizar</button></div>
             @if (quotations.length) { <div class="table-scroll"><table class="table-list"><caption>Cotizaciones de la empresa</caption>
-              <thead><tr><th scope="col">Número</th><th scope="col">Estado</th><th scope="col">Total</th><th scope="col">Acción</th></tr></thead>
-              <tbody>@for (item of quotations; track item.id) { <tr><th scope="row">{{ item.quotation_number }}</th><td>{{ item.status }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td><td>@if (item.status === 'draft') { <div class="inline-action"><input [name]="'order-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número del pedido" placeholder="Número de pedido" /><button class="btn btn-secondary" type="button" (click)="confirmQuotation(item)" [disabled]="busy || !orderNumbers[item.id]">Confirmar</button></div> }</td></tr> }</tbody>
+              <thead><tr><th scope="col">Número</th><th scope="col">Estado</th><th scope="col">Vigencia UTC</th><th scope="col">Total</th><th scope="col">Acción</th></tr></thead>
+              <tbody>@for (item of quotations; track item.id) { <tr><th scope="row">{{ item.quotation_number }}</th><td>{{ item.is_expired ? 'Vencida · requiere revisión' : item.status }}</td><td>{{ item.valid_until || 'Sin caducidad' }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td><td>@if (item.status === 'draft' && !item.is_expired) { <div class="inline-action"><input [name]="'order-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número del pedido" placeholder="Número de pedido" /><button class="btn btn-secondary" type="button" (click)="confirmQuotation(item)" [disabled]="busy || !orderNumbers[item.id]">Confirmar</button></div> }</td></tr> }</tbody>
             </table></div> } @else { <p class="muted">Sin cotizaciones.</p> }
             <h3>Pedidos confirmados</h3>
             @if (salesOrders.length) { <div class="table-scroll"><table class="table-list"><caption>Pedidos de venta</caption><thead><tr><th scope="col">Pedido</th><th scope="col">Cliente</th><th scope="col">Estado</th><th scope="col">Total</th></tr></thead><tbody>@for (item of salesOrders; track item.id) { <tr><th scope="row">{{ item.order_number }}</th><td>{{ item.customer_name }}</td><td>{{ item.status }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td></tr> }</tbody></table></div> } @else { <p class="muted">Sin pedidos.</p> }
+          </article>
+          <article class="surface-card"><h2>Revisar vigencia de cotización</h2>
+            <p>Solo borradores. Conserva precios y líneas; no recalcula importes ni cambia un pedido existente. Si cambió el precio, crea una nueva cotización.</p>
+            <form class="form-grid" #validityForm="ngForm" (ngSubmit)="reviseValidity()">
+              <label>Cotización a revisar<select name="validityQuotation" [(ngModel)]="validityQuotation" (ngModelChange)="prepareValidity()" required>
+                <option [ngValue]="null">Selecciona</option>@for (item of draftQuotations; track item.id) {
+                  <option [ngValue]="item">{{ item.quotation_number }} · {{ item.is_expired ? 'Vencida' : 'Borrador' }} · revisión {{ item.revision }}</option>
+                }
+              </select></label>
+              <label><input name="validityUnlimited" type="checkbox" [(ngModel)]="validity.unlimited" /> Retirar fecha de caducidad</label>
+              @if (!validity.unlimited) { <label>Nueva vigencia UTC<input name="newValidity" type="date" [(ngModel)]="validity.date" required /></label> }
+              <label>Motivo de revisión de vigencia<input name="validityReason" [(ngModel)]="validity.reason" minlength="10" maxlength="1000" required /></label>
+              <label><input name="validityReviewed" type="checkbox" [(ngModel)]="validity.reviewed" required /> Revisé precios y condiciones antes de cambiar la vigencia.</label>
+              <button type="submit" class="btn btn-secondary" [disabled]="busy || validityBusy || validityForm.invalid">Guardar nueva vigencia</button>
+            </form>
           </article>
         }
 
@@ -156,17 +180,44 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               <div class="quick-actions"><button class="btn btn-secondary" type="button" (click)="addLine(purchaseLines)">Agregar producto</button><button class="btn btn-primary" type="submit" [disabled]="busy || purchaseForm.invalid">Crear solicitud</button></div>
             </form>
           </article>
-          <article class="surface-card"><div class="header-with-action"><h2>Seguimiento de compras</h2><button class="btn btn-secondary" type="button" (click)="refresh()" [disabled]="loading">Actualizar</button></div>
+          <article class="surface-card"><div class="header-with-action"><h2>Seguimiento de compras</h2><button class="btn btn-secondary" type="button" (click)="refresh()" [disabled]="loading || busy">Actualizar</button></div>
             @if (purchaseRequests.length) { <div class="table-scroll"><table class="table-list"><caption>Solicitudes, órdenes, recepción física y contabilidad</caption>
               <thead><tr><th scope="col">Solicitud / proveedor</th><th scope="col">Total</th><th scope="col">Estado solicitud</th><th scope="col">Orden</th><th scope="col">Acciones</th></tr></thead>
-              <tbody>@for (item of purchaseRequests; track item.id) { <tr><th scope="row">{{ item.request_number }}<br><small>{{ item.supplier_name }}</small></th><td>{{ item.grand_total | number:'1.2-4' }}</td><td>{{ item.status }}</td>
+              <tbody>@for (item of purchaseRequests; track item.id) { <tr><th scope="row">{{ item.request_number }}<br><small>{{ item.supplier_name }}</small></th><td>{{ item.grand_total | number:'1.2-4' }}</td><td>{{ item.status }} @if (item.status === 'rejected' && item.rejection_reason) { <br><small>Motivo: {{ item.rejection_reason }}</small> }</td>
                 <td>{{ item.purchase_order_number || '—' }}<br><small>{{ item.purchase_order_status || '' }}</small></td>
-                <td>@if (!item.purchase_order_id) { <div class="inline-action"><input [name]="'po-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número de orden de compra" placeholder="Orden de compra" /><button class="btn btn-secondary" type="button" (click)="approvePurchase(item)" [disabled]="busy || !orderNumbers[item.id]">Aprobar</button></div> }
+                <td><button class="btn btn-secondary" type="button" (click)="showPurchaseDetails(item)" [disabled]="busy || loading">Ver detalle de {{ item.request_number }}</button>
+                  @if (!item.purchase_order_id && (item.status === 'draft' || item.status === 'submitted')) {
+                    <div class="inline-action"><input [name]="'po-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número de orden de compra" placeholder="Orden de compra" /><button class="btn btn-secondary" type="button" (click)="approvePurchase(item)" [disabled]="busy || !orderNumbers[item.id]">Aprobar</button></div>
+                    <label>Motivo de rechazo de {{ item.request_number }}<input [name]="'reject-' + item.id" [(ngModel)]="rejectionReasons[item.id]" minlength="10" maxlength="1000" [disabled]="busy" /></label>
+                    <button class="btn btn-secondary" type="button" (click)="rejectPurchase(item)" [disabled]="busy || loading || (rejectionReasons[item.id] || '').trim().length < 10">Rechazar solicitud</button>
+                  }
+                  @else if (item.status === 'rejected') { <span>Solicitud rechazada; no genera orden.</span> }
                   @else if (item.purchase_order_status === 'ordered' || item.purchase_order_status === 'partially_received') { <a class="btn btn-secondary" routerLink="/receiving">Recibir por cantidades</a> }
                   @else if (item.purchase_order_status === 'received' && !item.inventory_received) { <div class="inline-action"><input [name]="'location-' + item.id" [(ngModel)]="locations[item.id]" aria-label="Ubicación de recepción" placeholder="MAIN" /><button class="btn btn-secondary" type="button" (click)="applyReceipt(item)" [disabled]="busy">Aplicar a inventario</button></div> }
                   @else if (item.purchase_order_status === 'received' && !item.is_posted) { <button class="btn btn-secondary" type="button" (click)="postPurchase(item)" [disabled]="busy">Contabilizar</button> }
                   @else { <span>Proceso completado</span> }</td></tr> }</tbody>
             </table></div> } @else { <p class="muted">Sin solicitudes de compra.</p> }
+            @if (purchaseDetails) {
+              <section aria-label="Detalle de solicitud de compra">
+                <h3>Solicitud {{ purchaseDetails.request_number }} · {{ purchaseDetails.supplier_name }}</h3>
+                <p>Estado al consultar: {{ purchaseDetails.status }}. Moneda: {{ purchaseDetails.currency_code || 'No registrada' }}.
+                  Actualiza y vuelve a consultar antes de decidir; el estado puede cambiar.</p>
+                @if (purchaseDetails.replenishment_location) {
+                  <p>Origen: reposición {{ purchaseDetails.replenishment_location }}, revisión {{ purchaseDetails.replenishment_rule_revision }}.
+                    Motivo: {{ purchaseDetails.replenishment_reason }}. La ubicación es informativa, no destino de la orden.</p>
+                }
+                @if (purchaseDetails.lines.length) {
+                  <div class="table-scroll"><table class="table-list">
+                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unitario</th><th>Importe</th></tr></thead>
+                    <tbody>@for (line of purchaseDetails.lines; track line.id) {
+                      <tr><th scope="row">{{ line.sku || 'Sin código' }} · {{ line.product_name || 'Producto no disponible' }}</th>
+                        <td>{{ line.quantity }}</td><td>{{ line.unit_cost }}</td><td>{{ line.line_total }}</td></tr>
+                    }</tbody>
+                  </table></div>
+                } @else { <p class="status status-error" role="alert">La solicitud no tiene líneas; revisa el documento antes de aprobar.</p> }
+                <p>Subtotal {{ purchaseDetails.subtotal }} · Impuesto {{ purchaseDetails.tax_total }} · Total {{ purchaseDetails.grand_total }}</p>
+              </section>
+            }
             <p class="muted">Las recepciones nuevas por cantidades ingresan inventario en un solo paso. Contabiliza al completar la compra. Solo los documentos históricos conservan la aplicación física separada.</p>
           </article>
         }
@@ -283,6 +334,7 @@ export class OperationsComponent implements OnInit {
   quotations: Quotation[] = [];
   salesOrders: SalesOrder[] = [];
   purchaseRequests: PurchaseRequest[] = [];
+  purchaseDetails: PurchaseRequestDetails | null = null;
   employees: Employee[] = [];
   attendance: Attendance[] = [];
   leaveRequests: LeaveRequest[] = [];
@@ -291,6 +343,7 @@ export class OperationsComponent implements OnInit {
   portalTokens: PortalToken[] = [];
   trialBalance: TrialBalance | null = null;
   readonly orderNumbers: Record<string, string> = {};
+  rejectionReasons: Record<string, string> = {};
   readonly receiptNumbers: Record<string, string> = {};
   readonly locations: Record<string, string> = {};
   issuedPortalToken = '';
@@ -298,7 +351,12 @@ export class OperationsComponent implements OnInit {
   product = { sku: '', name: '', description: '', unitPrice: 0 };
   supplier = { code: '', name: '', email: '', taxId: '' };
   tax = { code: '', name: '', rate: 0, taxType: 'vat' as 'vat' | 'withholding' | 'other' };
-  quotation = { quotationNumber: '', customerId: '', taxRateCode: '' };
+  quotation = { quotationNumber: '', customerId: '', taxRateCode: '', validUntil: '' };
+  validityQuotation: Quotation | null = null;
+  validityBusy = false;
+  validity = { date: '', unlimited: false, reason: '', reviewed: false };
+  get draftQuotations() { return this.quotations.filter(row => row.status === 'draft'); }
+  prepareValidity() { this.validity = { date: this.validityQuotation?.valid_until ?? '', unlimited: false, reason: '', reviewed: false }; }
   salesLines: CommerceLine[] = [{ productId: '', quantity: 1, unitPrice: null }];
   purchase = { requestNumber: '', supplierId: '', taxRateCode: '' };
   purchaseLines: Array<{ productId: string; quantity: number; unitCost: number | null }> = [{ productId: '', quantity: 1, unitCost: null }];
@@ -313,6 +371,20 @@ export class OperationsComponent implements OnInit {
   error = '';
   message = '';
 
+  constructor() {
+    effect(() => {
+      this.session.user();
+      this.validityQuotation = null;
+      this.prepareValidity();
+      this.validityBusy = false;
+      this.quotations = [];
+      this.purchaseRequests = [];
+      this.purchaseDetails = null;
+      this.rejectionReasons = {};
+      this.busy = false;
+    });
+  }
+
   ngOnInit() {
     const requestedTab = this.route.snapshot.queryParamMap.get('tab');
     if (this.tabs.some(tab => tab.id === requestedTab)) this.activeTab = requestedTab!;
@@ -324,7 +396,8 @@ export class OperationsComponent implements OnInit {
 
   async refresh() {
     if (this.loading || !this.isAdmin) return;
-    this.loading = true; this.error = '';
+    this.loading = true; this.error = ''; this.purchaseDetails = null;
+    const identity = this.session.user();
     try {
       const [customers, products, suppliers, taxes, quotations, salesOrders, purchaseRequests,
         employees, attendance, leaveRequests, invoices, fiscalDocuments, portalTokens] = await Promise.all([
@@ -332,15 +405,18 @@ export class OperationsComponent implements OnInit {
         this.get<Supplier[]>('/masters/suppliers'), this.get<TaxRate[]>('/masters/tax-rates'),
         this.get<Quotation[]>('/commerce/sales/quotations'), this.get<SalesOrder[]>('/commerce/sales/orders'),
         this.get<PurchaseRequest[]>('/commerce/purchases/requests'), this.get<Employee[]>('/hr/employees'),
-        this.get<Attendance[]>('/hr/attendance'), this.get<LeaveRequest[]>('/hr/leave-requests'),
+        this.get<Attendance[]>('/hr/attendance?status=open'), this.get<LeaveRequest[]>('/hr/leave-requests'),
         this.get<Invoice[]>('/commerce/sales/invoices'), this.get<FiscalDocument[]>('/fiscal/documents'),
         this.get<PortalToken[]>('/portal/access-tokens'),
       ]);
+      if (this.session.user() !== identity) return;
       this.customers = customers; this.products = products; this.suppliers = suppliers; this.taxes = taxes;
       this.quotations = quotations; this.salesOrders = salesOrders; this.purchaseRequests = purchaseRequests;
       this.employees = employees; this.attendance = attendance; this.leaveRequests = leaveRequests;
       this.invoices = invoices; this.fiscalDocuments = fiscalDocuments; this.portalTokens = portalTokens;
-    } catch (error) { this.error = this.errorMessage(error, 'No se pudieron cargar los módulos de operación.'); }
+    } catch (error) {
+      if (this.session.user() === identity) this.error = this.errorMessage(error, 'No se pudieron cargar los módulos de operación.');
+    }
     finally { this.loading = false; }
   }
 
@@ -373,10 +449,11 @@ export class OperationsComponent implements OnInit {
     await this.perform(async () => {
       const result = await firstValueFrom(this.http.post<{ id: string }>(`${this.api}/commerce/sales/quotations`, {
         ...this.quotation, taxRateCode: this.quotation.taxRateCode || undefined,
+        validUntil: this.quotation.validUntil || undefined,
         lines: this.salesLines.map(line => ({ ...line, unitPrice: line.unitPrice ?? undefined })),
       }));
       this.orderNumbers[result.id] = this.autoNumber('SO');
-      this.quotation = { quotationNumber: this.autoNumber('Q'), customerId: '', taxRateCode: '' };
+      this.quotation = { quotationNumber: this.autoNumber('Q'), customerId: '', taxRateCode: '', validUntil: '' };
       this.salesLines = [{ productId: '', quantity: 1, unitPrice: null }];
       this.message = 'Cotización creada. Revísala antes de confirmarla.';
       await this.refresh();
@@ -384,6 +461,7 @@ export class OperationsComponent implements OnInit {
   }
 
   async confirmQuotation(item: Quotation) {
+    if (item.is_expired) { this.error = 'La cotización venció. Revisa sus condiciones y vigencia antes de confirmar.'; return; }
     await this.perform(async () => {
       const result = await firstValueFrom(this.http.post<{ orderNumber: string }>(
         `${this.api}/commerce/sales/quotations/${item.id}/confirm`, { orderNumber: this.orderNumbers[item.id].trim() },
@@ -391,6 +469,33 @@ export class OperationsComponent implements OnInit {
       this.message = `Pedido ${result.orderNumber} confirmado.`;
       await this.refresh();
     });
+  }
+
+  async reviseValidity() {
+    const quote = this.validityQuotation;
+    if (!quote || !this.validity.reviewed || this.validity.reason.trim().length < 10 || (!this.validity.unlimited && !this.validity.date)) {
+      this.error = 'Selecciona un borrador, revisa sus condiciones e indica vigencia y motivo.';
+      return;
+    }
+    if (this.validityBusy || this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.validityBusy = true; this.error = ''; this.message = '';
+    try {
+      await firstValueFrom(this.http.patch(`${this.api}/commerce/sales/quotations/${quote.id}/validity`, {
+        expectedRevision: quote.revision, validUntil: this.validity.unlimited ? null : this.validity.date,
+        reason: this.validity.reason.trim(),
+      }));
+      if (this.session.user() !== identity) return;
+      this.validityQuotation = null; this.prepareValidity();
+      this.message = 'Vigencia actualizada con historial conservado. Los precios no cambiaron.';
+      await this.refresh();
+    } catch (error) {
+      if (this.session.user() === identity) {
+        this.error = error instanceof HttpErrorResponse && error.status === 409
+          ? 'La cotización cambió o ya tiene esa vigencia. Actualiza y revisa su estado antes de continuar.'
+          : this.errorMessage(error, 'No se pudo actualizar la vigencia.');
+      }
+    } finally { if (this.session.user() === identity) this.validityBusy = false; }
   }
 
   async createPurchase() {
@@ -419,6 +524,37 @@ export class OperationsComponent implements OnInit {
       await this.refresh();
       if (!result.purchaseOrderId) throw new Error('Purchase order response is invalid.');
     });
+  }
+
+  async rejectPurchase(item: PurchaseRequest) {
+    const reason = this.rejectionReasons[item.id]?.trim();
+    if (this.busy || this.loading || !this.isAdmin || !reason || reason.length < 10 ||
+        (item.status !== 'draft' && item.status !== 'submitted')) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = '';
+    try {
+      await firstValueFrom(this.http.post(`${this.api}/commerce/purchases/requests/${item.id}/reject`, { reason }));
+      if (this.session.user() !== identity) return;
+      delete this.rejectionReasons[item.id];
+      await this.refresh();
+      if (this.session.user() === identity && !this.error) this.message = 'Solicitud rechazada con motivo auditado. No se creó una orden.';
+    } catch (error) {
+      if (this.session.user() === identity) this.error = error instanceof HttpErrorResponse && error.status === 409
+        ? 'La solicitud ya cambió. Actualiza antes de continuar.'
+        : this.errorMessage(error, 'No se pudo rechazar la solicitud.');
+    } finally { if (this.session.user() === identity) this.busy = false; }
+  }
+
+  async showPurchaseDetails(item: PurchaseRequest) {
+    if (this.busy || this.loading || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = ''; this.purchaseDetails = null;
+    try {
+      const details = await firstValueFrom(this.http.get<PurchaseRequestDetails>(`${this.api}/commerce/purchases/requests/${item.id}`));
+      if (this.session.user() === identity) this.purchaseDetails = details;
+    } catch (error) {
+      if (this.session.user() === identity) this.error = this.errorMessage(error, 'No se pudo cargar el detalle de la solicitud.');
+    } finally { if (this.session.user() === identity) this.busy = false; }
   }
 
   async receivePurchase(item: PurchaseRequest) {

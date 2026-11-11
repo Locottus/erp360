@@ -25,6 +25,8 @@ export declare class CommerceController {
         subtotal: number;
         taxTotal: number;
         grandTotal: number;
+        validUntil: string | null;
+        revision: number;
     }>;
     listQuotations(request: AuthenticatedRequest): Promise<{
         id: string;
@@ -34,6 +36,9 @@ export declare class CommerceController {
         tax_total: string;
         grand_total: string;
         customer_id: string;
+        valid_until: string | null;
+        revision: number;
+        is_expired: boolean;
     }[]>;
     listSalesOrders(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     listSalesInvoices(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
@@ -45,6 +50,11 @@ export declare class CommerceController {
         orderNumber: string;
         status: string;
     }>;
+    reviseQuotationValidity(request: AuthenticatedRequest, id: string, body: {
+        validUntil: string | null;
+        expectedRevision: number;
+        reason: string;
+    }): Promise<any>;
     issueInvoice(request: AuthenticatedRequest, salesOrderId: string, body: {
         invoiceNumber: string;
     }): Promise<{
@@ -70,6 +80,13 @@ export declare class CommerceController {
         grand_total: string;
         supplier_id: string;
     }[]>;
+    purchaseRequestDetails(request: AuthenticatedRequest, id: string): Promise<import("pg").QueryResultRow>;
+    rejectPurchaseRequest(request: AuthenticatedRequest, id: string, input: {
+        reason: string;
+    }): Promise<{
+        id: string;
+        status: string;
+    }>;
     approvePurchaseRequest(request: AuthenticatedRequest, requestId: string, body: {
         orderNumber: string;
     }): Promise<{

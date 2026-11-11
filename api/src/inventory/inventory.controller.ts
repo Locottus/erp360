@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -9,6 +9,32 @@ import { InventoryService } from './inventory.service';
 @UseGuards(AuthGuard)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  @Get('replenishment')
+  @Roles('admin')
+  replenishment(@Req() request: AuthenticatedRequest, @Query('locationCode') locationCode?: string) {
+    return this.inventoryService.listReplenishment(request.user, locationCode);
+  }
+
+  @Get('replenishment/:productId/purchase-commitments')
+  @Roles('admin')
+  purchaseCommitments(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string) {
+    return this.inventoryService.purchaseCommitments(request.user, productId);
+  }
+
+  @Post('replenishment/:productId/proposals')
+  @Roles('admin')
+  createReplenishmentProposal(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() input: Parameters<InventoryService['createReplenishmentProposal']>[2]) {
+    return this.inventoryService.createReplenishmentProposal(request.user, productId, input);
+  }
+
+  @Patch('replenishment/:productId')
+  @Roles('admin')
+  setReplenishment(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string,
+    @Body() input: Parameters<InventoryService['setReplenishment']>[2]) {
+    return this.inventoryService.setReplenishment(request.user, productId, input);
+  }
 
   @Get('purchases/orders/:id/receipts')
   @Roles('admin')
@@ -89,6 +115,7 @@ export class InventoryController {
   }
 
   @Get('sales-orders')
+  @Roles('admin', 'sales')
   listSalesOrdersForFulfillment(@Req() request: AuthenticatedRequest) {
     return this.inventoryService.listSalesOrdersForFulfillment(request.user);
   }

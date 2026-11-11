@@ -16,6 +16,7 @@ const crypto_1 = require("crypto");
 const database_service_1 = require("../common/database.service");
 const crypto_util_1 = require("./crypto.util");
 const jwt_keys_util_1 = require("./jwt-keys.util");
+const management_input_1 = require("../common/management-input");
 let AuthService = class AuthService {
     db;
     constructor(db) {
@@ -104,7 +105,7 @@ let AuthService = class AuthService {
         return { revoked: true };
     }
     async listUsers(user) {
-        const result = await this.db.query(`SELECT u.id, u.email, u.full_name, u.is_active,
+        const result = await this.db.query(`SELECT u.id, u.email, u.full_name, u.is_active, u.management_revision,
               COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
        FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id
        WHERE u.company_id = $1 GROUP BY u.id ORDER BY u.full_name`, [user.companyId]);
@@ -141,31 +142,40 @@ let AuthService = class AuthService {
     }
     async updateUser(user, id, input) {
         this.validateIdentity({ ...input, email: user.email });
+        const revision = (0, management_input_1.expectedRevision)(input.expectedRevision);
+        const reason = (0, management_input_1.changeReason)(input.reason);
         if (typeof input.isActive !== 'boolean')
             throw new common_1.BadRequestException('isActive must be boolean.');
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
             await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [user.companyId]);
-            const target = await client.query('SELECT id FROM users WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+            const target = await client.query('SELECT full_name,is_active,management_revision FROM users WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
             if (!target.rows[0])
                 throw new common_1.BadRequestException('User not found in current company.');
+            if (target.rows[0].management_revision !== revision)
+                throw new common_1.ConflictException('User changed. Reload before editing.');
+            const roles = await client.query('SELECT r.code FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 ORDER BY r.code', [id]);
             if (!input.isActive || !input.roles.includes('admin')) {
                 const admins = await client.query(`SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
            WHERE u.company_id=$1 AND u.is_active=TRUE AND r.code='admin' AND u.id<>$2`, [user.companyId, id]);
                 if (!admins.rows.length)
                     throw new common_1.BadRequestException('At least one active administrator must remain.');
             }
-            await client.query(`UPDATE users SET full_name=$1,is_active=$2,session_version=session_version+1,updated_at=NOW()
+            await client.query(`UPDATE users SET full_name=$1,is_active=$2,session_version=session_version+1,management_revision=management_revision+1,updated_at=NOW()
          WHERE id=$3 AND company_id=$4`, [input.fullName.trim(), input.isActive, id, user.companyId]);
             await client.query('DELETE FROM user_roles WHERE user_id=$1', [id]);
             for (const role of input.roles) {
                 await client.query('INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code=$2', [id, role]);
             }
-            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id)
-         VALUES($1,$2,'user.update','users',$3)`, [user.companyId, user.sub, id]);
+            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'user.update','users',$3,$4)`, [user.companyId, user.sub, id, JSON.stringify({
+                    before: { ...target.rows[0], roles: roles.rows.map(row => row.code) },
+                    after: { full_name: input.fullName.trim(), is_active: input.isActive, roles: [...input.roles].sort(), management_revision: revision + 1 },
+                    reason,
+                })]);
             await client.query('COMMIT');
-            return { id };
+            return { id, revision: revision + 1 };
         }
         catch (error) {
             await client.query('ROLLBACK');

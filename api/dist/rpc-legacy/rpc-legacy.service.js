@@ -70,6 +70,9 @@ let RpcLegacyService = class RpcLegacyService {
             return company.rows[0] ?? null;
         }
         if (model === 'hr.employee' && method === 'search_read') {
+            if (!auth.roles.includes('admin')) {
+                throw new common_1.ForbiddenException('Insufficient role permissions.');
+            }
             const employees = await this.db.query(`SELECT id, employee_code, full_name, email, job_title, hire_date, status
          FROM hr_employees
          WHERE company_id = $1
@@ -77,6 +80,9 @@ let RpcLegacyService = class RpcLegacyService {
             return employees.rows;
         }
         if (model === 'sale.order' && method === 'search_read') {
+            if (!auth.roles.some((role) => ['admin', 'sales'].includes(role))) {
+                throw new common_1.ForbiddenException('Insufficient role permissions.');
+            }
             const limitRaw = payload['limit'];
             const parsedLimit = Number(limitRaw);
             const limit = Number.isFinite(parsedLimit) ? parsedLimit : 50;

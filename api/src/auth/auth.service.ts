@@ -11,6 +11,7 @@ import { DatabaseService } from '../common/database.service';
 import { hashPassword, verifyPassword } from './crypto.util';
 import type { AuthTokenPayload, BootstrapAdminInput, LoginInput } from './auth.types';
 import { loadJwtKeysFromEnv, resolveActiveJwtKey, resolveVerificationKeys } from './jwt-keys.util';
+import { changeReason, expectedRevision } from '../common/management-input';
 
 type UserRecord = {
   id: string;
@@ -132,7 +133,7 @@ export class AuthService {
 
   async listUsers(user: AuthTokenPayload) {
     const result = await this.db.query(
-      `SELECT u.id, u.email, u.full_name, u.is_active,
+      `SELECT u.id, u.email, u.full_name, u.is_active, u.management_revision,
               COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
        FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id
        WHERE u.company_id = $1 GROUP BY u.id ORDER BY u.full_name`, [user.companyId],
@@ -173,16 +174,22 @@ export class AuthService {
     } finally { client.release(); }
   }
 
-  async updateUser(user: AuthTokenPayload, id: string, input: { fullName: string; roles: string[]; isActive: boolean }) {
+  async updateUser(user: AuthTokenPayload, id: string, input: { fullName: string; roles: string[]; isActive: boolean; expectedRevision: number; reason: string }) {
     this.validateIdentity({ ...input, email: user.email });
+    const revision = expectedRevision(input.expectedRevision);
+    const reason = changeReason(input.reason);
     if (typeof input.isActive !== 'boolean') throw new BadRequestException('isActive must be boolean.');
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
       // Serialize membership changes so two administrators cannot disable the last administrator.
       await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [user.companyId]);
-      const target = await client.query('SELECT id FROM users WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+      const target = await client.query<{ full_name: string; is_active: boolean; management_revision: number }>(
+        'SELECT full_name,is_active,management_revision FROM users WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
       if (!target.rows[0]) throw new BadRequestException('User not found in current company.');
+      if (target.rows[0].management_revision !== revision) throw new ConflictException('User changed. Reload before editing.');
+      const roles = await client.query<{ code: string }>(
+        'SELECT r.code FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=$1 ORDER BY r.code', [id]);
       if (!input.isActive || !input.roles.includes('admin')) {
         const admins = await client.query(
           `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id
@@ -191,7 +198,7 @@ export class AuthService {
         if (!admins.rows.length) throw new BadRequestException('At least one active administrator must remain.');
       }
       await client.query(
-        `UPDATE users SET full_name=$1,is_active=$2,session_version=session_version+1,updated_at=NOW()
+        `UPDATE users SET full_name=$1,is_active=$2,session_version=session_version+1,management_revision=management_revision+1,updated_at=NOW()
          WHERE id=$3 AND company_id=$4`, [input.fullName.trim(), input.isActive, id, user.companyId],
       );
       await client.query('DELETE FROM user_roles WHERE user_id=$1', [id]);
@@ -199,11 +206,15 @@ export class AuthService {
         await client.query('INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code=$2', [id, role]);
       }
       await client.query(
-        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id)
-         VALUES($1,$2,'user.update','users',$3)`, [user.companyId, user.sub, id],
+        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'user.update','users',$3,$4)`, [user.companyId, user.sub, id, JSON.stringify({
+          before: { ...target.rows[0], roles: roles.rows.map(row => row.code) },
+          after: { full_name: input.fullName.trim(), is_active: input.isActive, roles: [...input.roles].sort(), management_revision: revision + 1 },
+          reason,
+        })],
       );
       await client.query('COMMIT');
-      return { id };
+      return { id, revision: revision + 1 };
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }

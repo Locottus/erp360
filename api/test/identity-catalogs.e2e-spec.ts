@@ -24,6 +24,55 @@ describe('Identity lifecycle and master catalogs (e2e)', () => {
   });
   afterAll(async () => { await app.close(); });
 
+  it('restricts financial and fiscal reads to administrators', async () => {
+    const paths = ['/accounting/reports/trial-balance', '/fiscal/documents',
+      '/fiscal/documents/00000000-0000-0000-0000-000000000001'];
+    for (const role of ['employee', 'sales', 'purchases']) {
+      const email = `finance-${role}-${suffix}@example.test`;
+      const invitation = await request(app.getHttpServer()).post('/auth/users').auth(token, { type: 'bearer' })
+        .send({ email, fullName: role, roles: [role] }).expect(201);
+      await request(app.getHttpServer()).post('/auth/reset-password').send({ token: invitation.body.activationToken, password }).expect(201);
+      const login = await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(201);
+      for (const path of paths) {
+        await request(app.getHttpServer()).get(path).auth(login.body.access_token, { type: 'bearer' }).expect(403);
+      }
+    }
+    await request(app.getHttpServer()).get(paths[0]).auth(token, { type: 'bearer' }).expect(200);
+    await request(app.getHttpServer()).get(paths[1]).auth(token, { type: 'bearer' }).expect(200);
+    await request(app.getHttpServer()).get(paths[2]).auth(token, { type: 'bearer' }).expect(404);
+    for (const path of paths) await request(app.getHttpServer()).get(path).expect(401);
+  });
+
+  it('separates sales and purchase reads across HTTP and RPC', async () => {
+    const salesPaths = ['/masters/customers', '/commerce/sales/quotations', '/commerce/sales/orders',
+      '/commerce/sales/invoices', '/inventory/sales-orders'];
+    const purchasePaths = ['/masters/suppliers', '/commerce/purchases/requests'];
+    const pdf = '/commerce/sales/invoices/00000000-0000-0000-0000-000000000001/pdf';
+    for (const role of ['employee', 'sales', 'purchases']) {
+      const email = `commercial-${role}-${suffix}@example.test`;
+      const invitation = await request(app.getHttpServer()).post('/auth/users').auth(token, { type: 'bearer' })
+        .send({ email, fullName: role, roles: [role] }).expect(201);
+      await request(app.getHttpServer()).post('/auth/reset-password').send({ token: invitation.body.activationToken, password }).expect(201);
+      const login = await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(201);
+      for (const path of salesPaths) {
+        await request(app.getHttpServer()).get(path).auth(login.body.access_token, { type: 'bearer' }).expect(role === 'sales' ? 200 : 403);
+      }
+      for (const path of purchasePaths) {
+        await request(app.getHttpServer()).get(path).auth(login.body.access_token, { type: 'bearer' }).expect(role === 'purchases' ? 200 : 403);
+      }
+      await request(app.getHttpServer()).get(pdf).auth(login.body.access_token, { type: 'bearer' }).expect(role === 'sales' ? 404 : 403);
+      const xml = `<?xml version="1.0"?><methodCall><methodName>object.execute_kw</methodName><params>
+        <param><value><string>${login.body.access_token}</string></value></param>
+        <param><value><string>sale.order</string></value></param>
+        <param><value><string>search_read</string></value></param></params></methodCall>`;
+      const rpc = await request(app.getHttpServer()).post('/rpc/xmlrpc').send({ xml }).expect(200);
+      expect(rpc.text.includes('<fault>')).toBe(role !== 'sales');
+    }
+    for (const path of [...salesPaths, ...purchasePaths]) {
+      await request(app.getHttpServer()).get(path).auth(token, { type: 'bearer' }).expect(200);
+    }
+  });
+
   it('activates a user, rejects token reuse, enforces tenant and revokes sessions', async () => {
     const email = `invited-${suffix}@example.test`;
     const invitation = await request(app.getHttpServer()).post('/auth/users').auth(token, { type: 'bearer' })
@@ -42,7 +91,8 @@ describe('Identity lifecycle and master catalogs (e2e)', () => {
     expect(listing.body.every((user: Record<string, unknown>) => !('password_hash' in user))).toBe(true);
     const admin = listing.body.find((user: { roles: string[] }) => user.roles.includes('admin'));
     await request(app.getHttpServer()).patch(`/auth/users/${admin.id}`).auth(token, { type: 'bearer' })
-      .send({ fullName: 'Admin', roles: ['employee'], isActive: false }).expect(400);
+      .send({ fullName: 'Admin', roles: ['employee'], isActive: false,
+        expectedRevision: admin.management_revision, reason: 'Attempt disabling last administrator' }).expect(400);
   });
 
   it('edits without destroying historical keys and rolls back an entire duplicate import', async () => {

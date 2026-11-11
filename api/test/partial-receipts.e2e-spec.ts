@@ -25,8 +25,14 @@ describe('Partial purchase receipts and supplier returns', () => {
   const suffix = Date.now().toString();
   const post = (path: string, body: object) => request(app.getHttpServer()).post(path).auth(token, { type: 'bearer' }).send(body);
   const get = (path: string) => request(app.getHttpServer()).get(path).auth(token, { type: 'bearer' });
+  const commitmentPath = (product: string) => `/inventory/replenishment/${product}/purchase-commitments`;
   const details = async (): Promise<Details> => (await get(`/inventory/purchases/orders/${orderId}/receipts`).expect(200)).body as Details;
   const stock = async () => Number((await get('/inventory/stock?locationCode=DOCK').expect(200)).body[0]?.on_hand ?? 0);
+  const replenishment = async () => (await get('/inventory/replenishment?locationCode=DOCK').expect(200)).body
+    .find((row: { product_id: string }) => row.product_id === productId) as {
+    pending_purchase_quantity: string; pending_purchase_orders: number; purchase_orders_requiring_review: number;
+    on_hand: string; suggested_quantity: string;
+  };
 
   beforeAll(async () => {
     const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
@@ -50,10 +56,23 @@ describe('Partial purchase receipts and supplier returns', () => {
     }).expect(201);
     orderId = (await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: 'PO' }).expect(201)).body.purchaseOrderId;
     lineId = (await details()).lines[0].id;
+    await request(app.getHttpServer()).patch(`/inventory/replenishment/${productId}`).auth(token, { type: 'bearer' })
+      .send({ locationCode: 'DOCK', minimumQuantity: '4', targetQuantity: '6', expectedRevision: 0,
+        reason: 'Reviewed test replenishment policy' }).expect(200);
   });
   afterAll(async () => { await app.close(); });
 
   it('rejects invalid quantities, duplicate lines and cross-tenant access without writes', async () => {
+    expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '5.0000', pending_purchase_orders: 1,
+      purchase_orders_requiring_review: 0, on_hand: '0', suggested_quantity: '6.0000' });
+    expect((await get(commitmentPath(productId)).expect(200)).body).toMatchObject([{
+      order_id: orderId, order_number: 'PO', supplier_name: 'Receipt supplier',
+      ordered_quantity: '5.0000', documented_received_quantity: '0', pending_quantity: '5.0000',
+      has_legacy: false, over_received: false,
+    }]);
+    await request(app.getHttpServer()).get(commitmentPath(productId)).auth(otherToken, { type: 'bearer' }).expect(404);
+    await get(commitmentPath('not-a-uuid')).expect(400);
+    expect((await request(app.getHttpServer()).get('/inventory/replenishment').auth(otherToken, { type: 'bearer' }).expect(200)).body).toEqual([]);
     const endpoint = `/inventory/purchases/orders/${orderId}/receipts`;
     const base = { reference: 'BAD', locationCode: 'DOCK', lines: [{ lineId, quantity: 1 }] };
     for (const quantity of [0, -1, 0.00001, 1e10, '1']) {
@@ -68,10 +87,67 @@ describe('Partial purchase receipts and supplier returns', () => {
     expect((await details()).receipts).toHaveLength(0);
   });
 
+  it('counts multiple lines once per order and removes commitments on cancellation', async () => {
+    const pr = await post('/commerce/purchases/requests', {
+      requestNumber: 'PR-CANCEL', supplierId, lines: [
+        { productId, quantity: 0.0001, unitCost: 1 },
+        { productId, quantity: 1, unitCost: 1 },
+      ],
+    }).expect(201);
+    const order = await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: 'PO-CANCEL' }).expect(201);
+    expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '6.0001', pending_purchase_orders: 2 });
+    expect((await get(commitmentPath(productId)).expect(200)).body).toHaveLength(2);
+    await post(`/commerce/purchases/orders/${order.body.purchaseOrderId}/cancel`,
+      { reason: 'Supplier order cancelled for fixture' }).expect(201);
+    expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '5.0000', pending_purchase_orders: 1 });
+    expect((await get(commitmentPath(productId)).expect(200)).body).toHaveLength(1);
+  });
+
+  it('flags legacy open receipts instead of treating an uncertain quantity as confirmed', async () => {
+    const product = await post('/masters/products', { sku: 'LEGACY', name: 'Legacy fixture product', unitPrice: 1 }).expect(201);
+    const pr = await post('/commerce/purchases/requests', {
+      requestNumber: 'PR-LEGACY', supplierId, lines: [{ productId: product.body.id, quantity: 7, unitCost: 1 }],
+    }).expect(201);
+    const order = await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: 'PO-LEGACY' }).expect(201);
+    await request(app.getHttpServer()).patch(`/inventory/replenishment/${product.body.id}`).auth(token, { type: 'bearer' })
+      .send({ locationCode: 'DOCK', minimumQuantity: '1', targetQuantity: '2', expectedRevision: 0,
+        reason: 'Reviewed legacy test policy' }).expect(200);
+    await db.query(`INSERT INTO purchase_receipts(company_id,purchase_order_id,receipt_number)
+      VALUES($1,$2,'LEGACY-UNCERTAIN')`, [companyId, order.body.purchaseOrderId]);
+    const rows = (await get('/inventory/replenishment?locationCode=DOCK').expect(200)).body as
+      { product_id: string; pending_purchase_quantity: string; pending_purchase_orders: number; purchase_orders_requiring_review: number }[];
+    expect(rows.find(row => row.product_id === product.body.id)).toMatchObject({
+      pending_purchase_quantity: '0', pending_purchase_orders: 0, purchase_orders_requiring_review: 1,
+    });
+    const invalidRequest = await post('/commerce/purchases/requests', {
+      requestNumber: 'PR-INCONSISTENT', supplierId,
+      lines: [{ productId: product.body.id, quantity: 1, unitCost: 1 }, { productId: product.body.id, quantity: 3, unitCost: 1 }],
+    }).expect(201);
+    const invalidOrder = await post(`/commerce/purchases/requests/${invalidRequest.body.id}/approve`,
+      { orderNumber: 'PO-INCONSISTENT' }).expect(201);
+    const invalidLine = (await get(`/inventory/purchases/orders/${invalidOrder.body.purchaseOrderId}/receipts`).expect(200)).body.lines
+      .find((line: { remaining: string }) => line.remaining === '1.0000');
+    const receipt = await db.query<{ id: string }>(
+      `INSERT INTO purchase_receipts(company_id,purchase_order_id,receipt_number,payload)
+       VALUES($1,$2,'INCONSISTENT-FIXTURE','{}'::jsonb) RETURNING id`, [companyId, invalidOrder.body.purchaseOrderId]);
+    await db.query(`INSERT INTO purchase_receipt_lines(receipt_id,order_line_id,location_code,quantity,unit_cost)
+      VALUES($1,$2,'DOCK',2,1)`, [receipt.rows[0].id, invalidLine.id]);
+    const after = (await get('/inventory/replenishment?locationCode=DOCK').expect(200)).body as typeof rows;
+    expect(after.find(row => row.product_id === product.body.id)).toMatchObject({
+      pending_purchase_quantity: '0', pending_purchase_orders: 0, purchase_orders_requiring_review: 2,
+    });
+    const breakdown = (await get(commitmentPath(product.body.id)).expect(200)).body;
+    expect(breakdown).toEqual(expect.arrayContaining([
+      expect.objectContaining({ order_number: 'PO-LEGACY', has_legacy: true, pending_quantity: null }),
+      expect.objectContaining({ order_number: 'PO-INCONSISTENT', over_received: true, pending_quantity: null }),
+    ]));
+  });
+
   it('serializes a repeated batch, snapshots cost and blocks legacy/full and premature accounting paths', async () => {
     const endpoint = `/inventory/purchases/orders/${orderId}/receipts`;
     const input = { reference: 'RCV-1', locationCode: 'dock', lines: [{ lineId, quantity: 2 }] };
-    const concurrent = await Promise.all([post(endpoint, input), post(endpoint, input)]);
+    const [concurrent, snapshot] = await Promise.all([Promise.all([post(endpoint, input), post(endpoint, input)]), replenishment()]);
+    expect(Number(snapshot.on_hand) + Number(snapshot.pending_purchase_quantity)).toBe(5);
     expect(concurrent.map(row => row.status)).toEqual([201, 201]);
     expect(concurrent.map(row => row.body.replayed).sort()).toEqual([false, true]);
     expect(concurrent[0].body.receiptId).toBe(concurrent[1].body.receiptId);
@@ -79,6 +155,11 @@ describe('Partial purchase receipts and supplier returns', () => {
     const current = await details();
     expect(current.order.status).toBe('partially_received');
     expect(Number(current.lines[0].remaining)).toBe(3);
+    expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '3.0000', pending_purchase_orders: 1,
+      on_hand: '2.0000', suggested_quantity: '4.0000' });
+    expect((await get(commitmentPath(productId)).expect(200)).body).toMatchObject([
+      { order_id: orderId, documented_received_quantity: '2.0000', pending_quantity: '3.0000' },
+    ]);
     expect(current.receipts[0].unit_cost).toBe('3.3333');
     receiptLine = current.receipts[0].id;
     await post(endpoint, { ...input, lines: [{ lineId, quantity: 3 }] }).expect(409);
@@ -88,7 +169,7 @@ describe('Partial purchase receipts and supplier returns', () => {
     await post(`/accounting/purchase-orders/${orderId}/post`, {}).expect(400);
     await post(`/accounting/purchase-orders/${orderId}/returns`, { reference: 'EARLY', reason: 'Too early to return goods', lines: [{ lineId: receiptLine, quantity: 1 }] }).expect(400);
     const listed = (await get('/commerce/purchases/requests')).body;
-    expect(listed[0].inventory_received).toBe(true);
+    expect(listed.find((row: { purchase_order_id: string }) => row.purchase_order_id === orderId).inventory_received).toBe(true);
   });
 
   it('finishes outstanding quantities once and prevents double application to inventory', async () => {
@@ -100,6 +181,9 @@ describe('Partial purchase receipts and supplier returns', () => {
     const current = await details();
     expect(current.order.status).toBe('received');
     expect(Number(current.lines[0].remaining)).toBe(0);
+    expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '0', pending_purchase_orders: 0,
+      on_hand: '5.0000', suggested_quantity: '0' });
+    expect((await get(commitmentPath(productId)).expect(200)).body).toEqual([]);
     await post(`/inventory/purchases/orders/${orderId}/receive`, { locationCode: 'DOCK' }).expect(400);
     await post(`/accounting/purchase-orders/${orderId}/post`, {}).expect(201);
     await post(`/accounting/purchase-orders/${orderId}/payments`, { paymentReference: 'PART-PAY', amount: 10 }).expect(201);
@@ -138,7 +222,7 @@ describe('Partial purchase receipts and supplier returns', () => {
     await post(endpoint, { ...input, reason: 'Changed reason should conflict' }).expect(409);
     await post(endpoint, { ...input, reference: 'TOO-MUCH', lines: [{ lineId: receiptLine, quantity: 2 }] }).expect(409);
     await post(`/accounting/purchase-orders/${orderId}/payments`, { paymentReference: 'OVERPAY', amount: 6 }).expect(400);
-    expect(Number((await get('/accounting/payables')).body[0].balance_due)).toBe(5.5998);
+    expect(Number((await get('/accounting/payables')).body.find((row: { id: string }) => row.id === orderId).balance_due)).toBe(5.5998);
   });
 
   it('allocates final rounding remainder exactly and preserves supplier credit instead of inventing a cash refund', async () => {
@@ -154,7 +238,7 @@ describe('Partial purchase receipts and supplier returns', () => {
        FROM purchase_supplier_returns WHERE purchase_order_id=$1`, [orderId],
     );
     expect(totals.rows[0]).toEqual({ subtotal: '16.6665', tax: '2.8333', total: '19.4998' });
-    const payable = (await get('/accounting/payables')).body[0];
+    const payable = (await get('/accounting/payables')).body.find((row: { id: string }) => row.id === orderId);
     expect(payable.balance_due).toBe('-10.0000');
     const journal = await db.query<{ debit: string; credit: string }>(
       `SELECT SUM(l.debit)::text debit,SUM(l.credit)::text credit FROM accounting_journal_lines l

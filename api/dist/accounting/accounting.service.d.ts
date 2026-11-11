@@ -4,6 +4,43 @@ import type { AuthUser, ClosePeriodInput, RegisterInvoicePaymentInput } from './
 export declare class AccountingService {
     private readonly db;
     constructor(db: DatabaseService);
+    listAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    generalLedger(user: AuthUser, options: {
+        accountCode?: string;
+        fromDate?: string;
+        toDate?: string;
+        page?: string;
+        pageSize?: string;
+    }): Promise<{
+        fromDate: string;
+        toDate: string;
+        page: number;
+        pageSize: number;
+        account: {
+            code: string;
+            name: string;
+            account_type: string;
+        };
+        summary: {
+            opening: string;
+            debit: string;
+            credit: string;
+            closing: string;
+        };
+        items: {
+            id: string;
+            entry_id: string;
+            entry_number: string;
+            entry_date: string;
+            description: string | null;
+            source_type: string;
+            source_id: string | null;
+            debit: string;
+            credit: string;
+            running_balance: string;
+        }[];
+        total: number;
+    }>;
     creditInvoice(user: AuthUser, invoiceId: string, input: {
         reason: string;
         returnStock: boolean;

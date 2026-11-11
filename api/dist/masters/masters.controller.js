@@ -77,6 +77,7 @@ __decorate([
 ], MastersController.prototype, "import", null);
 __decorate([
     (0, common_1.Get)('customers'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -109,6 +110,7 @@ __decorate([
 ], MastersController.prototype, "createProduct", null);
 __decorate([
     (0, common_1.Get)('suppliers'),
+    (0, roles_decorator_1.Roles)('admin', 'purchases'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),

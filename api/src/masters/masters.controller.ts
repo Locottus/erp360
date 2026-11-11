@@ -30,6 +30,7 @@ export class MastersController {
   }
 
   @Get('customers')
+  @Roles('admin', 'sales')
   listCustomers(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listCustomers(request.user);
   }
@@ -52,6 +53,7 @@ export class MastersController {
   }
 
   @Get('suppliers')
+  @Roles('admin', 'purchases')
   listSuppliers(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listSuppliers(request.user);
   }

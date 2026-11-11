@@ -16,6 +16,7 @@ exports.CompaniesController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const companies_service_1 = require("./companies.service");
+const roles_decorator_1 = require("../auth/roles.decorator");
 let CompaniesController = class CompaniesController {
     companiesService;
     constructor(companiesService) {
@@ -23,6 +24,9 @@ let CompaniesController = class CompaniesController {
     }
     getCurrentCompany(request) {
         return this.companiesService.getCurrentCompany(request.user);
+    }
+    updateCurrentCompany(request, input) {
+        return this.companiesService.updateCurrentCompany(request.user, input);
     }
     getCompanyById(id, request) {
         return this.companiesService.getCompanyById(id, request.user);
@@ -36,6 +40,15 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], CompaniesController.prototype, "getCurrentCompany", null);
+__decorate([
+    (0, common_1.Patch)('current'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], CompaniesController.prototype, "updateCurrentCompany", null);
 __decorate([
     (0, common_1.Get)(':id'),
     __param(0, (0, common_1.Param)('id')),

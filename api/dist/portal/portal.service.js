@@ -86,12 +86,13 @@ let PortalService = class PortalService {
         }
         const tokenHash = this.hashToken(rawToken.trim());
         const client = await this.db.connect();
+        let committed = false;
         try {
             await client.query('BEGIN');
             const token = await client.query(`SELECT id, company_id, customer_id, status, expires_at
          FROM portal_access_tokens
          WHERE token_hash = $1
-         LIMIT 1`, [tokenHash]);
+         LIMIT 1 FOR UPDATE`, [tokenHash]);
             if (!token.rows[0]) {
                 throw new common_1.UnauthorizedException('Portal token not found.');
             }
@@ -103,6 +104,8 @@ let PortalService = class PortalService {
                 await client.query(`UPDATE portal_access_tokens
            SET status = 'expired'
            WHERE id = $1`, [token.rows[0].id]);
+                await client.query('COMMIT');
+                committed = true;
                 throw new common_1.UnauthorizedException('Portal token has expired.');
             }
             await client.query(`UPDATE portal_access_tokens SET last_used_at = NOW() WHERE id = $1`, [token.rows[0].id]);
@@ -135,7 +138,8 @@ let PortalService = class PortalService {
             };
         }
         catch (error) {
-            await client.query('ROLLBACK');
+            if (!committed)
+                await client.query('ROLLBACK');
             throw error;
         }
         finally {

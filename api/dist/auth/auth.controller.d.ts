@@ -45,8 +45,11 @@ export declare class AuthController {
         fullName: string;
         roles: string[];
         isActive: boolean;
+        expectedRevision: number;
+        reason: string;
     }): Promise<{
         id: string;
+        revision: number;
     }>;
     issueReset(request: AuthenticatedRequest, id: string): Promise<{
         resetToken: string;

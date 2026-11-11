@@ -1,6 +1,9 @@
 # Matriz de paridad funcional (inicial)
 
 > Estado inicial de Etapa 1. Esta matriz se irá refinando por subproceso y caso de uso.
+> `Probado` indica únicamente el flujo básico descrito, no paridad completa,
+> autorización fina ni certificación fiscal o bancaria. Para límites y pendientes
+> actuales, consultar `PENDIENTES_DESARROLLO.md`.
 
 | ID | Módulo | Funcionalidad original | Evidencia | Regla de negocio a preservar | Datos involucrados | Componente destino | Prueba prevista | Estado | Observaciones |
 |---|---|---|---|---|---|---|---|---|---|

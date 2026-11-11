@@ -33,11 +33,13 @@ export class FiscalController {
   }
 
   @Get('documents/:id')
+  @Roles('admin')
   getFiscalDocument(@Req() request: AuthenticatedRequest, @Param('id') fiscalDocumentId: string) {
     return this.fiscalService.getFiscalDocument(request.user, fiscalDocumentId);
   }
 
   @Get('documents')
+  @Roles('admin')
   listFiscalDocuments(@Req() request: AuthenticatedRequest, @Query('countryCode') countryCode?: CountryCode) {
     return this.fiscalService.listFiscalDocuments(request.user, countryCode);
   }

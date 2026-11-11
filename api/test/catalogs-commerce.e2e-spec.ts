@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { DatabaseService } from '../src/common/database.service';
 
 describe('Catalogs + Commerce (e2e)', () => {
   let app: INestApplication<App>;
@@ -91,6 +92,24 @@ describe('Catalogs + Commerce (e2e)', () => {
     await request(app.getHttpServer())
       .get(`/portal/public/${portalToken.body.token}/summary`)
       .expect(401);
+
+    const expiredToken = await request(app.getHttpServer())
+      .post('/portal/access-tokens')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ customerId: customer.body.id, expiresInDays: 30 })
+      .expect(201);
+    await app.get(DatabaseService).query(
+      "UPDATE portal_access_tokens SET expires_at = NOW() - interval '1 minute' WHERE id = $1",
+      [expiredToken.body.id],
+    );
+    await request(app.getHttpServer())
+      .get(`/portal/public/${expiredToken.body.token}/summary`)
+      .expect(401);
+    const tokenList = await request(app.getHttpServer())
+      .get('/portal/access-tokens')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(tokenList.body.find((row: { id: string }) => row.id === expiredToken.body.id).status).toBe('expired');
 
     await request(app.getHttpServer())
       .post('/masters/tax-rates')
@@ -245,6 +264,19 @@ describe('Catalogs + Commerce (e2e)', () => {
       .set('Authorization', `Bearer ${token}`)
       .expect(200);
     expect(trialBalance.body.totals.isBalanced).toBe(true);
+
+    const emptyPeriod = await request(app.getHttpServer())
+      .get('/accounting/reports/trial-balance?fromDate=1900-01-01&toDate=1900-12-31')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(emptyPeriod.body.rows.map((row: { account_code: string }) => row.account_code))
+      .toEqual(trialBalance.body.rows.map((row: { account_code: string }) => row.account_code));
+    expect(emptyPeriod.body.rows.every((row: { debit: string; credit: string }) => Number(row.debit) === 0 && Number(row.credit) === 0)).toBe(true);
+    expect(emptyPeriod.body.totals).toMatchObject({ totalDebit: 0, totalCredit: 0, isBalanced: true });
+    for (const query of ['fromDate=2026-02-31', 'toDate=invalid', 'fromDate=2026-02-01&toDate=2026-01-01']) {
+      await request(app.getHttpServer()).get(`/accounting/reports/trial-balance?${query}`)
+        .set('Authorization', `Bearer ${token}`).expect(400);
+    }
 
     const now = new Date();
     const fiscalConfig = {

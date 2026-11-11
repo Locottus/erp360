@@ -34,8 +34,11 @@ export declare class AuthService {
         fullName: string;
         roles: string[];
         isActive: boolean;
+        expectedRevision: number;
+        reason: string;
     }): Promise<{
         id: string;
+        revision: number;
     }>;
     issuePasswordReset(user: AuthTokenPayload, id: string): Promise<{
         resetToken: string;

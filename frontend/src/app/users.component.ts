@@ -6,7 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
 
-type User = { id: string; email: string; full_name: string; is_active: boolean; roles: string[] };
+type User = { id: string; email: string; full_name: string; is_active: boolean; roles: string[]; management_revision: number };
 
 @Component({
   selector: 'app-users',
@@ -40,7 +40,11 @@ type User = { id: string; email: string; full_name: string; is_active: boolean; 
             </fieldset>
             <p class="muted">Administrador habilita las escrituras de los módulos actuales. Ventas y Compras
               habilitan sus indicadores; Consulta no concede permisos administrativos.</p>
-            @if (editingId) { <label class="consent"><input name="active" type="checkbox" [(ngModel)]="form.isActive" /> Cuenta activa</label> }
+            @if (editingId) {
+              <label class="consent"><input name="active" type="checkbox" [(ngModel)]="form.isActive" /> Cuenta activa</label>
+              <label>Motivo del cambio de usuario<input name="userReason" [(ngModel)]="reason" minlength="10" maxlength="1000" required /></label>
+              <p class="muted">Revisión {{ expectedRevision }}. Si otra persona guarda primero, actualiza la lista y vuelve a editar.</p>
+            }
             <div class="quick-actions"><button class="btn btn-primary" type="submit" [disabled]="busy || userForm.invalid || !form.roles.length">Guardar</button>
               <button class="btn btn-secondary" type="button" (click)="resetForm()" [disabled]="busy">Cancelar edición</button></div>
           </form>
@@ -70,12 +74,13 @@ export class UsersComponent {
   users: User[] = [];
   form = { email: '', fullName: '', roles: ['employee'], isActive: true };
   editingId = ''; error = ''; message = ''; secret = ''; busy = false;
+  expectedRevision = 0; reason = '';
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   constructor() {
     effect(() => {
       const user = this.session.user();
       untracked(() => {
-        this.users = []; this.secret = ''; this.resetForm();
+        this.users = []; this.secret = ''; this.error = ''; this.message = ''; this.busy = false; this.resetForm();
         if (user?.roles.includes('admin')) void this.load();
       });
     });
@@ -93,45 +98,55 @@ export class UsersComponent {
   }
   edit(user: User) {
     this.editingId = user.id;
+    this.expectedRevision = user.management_revision; this.reason = ''; this.secret = '';
     this.form = { email: user.email, fullName: user.full_name, roles: [...user.roles], isActive: user.is_active };
   }
-  resetForm() { this.editingId = ''; this.form = { email: '', fullName: '', roles: ['employee'], isActive: true }; }
+  resetForm() { this.editingId = ''; this.expectedRevision = 0; this.reason = ''; this.form = { email: '', fullName: '', roles: ['employee'], isActive: true }; }
   async save() {
+    const id = this.editingId;
+    const data = { ...this.form, roles: [...this.form.roles], expectedRevision: this.expectedRevision, reason: this.reason };
+    if (id && this.reason.trim().length < 10) { this.error = 'Indica un motivo de al menos 10 caracteres.'; return; }
     await this.perform(async () => {
-      if (this.editingId) {
-        await firstValueFrom(this.http.patch(`${API_BASE_URL}/auth/users/${this.editingId}`, this.form));
-        if (this.editingId === this.session.user()?.id) {
-          this.session.logout();
-          this.message = 'Tu cuenta cambió. Inicia sesión de nuevo.';
-        }
+      if (id) {
+        await firstValueFrom(this.http.patch(`${API_BASE_URL}/auth/users/${id}`, data));
+        return { logout: id === this.session.user()?.id, clearForm: true };
       } else {
-        const result = await firstValueFrom(this.http.post<{ activationToken: string }>(`${API_BASE_URL}/auth/users`, this.form));
-        this.secret = result.activationToken;
+        const result = await firstValueFrom(this.http.post<{ activationToken: string }>(`${API_BASE_URL}/auth/users`, data));
+        return { secret: result.activationToken, clearForm: true };
       }
-      this.resetForm();
     });
   }
   async revoke(user: User) {
     await this.perform(async () => {
       await firstValueFrom(this.http.post(`${API_BASE_URL}/auth/users/${user.id}/revoke-sessions`, {}));
-      if (user.id === this.session.user()?.id) this.session.logout();
+      return { logout: user.id === this.session.user()?.id };
     });
   }
   async issueReset(user: User) {
     await this.perform(async () => {
       const result = await firstValueFrom(this.http.post<{ resetToken: string }>(`${API_BASE_URL}/auth/users/${user.id}/reset-password`, {}));
-      this.secret = result.resetToken;
+      return { secret: result.resetToken };
     });
   }
-  private async perform(action: () => Promise<void>) {
+  private async perform(action: () => Promise<{ secret?: string; logout?: boolean; clearForm?: boolean }>) {
     if (this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
     this.busy = true; this.error = ''; this.message = ''; this.secret = '';
-    try { await action(); if (this.isAdmin) { await this.load(); this.message = 'Operación registrada.'; } }
+    try {
+      const result = await action();
+      if (this.session.user() !== identity) return;
+      if (result.logout) { this.session.logout(); return; }
+      this.secret = result.secret ?? '';
+      if (result.clearForm) this.resetForm();
+      await this.load();
+      if (this.session.user() === identity && !this.error) this.message = 'Operación registrada.';
+    }
     catch (error) {
+      if (this.session.user() !== identity) return;
       this.error = error instanceof HttpErrorResponse && error.status === 400
         ? 'Revisa los datos. Debe conservarse al menos un administrador activo.'
         : error instanceof HttpErrorResponse && error.status === 409
-          ? 'El correo ya está registrado.' : 'La operación no pudo completarse.';
-    } finally { this.busy = false; }
+          ? 'Conflicto: actualiza la lista y vuelve a editar. Si invitas, comprueba que el correo no exista.' : 'La operación no pudo completarse.';
+    } finally { if (this.session.user() === identity) this.busy = false; }
   }
 }

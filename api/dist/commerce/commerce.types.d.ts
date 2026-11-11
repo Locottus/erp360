@@ -14,6 +14,7 @@ export type CreateQuotationInput = {
     customerId: string;
     taxRateCode?: string;
     notes?: string;
+    validUntil?: string | null;
     lines: SalesLineInput[];
 };
 export type PurchaseLineInput = {

@@ -47,7 +47,7 @@ export class AuthController {
   @UseGuards(AuthGuard)
   @Roles('admin')
   updateUser(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { fullName: string; roles: string[]; isActive: boolean }) {
+    @Body() body: { fullName: string; roles: string[]; isActive: boolean; expectedRevision: number; reason: string }) {
     return this.authService.updateUser(request.user, id, body);
   }
 

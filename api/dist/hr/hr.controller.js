@@ -34,8 +34,8 @@ let HrController = class HrController {
     listEmployees(request) {
         return this.hrService.listEmployees(request.user);
     }
-    listAttendance(request) {
-        return this.hrService.listAttendance(request.user);
+    listAttendance(request, status) {
+        return this.hrService.listAttendance(request.user, status);
     }
     checkIn(request, body) {
         return this.hrService.checkIn(request.user, body);
@@ -91,6 +91,7 @@ __decorate([
 ], HrController.prototype, "createEmployee", null);
 __decorate([
     (0, common_1.Get)('employees'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -98,9 +99,11 @@ __decorate([
 ], HrController.prototype, "listEmployees", null);
 __decorate([
     (0, common_1.Get)('attendance'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('status')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listAttendance", null);
 __decorate([
@@ -152,6 +155,7 @@ __decorate([
 ], HrController.prototype, "rejectLeaveRequest", null);
 __decorate([
     (0, common_1.Get)('leave-requests'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),

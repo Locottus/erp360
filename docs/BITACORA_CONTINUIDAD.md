@@ -1,6 +1,6 @@
 # Bitácora de implementación y continuidad de ERP360
 
-Fecha de corte: 2026-11-11 UTC (2026-11-10 en el equipo de pruebas).
+Fecha de corte: 2026-11-11 UTC y local UTC-6.
 Proyecto: `C:\angular\erp360\erp360-modernizado`.
 
 ## 1. Resumen ejecutivo y límites de la entrega
@@ -25,15 +25,16 @@ de otro ERP mediante código ajeno. Las pruebas usan empresas ficticias.
 
 | Frente | Entregado y verificado | Lo que NO significa |
 |---|---|---|
-| Identidad | Invitación/activación, recuperación administrativa, roles existentes, bajas, revocación en HTTP/RPC, último admin protegido | Sin MFA, email automático ni membresías multiempresa |
+| Identidad | Invitación/activación, recuperación administrativa, edición revisionada/auditada, bajas, revocación HTTP/RPC, último admin protegido | Sin MFA, email automático ni membresías multiempresa |
+| Empresa | Perfil propio con revisión, motivo y auditoría; código/tenant inmutables | No modifica país, moneda, actividad o contrato ni valida identidad fiscal |
 | Maestros | Altas normalizadas, edición, desactivación, exportación JSON e importación atómica de 1–200 altas | No CSV, upsert masivo, deduplicación ni historial visual de cambios |
-| Inventario | Transferencias/conteos, disponible protegido, recepciones parciales por cantidades con ingreso físico atómico | Sin costo de ventas, valoración, lotes de fabricación, series ni vencimientos |
+| Inventario | Transferencias/conteos, disponible protegido, recepciones parciales y sugerencia exacta de reposición por ubicación | Sin COGS, valoración, series ni compra automática; sugerencia no descuenta tránsito |
 | Tesorería | Saldos/pagos proveedores, recuperación de crédito con historial, cobros/reembolsos acotados, asientos por origen | Registra dinero ya movido; no conecta bancos ni compensa entre compras |
 | Comercial | Cancelación antes de factura/despacho/recepción; liberación de reservas; folio opcional automático; moneda explícita nueva | No anulación fiscal ni numeración legal autorizada |
 | Documentos | PDF real, snapshot de descripciones/cliente/empresa de facturas nuevas | PDF histórico sin snapshot usa descripciones actuales y lo advierte |
 | Créditos | Un crédito TOTAL por factura, retorno inmediato o total posterior idempotente, reversión y saldo a reembolsar | Sin crédito ni retorno parcial de venta; ningún reembolso automático |
 | Compras por lotes documentales | Recibido/pendiente por línea, snapshot costo, referencias repetibles y devolución proveedor con crédito proporcional | Devengo solo al completar; no devolución de históricos ni cierre de remanente |
-| Contabilidad | Posteo concurrente protegido, cierre/reapertura auditada, guard y trigger contra asientos nuevos en período cerrado | No suite financiera ni protección contra un DBA que modifique SQL |
+| Contabilidad | Posteo/cierre protegidos, reapertura auditada y libro mayor con apertura/acumulado exactos antes de paginar | No suite financiera, conciliación bancaria ni protección contra cambios SQL de un DBA |
 | Tienda | Checkout serializado/repetible, precio/publicación revalidados, stock MAIN coherente, cliente invitado separado | Sin pasarela, pago, cuenta autenticada de cliente ni multicurrency |
 | Entregas | Recogida/envío solicitado, dirección/teléfono, preparación, guía y entrega manual | No cotiza flete, contrata transportista ni envía avisos |
 | Suscriptores | Consentimiento explícito y baja pública por clave privada hash | No double opt-in ni plataforma de campañas |
@@ -41,7 +42,199 @@ de otro ERP mediante código ajeno. Las pruebas usan empresas ficticias.
 | Asistencia | Respuesta mock local identificada, sin petición externa ni escritura | No es un modelo de IA ni conoce documentos del usuario |
 | SaaS | Consola de cartera, contratos por módulos, ingresos recibidos e historial de seguimiento | Contratos informativos; sin pasarela, envíos ni restricciones automáticas |
 
+Actualización 2026-11-11: Operaciones consulta las jornadas abiertas con
+`GET /hr/attendance?status=open`, sin el límite de 500 del historial y con
+aislamiento por empresa. Ambas consultas requieren paginación para grandes
+volúmenes; no se modificaron reglas laborales ni datos existentes.
+
+Actualización 2026-11-11: las lecturas privadas de empleados, asistencias y
+ausencias requieren administrador tanto en HTTP como en el RPC de empleados.
+La corrección de jornadas en Personas conserva segundos y milisegundos en UTC;
+las respuestas de edición de otra sesión se descartan. No existe aún el vínculo
+usuario-empleado ni autoservicio de datos propios.
+
+Actualización 2026-11-11: el portal persiste el estado vencido cuando rechaza
+un token expirado y bloquea la fila durante la consulta para ordenar lecturas y
+revocaciones. La expiración está cubierta por integración; queda pendiente una
+prueba específica de concurrencia entre consulta y revocación.
+
+Actualización 2026-11-11: las lecturas de clientes y ventas, PDF comercial,
+pedidos de surtido y RPC de ventas requieren admin o sales; proveedores y
+solicitudes de compra requieren admin o purchases. Balance y documentos
+fiscales requieren admin. No hay filtro por vendedor ni roles contables o de
+inventario independientes. El balance por fechas conserva cuentas sin
+movimientos y valida el rango; no calcula saldos de apertura. El kardex vuelve
+a la primera página al aplicar filtros. Sin cambios en saldos ni migraciones.
+
+Actualización 2026-11-11: los cobros de facturas validan hasta cuatro decimales
+y calculan saldo, sobrecobro y liquidación con NUMERIC en PostgreSQL bajo el
+bloqueo de factura. Un saldo de 0,0001 no se marca pagado. No se modificaron
+facturas históricas: revisar los registros anteriores que figuren pagados con
+saldo positivo. No equivale a una política monetaria por divisa.
+
+REA examinó estáticamente el instalador PE32 sin ejecutarlo; el inventario solo
+cubre el archivo raíz y las importaciones PE. El análisis profundo no estuvo
+disponible por falta de Ghidra configurado; recursos PE fallaron al interpretar
+un grupo de iconos. No se comprobó equivalencia entre instalador y fuente. La
+[evidencia REA](rea-odoo-installer-evidence.json) conserva las observaciones.
+
 ## 3. Cambios funcionales y procedimientos
+
+### Actualización 0026: propuestas de reposición en borrador
+
+Cada regla de producto activo permite preparar solicitud de compra con
+proveedor, cantidad, costo y motivo explícitos. El importe se calcula con
+NUMERIC y sin impuesto; no se crean órdenes, movimientos ni asientos al
+proponer. Se guarda regla/revisión, ubicación de origen y auditoría.
+Una sola propuesta abierta por regla; bloqueo transaccional serializa
+creaciones simultáneas y rechaza revisión de regla obsoleta. La ubicación
+no es destino. La decisión de aprobación o rechazo se realiza en Compras.
+Al cerrar la solicitud se libera la regla: compras manuales, otras ubicaciones
+y órdenes abiertas requieren revisión humana, no se deduplican globalmente.
+No se garantiza que el saldo o compromiso no cambie tras su consulta.
+Migración aditiva aplicada tras respaldo de PostgreSQL, sin alterar históricos.
+Verificado: builds, 36 pruebas unitarias API, 78 e2e y 61 frontend; seis
+flujos de navegador y 24 combinaciones ruta/ancho sin errores. Manual 3.12.
+
+### Actualización 2026-11-11: revisión de solicitudes de compra
+
+Seguimiento de compras permite consultar líneas, cantidades, costos y totales
+de una solicitud antes de decidir. La API permite lectura a admin/purchases
+de la empresa autenticada; Operaciones está limitada a admin. Una consulta no
+bloquea la solicitud: debe actualizarse al decidir. No genera propuestas ni
+crea órdenes y no requiere migración. La creación/aprobación segregada y
+propuestas vinculadas a reposición siguen pendientes.
+Builds correctos; 36 unitarias y 77 e2e API, 59 frontend, cinco flujos de
+navegador y 20 combinaciones ruta/ancho sin errores. Manual 3.11.
+
+### Actualización 2026-11-11: rechazo de solicitud de compra
+
+Las solicitudes abiertas permiten rechazo administrativo con motivo de 10 a
+1000 caracteres y auditoría transaccional. En la lista aparece el motivo; no
+se habilita aprobación de solicitudes rechazadas. La decisión bloquea la misma
+fila que la aprobación: si ambas compiten solo una gana y no se genera una
+orden para una solicitud rechazada. Protegido por empresa y rol. Para una
+orden ya aprobada se mantiene su propio proceso de cancelación/devolución.
+Sin migración; no implementa propuesta automática ni separación de funciones.
+La referencia estática a Odoo figura en [adaptación](ADAPTACION_ODOO.md).
+Verificado: builds, 36 unitarias y 77 e2e API, 57 frontend; cinco flujos en
+navegador y 20 combinaciones ruta/ancho sin errores. Manual 3.10; API
+reiniciada con bootstrap deshabilitado y clave efímera, iniciar sesión de nuevo.
+
+### Actualización 2026-11-11: desglose de compras pendientes
+
+Reposición incorpora consulta por producto de órdenes abiertas con proveedor,
+estado, cantidades ordenadas y recepciones documentadas. La misma definición
+SQL alimenta resumen y detalle. Las órdenes con recibos legados o sobre-recepción
+se identifican por motivo y muestran pendiente desconocido, no cero. Ambas
+lecturas son independientes: pueden variar con operaciones concurrentes;
+actualizar y volver a consultar antes de tomar decisiones. Es solo lectura,
+para administradores de la empresa autenticada, sin migración ni propuestas.
+No se ejecutó Odoo; contraste estático y diferencias en [adaptación](ADAPTACION_ODOO.md).
+
+Verificación de esta actualización: builds API y frontend, 36 unitarias y
+75 e2e API, 55 pruebas frontend, cuatro flujos reales y 16 rutas/anchos sin
+errores. La captura verifica orden, proveedor y remanente 3.0001 tras recibir 2
+de 5.0001 en otra ubicación. Manual 3.9. Se reinició la API local con
+bootstrap deshabilitado y clave efímera; hay que iniciar sesión nuevamente.
+
+### Actualización 2026-11-11: compromisos visibles para reposición
+
+Se contrastó estáticamente la previsión de Odoo
+`odoo/addons/stock/models/stock_orderpoint.py:409` y recepción de compra en
+`odoo/addons/purchase_stock/models/purchase_order_line.py:57`.
+Ver [adaptación y diferencias](ADAPTACION_ODOO.md). No se ejecutó Odoo ni
+se copió su implementación.
+
+`GET /inventory/replenishment` agrega, por producto y empresa,
+`pending_purchase_quantity`, `pending_purchase_orders` y
+`purchase_orders_requiring_review`. Suma el remanente NUMERIC de órdenes
+ordenadas/parciales menos cantidades recibidas por línea, en una sola sentencia
+con la consulta de inventario. Cancelación y recepción total quitan el
+compromiso; las devoluciones no reabren órdenes. No hay migración ni escrituras
+nuevas. Si una orden abierta contiene recibo legado sin detalle o una línea
+del producto sobre-recibida, el producto en esa orden se excluye por completo
+y se cuenta como pendiente de revisión; no se inventa el remanente.
+
+La compra no registra destino/fecha futura. El total se repite por producto
+en cada regla y no se debe sumar entre ubicaciones. No se descuenta de la
+sugerencia por ubicación ni se crea propuesta/pedido; requiere revisión humana.
+Se probaron recepción concurrente, repetición idempotente, parcial/final,
+cancelación, múltiples líneas, empresa ajena y anomalías históricas.
+Último cierre: API 36 unitarias y 75 e2e; frontend 52 pruebas; builds correctos.
+Navegador cuatro flujos/16 anchos, cero errores: pendiente 5.0001 baja a
+3.0001 al recibir 2 en otra ubicación, la sugerencia permanece 4.0001.
+Manual 3.8 generado; métricas de capturas anteriores mantienen su fecha.
+API 3001 reiniciada con bootstrap deshabilitado: iniciar sesión nuevamente.
+
+Quedan pendientes multiempresa autorizada y permisos finos, destino/plazo de
+compra y propuestas aprobables, devengo parcial, política monetaria/costos,
+valoración/COGS, conciliación y estados financieros. No se infieren políticas.
+
+### Actualización 0025: gestión administrativa y trazabilidad operativa
+
+**Usuarios:** `GET /auth/users` expone `management_revision`.
+`PATCH /auth/users/:id` exige ahora `expectedRevision` y `reason` además de
+nombre/roles/estado. Este cambio de contrato es deliberado: sin revisión no
+se admite una edición que pueda perder cambios de otro administrador.
+Bloqueo de empresa y usuario, 409 para revisión obsoleta, auditoría
+antes/después/actor/motivo y revocación de sesiones se confirman juntos.
+La UI conserva la revisión del momento de Editar y descarta claves/resultados
+de escrituras pendientes si cambia la identidad.
+
+**Empresa:** `/company` y `PATCH /companies/current` actualizan solo nombre
+(máximo 160) e identificación tributaria (máximo 64 o null explícito).
+`profile_revision` y motivo obligatorios. El tenant procede del JWT;
+código/actividad/país/moneda/contrato no se modifican. El encabezado se refresca.
+Se comprobó que la instantánea de una factura emitida no cambia. Los PDF
+legados sin instantánea conservan su advertencia y pueden usar el nombre actual;
+no se inventan instantáneas de emisión histórica.
+
+**Inventario:** `inventory_reorder_rules` modela mínimo/objetivo por producto
+y ubicación sin crear saldos ni movimientos. Revisión cero para creación,
+revisiones posteriores serializadas por clave; antes/después/motivo auditados.
+Cantidades como cadenas decimales (máximo cuatro decimales). Disponible es
+físico menos reservado; se alerta solo por debajo del mínimo positivo y se
+sugiere objetivo menos disponible. Producto inactivo o mínimo cero no sugieren.
+Incluye reglas sin stock. La sugerencia no tiene en cuenta compras en tránsito
+ni emite compras/reservas/asientos; revisión humana obligatoria.
+
+**Contabilidad:** `GET /accounting/accounts` lista el plan sin calcular todos
+los asientos. `/accounting` consume
+`GET /accounting/reports/general-ledger?accountCode=...&fromDate=...&toDate=...`.
+Una sentencia SQL obtiene apertura anterior al inicio, movimientos publicados
+del intervalo inclusivo, cierre y acumulado completo antes de paginar. Responde
+importes como texto, sin conversión monetaria a Number. Fechas/tenant/cuenta y
+páginas acotadas validadas; límite 100 líneas por página, defecto 25.
+Orden estable por fecha/creación/IDs. Saldo es débito menos crédito incluso
+para pasivo/ingreso. La UI presenta fechas ejecutadas y no confunde fallos con
+saldo cero. No sustituye balance financiero legal ni conciliación.
+
+**Verificación:** ocho e2e nuevas y diez pruebas frontend nuevas.
+Suite completa: 36 unitarias API, 73 e2e (15 suites) y 52 ChromeHeadless;
+builds correctos. E2e comprueba concurrencia 200/409, aislamiento, último admin,
+revocación, snapshot, umbral inclusivo, reservado y cálculo exacto con
+`10000000000000.0001` sin pérdida de fracciones de `0.0001` entre páginas.
+Navegador real: cuatro flujos y 16 combinaciones en 320/390/768/1440, cero
+errores/desbordamiento. Evidencia con fecha:
+`docs/manual/management-evidence.json`; capturador
+`docs/manual/capture_management.cjs`, capturas ficticias 25 a 28 sin claves.
+Manual 3.7 generado/verificado: 26 capítulos/anexos, 41 figuras, 63 tablas y
+135 endpoints. Las capturas anteriores mantienen su fecha original.
+
+**Migración/operación:** `0025_core_management.sql` aplicada tras respaldo
+custom `/tmp/erp360-before-0025.dump` en el contenedor y copia fuera del
+repositorio en los archivos de sesión. Catálogo comprobado con `pg_restore -l`
+(502 líneas); no constituye ensayo de restauración.
+API recompilada/reiniciada en 3001 con bootstrap deshabilitado y clave efímera;
+es necesario iniciar sesión de nuevo. Frontend 4201 y proxy responden.
+Ningún dato real recibió umbrales, cambios de perfil ni apuntes de prueba.
+
+**Para continuar:** ver prioridades en
+[pendientes](PENDIENTES_DESARROLLO.md): permisos de escritura granulares,
+MFA/correo/membresías, cambios legales y monetarios autorizados, reposición
+con compromisos/fechas y propuestas aprobables, conciliación parcial y estados
+financieros. No convertir estas pantallas en permisos globales o compras automáticas.
 
 ### 3.1 Identidad y aislamiento
 
@@ -273,6 +466,8 @@ Se aplicaron con `psql -v ON_ERROR_STOP=1`, sin borrar volúmenes.
 | 0021_deferred_sales_returns | retorno físico total posterior vinculado al crédito |
 | 0022_supplier_refunds_leave_cancellation | ingresos recibidos de proveedor y cancelación/revisión de ausencias |
 | 0023_saas_billing | operadores, contratos revisionados, documentos internos, cartera y seguimiento SaaS |
+| 0024_quotation_validity | vigencia opcional, revisión auditada y bloqueo de confirmación vencida |
+| 0025_core_management | revisiones de usuarios/empresa, reglas de reposición e índices de libro mayor |
 
 Antes de 0020 se realizó respaldo PostgreSQL custom en la carpeta privada de
 sesión. No se eliminó ni reinicializó el volumen. Este respaldo NO equivale a
@@ -280,6 +475,9 @@ una restauración probada ni reemplaza política de backups productivos.
 También se respaldó antes de 0022; no se borraron volúmenes ni documentos.
 Antes de 0023 se generó otro respaldo custom y se comprobó su catálogo con
 `pg_restore -l`. Es respaldo legible, no una restauración ensayada.
+Antes de 0024 se generó respaldo custom y se conservó fuera del repositorio;
+`pg_restore -l` verificó su catálogo (502 líneas), sin ensayar restauración.
+La migración solo añade columnas, sin modificar fechas o importes existentes.
 
 No se infiere que estén aplicadas en otra máquina. No hay un ledger completo
 de migraciones automatizado: respaldar, revisar versión real y ejecutar solo
@@ -292,12 +490,13 @@ autorización antes de volver a ejecutar; no borrar evidencia.
 |---|---|---|
 | API build | `npm run build` en api | Correcto |
 | API unitaria | `npm test -- --runInBand` | 36 pruebas, 17 suites |
-| API e2e | `npm run test:e2e -- --runInBand` | 57 pruebas, 13 suites |
+| API e2e | `npm run test:e2e -- --runInBand` | 73 pruebas, 15 suites |
 | Frontend build | `npm run build` en frontend | Correcto |
-| Frontend Chrome | `npm test -- --watch=false --browsers=ChromeHeadless` | 34 pruebas |
+| Frontend Chrome | `npm test -- --watch=false --browsers=ChromeHeadless` | 52 pruebas |
 | Navegador real | `docs\manual\capture_manual.cjs` y `capture_billing.cjs` | 7+4 flujos, 52+8 casos de ruta/ancho, 0 errores de página |
 | Health | API 3001, frontend/proxy 4201 actualizados | HTTP 200 |
-| Manual | Generador Python + inspección de estructura DOCX | Edición 3.3: 26 capítulos/anexos, 35 figuras, 63 tablas y 129 endpoints |
+| Navegador gestión | `capture_management.cjs` | 4 flujos y 16 combinaciones ruta/ancho, cero errores |
+| Manual | Generador Python + inspección de estructura DOCX | Edición 3.7: 26 capítulos/anexos, 41 figuras, 63 tablas y 135 endpoints |
 
 Nuevas suites:
 
@@ -333,6 +532,33 @@ Nuevas suites:
   errores, revisiones y descarte de respuestas de una identidad anterior.
 
 ### Navegador y capturas
+
+#### Adaptación desde fuente Odoo: vigencia de cotizaciones
+
+El 11 de noviembre se trazó el flujo de `validity_date`/`is_expired` y sus
+consumidores de firma/pago de portal en el código local de Odoo. No se
+decompiló con REA porque existe fuente completa ni se ejecutó Odoo.
+Ver [análisis de adaptación](ADAPTACION_ODOO.md) para fuentes y diferencias.
+
+ERP360 incorpora `validUntil` opcional, indicador derivado de vencimiento y
+revisión con motivo/control optimista. Solo admin del mismo tenant puede
+renovar borradores. La confirmación vencida devuelve 409 antes de crear pedido;
+la renovación conserva precios y datos financieros.
+
+UTC explícito; fecha inclusiva. No se configuró un plazo empresarial por
+defecto, no se caducaron históricos sin fecha y no se añadió aceptación
+pública/firma/cobro. El checkout conserva el comportamiento sin fecha.
+
+Cinco e2e nuevas y tres UI nuevas. Suite completa actual: 36 unitarias API,
+65 e2e y 42 frontend; builds correctos. La evidencia adicional
+`docs\manual\quotation-evidence.json` verifica dos flujos reales y cuatro
+anchos sin overflow ni errores: crear oferta, fixture ficticia vencida,
+rechazo API, renovación por UI y confirmación con revisión 2.
+La fixture no cambia reloj ni documentos de clientes reales.
+
+El manual 3.6 explica el procedimiento y contiene captura 24. Las anteriores
+evidencias ERP/SaaS mantienen sus fechas históricas y no se presentan como
+una nueva ejecución en esta etapa.
 
 `docs\manual\evidence.json` contiene fecha real, empresa ficticia, anchos,
 rutas y medidas. No contiene contraseñas ni tokens. Capturas nuevas 12–20

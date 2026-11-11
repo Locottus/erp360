@@ -94,7 +94,7 @@ y permite preparar un contexto mínimo sin PII.
 
 ### Ampliación operativa
 
-Migraciones nuevas `0013` a `0023`: identidad, controles de inventario/tesorería,
+Migraciones nuevas `0013` a `0026`: identidad, controles de inventario/tesorería,
 moneda explícita en documentos nuevos, PDF y folios comerciales automáticos,
 créditos totales con devolución física opcional, reembolsos confirmados,
 revisiones de RRHH, entrega manual, clave privada de baja y snapshot de factura.
@@ -105,6 +105,24 @@ de ausencias con control de revisión. Recuperar crédito es registrar dinero
 ya recibido (no conectarse a bancos); cancelar ausencia no recalcula nómina.
 `0023` agrega la consola de cartera SaaS independiente y sus operadores,
 contratos, documentos internos, historial financiero y seguimiento.
+`0024` agrega vigencia opcional de cotizaciones y revisión auditada; las ofertas
+vencidas no se confirman hasta revisar sus condiciones. Históricos sin fecha
+conservan su comportamiento. Ver [adaptación de procesos Odoo](docs/ADAPTACION_ODOO.md).
+`0026` añade propuestas de reposición como solicitudes en borrador, con
+proveedor, cantidad y costo elegidos, sin impuesto y con aprobación separada.
+La deduplicación cubre solo propuestas abiertas de la misma regla; revisar
+compras manuales y otras ubicaciones antes de proponer.
+`0025` añade revisiones administrativas de usuarios/empresa y reglas de
+reposición por producto/ubicación. Usuarios exige motivo y revisión original al
+editar; Mi empresa permite actualizar nombre e identificación sin cambiar tenant.
+Inventario sugiere cantidades exactas, sin crear órdenes ni descontar tránsito.
+La pantalla muestra además compras aprobadas pendientes por producto para toda
+la empresa; no indica destino, no debe sumarse entre ubicaciones y advierte
+recepciones históricas o inconsistentes excluidas del total.
+Contabilidad incorpora libro mayor con apertura y acumulado antes de paginar;
+no asigna moneda a históricos ni sustituye conciliación o estados certificados.
+El contrato `PATCH /auth/users/:id` exige ahora `expectedRevision` y `reason`;
+los consumidores deben leer `management_revision` desde `GET /auth/users`.
 Los lotes nuevos ya ingresan inventario: no aplicar también una recepción total
 histórica. La devolución a proveedor exige compra completa/contabilizada y
 stock disponible en la ubicación original; registra crédito, no reembolso bancario.

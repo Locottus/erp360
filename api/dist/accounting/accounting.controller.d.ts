@@ -4,6 +4,37 @@ import { AccountingService } from './accounting.service';
 export declare class AccountingController {
     private readonly accountingService;
     constructor(accountingService: AccountingService);
+    accounts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    generalLedger(request: AuthenticatedRequest, accountCode?: string, fromDate?: string, toDate?: string, page?: string, pageSize?: string): Promise<{
+        fromDate: string;
+        toDate: string;
+        page: number;
+        pageSize: number;
+        account: {
+            code: string;
+            name: string;
+            account_type: string;
+        };
+        summary: {
+            opening: string;
+            debit: string;
+            credit: string;
+            closing: string;
+        };
+        items: {
+            id: string;
+            entry_id: string;
+            entry_number: string;
+            entry_date: string;
+            description: string | null;
+            source_type: string;
+            source_id: string | null;
+            debit: string;
+            credit: string;
+            running_balance: string;
+        }[];
+        total: number;
+    }>;
     returnToSupplier(request: AuthenticatedRequest, id: string, input: Parameters<AccountingService['returnToSupplier']>[2]): Promise<{
         returnId: string;
         replayed: boolean;

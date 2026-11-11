@@ -14,10 +14,64 @@ const common_1 = require("@nestjs/common");
 const database_service_1 = require("../common/database.service");
 const document_sequence_1 = require("../common/document-sequence");
 const quantity_document_1 = require("../common/quantity-document");
+const iso_date_1 = require("../common/iso-date");
 let AccountingService = class AccountingService {
     db;
     constructor(db) {
         this.db = db;
+    }
+    async listAccounts(user) {
+        const result = await this.db.query(`SELECT code AS account_code,name AS account_name,account_type,is_active,is_system
+       FROM accounting_accounts WHERE company_id=$1 ORDER BY code`, [user.companyId]);
+        return result.rows;
+    }
+    async generalLedger(user, options) {
+        if (typeof options.accountCode !== 'string' || !options.accountCode.trim() || options.accountCode.length > 32) {
+            throw new common_1.BadRequestException('accountCode is required (1 to 32 characters).');
+        }
+        const from = (0, iso_date_1.requiredDate)(options.fromDate, 'fromDate');
+        const to = (0, iso_date_1.requiredDate)(options.toDate, 'toDate');
+        if (from > to)
+            throw new common_1.BadRequestException('fromDate must not be later than toDate.');
+        const page = options.page === undefined ? 1 : Number(options.page);
+        const pageSize = options.pageSize === undefined ? 25 : Number(options.pageSize);
+        if (!Number.isSafeInteger(page) || page < 1 || page > 1_000_000 ||
+            !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+            throw new common_1.BadRequestException('page must be 1 to 1000000 and pageSize 1 to 100.');
+        }
+        const result = await this.db.query(`WITH account AS (
+         SELECT id,code,name,account_type FROM accounting_accounts WHERE company_id=$1 AND code=$2
+       ), source AS (
+         SELECT jl.id,je.id AS entry_id,je.entry_number,je.entry_date,je.created_at,
+           COALESCE(jl.line_description,je.description) AS description,je.source_type,je.source_id,jl.debit,jl.credit
+         FROM accounting_journal_lines jl JOIN account a ON a.id=jl.account_id
+         JOIN accounting_journal_entries je ON je.id=jl.journal_entry_id
+         WHERE je.company_id=$1 AND je.status='posted' AND je.entry_date<=$4::date
+       ), summary AS (
+         SELECT COALESCE(SUM(debit-credit) FILTER(WHERE entry_date<$3::date),0) AS opening,
+           COALESCE(SUM(debit) FILTER(WHERE entry_date>=$3::date),0) AS debit,
+           COALESCE(SUM(credit) FILTER(WHERE entry_date>=$3::date),0) AS credit,
+           COALESCE(SUM(debit-credit),0) AS closing,
+           COUNT(*) FILTER(WHERE entry_date>=$3::date)::integer AS total FROM source
+       ), running AS (
+         SELECT s.*,summary.opening+SUM(s.debit-s.credit) OVER (
+           ORDER BY s.entry_date,s.created_at,s.entry_id,s.id ROWS UNBOUNDED PRECEDING) AS running_balance
+         FROM source s CROSS JOIN summary WHERE s.entry_date>=$3::date
+       ), paged AS (
+         SELECT * FROM running ORDER BY entry_date,created_at,entry_id,id LIMIT $5 OFFSET $6
+       )
+       SELECT jsonb_build_object('code',a.code,'name',a.name,'account_type',a.account_type) AS account,
+         jsonb_build_object('opening',s.opening::text,'debit',s.debit::text,'credit',s.credit::text,'closing',s.closing::text) AS summary,
+         s.total,COALESCE((SELECT jsonb_agg(jsonb_build_object(
+           'id',p.id,'entry_id',p.entry_id,'entry_number',p.entry_number,'entry_date',p.entry_date::text,
+           'description',p.description,'source_type',p.source_type,'source_id',p.source_id,
+           'debit',p.debit::text,'credit',p.credit::text,'running_balance',p.running_balance::text)
+           ORDER BY p.entry_date,p.created_at,p.entry_id,p.id) FROM paged p),'[]'::jsonb) AS items
+       FROM account a CROSS JOIN summary s`, [user.companyId, options.accountCode.trim(), from, to, pageSize, (page - 1) * pageSize]);
+        if (!result.rows[0])
+            throw new common_1.NotFoundException('Account not found in current company.');
+        await this.insertAuditDirect(user, 'accounting.report.general_ledger', user.companyId, { account_code: options.accountCode.trim(), from_date: from, to_date: to, page, page_size: pageSize });
+        return { ...result.rows[0], fromDate: from, toDate: to, page, pageSize };
     }
     async creditInvoice(user, invoiceId, input) {
         if (typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000 ||
@@ -253,8 +307,9 @@ let AccountingService = class AccountingService {
         if (typeof input.paymentReference !== 'string' || !input.paymentReference.trim()) {
             throw new common_1.BadRequestException('paymentReference is required.');
         }
-        if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
-            throw new common_1.BadRequestException('amount must be greater than zero.');
+        if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0 ||
+            Math.round(input.amount * 10000) / 10000 !== input.amount) {
+            throw new common_1.BadRequestException('amount must be positive with at most 4 decimals.');
         }
         const client = await this.db.connect();
         try {
@@ -271,16 +326,20 @@ let AccountingService = class AccountingService {
                 throw new common_1.BadRequestException('Cannot pay a void invoice.');
             }
             await this.assertSourceEntryExists(client, user.companyId, 'sales_invoice', invoiceId);
-            const paid = await client.query(`SELECT COALESCE(SUM(amount), 0)::text AS total_paid
-         FROM accounting_payments
-         WHERE company_id = $1 AND invoice_id = $2`, [user.companyId, invoiceId]);
-            const totalPaid = Number(paid.rows[0].total_paid ?? '0');
-            const invoiceTotal = Number(invoice.rows[0].grand_total);
-            const remaining = Number((invoiceTotal - totalPaid).toFixed(4));
-            if (remaining <= 0) {
+            const balance = await client.query(`SELECT remaining::text, (remaining - $3::numeric)::text AS remaining_after,
+                remaining > 0 AS has_balance, $3::numeric <= remaining AS fits, $3::numeric = remaining AS settles
+         FROM (
+           SELECT i.grand_total - COALESCE(SUM(p.amount), 0) AS remaining
+           FROM sales_invoices i
+           LEFT JOIN accounting_payments p ON p.company_id = i.company_id AND p.invoice_id = i.id
+           WHERE i.company_id = $1 AND i.id = $2
+           GROUP BY i.id
+         ) balance`, [user.companyId, invoiceId, input.amount]);
+            const { remaining, remaining_after: newRemaining, has_balance: hasBalance, fits, settles } = balance.rows[0];
+            if (!hasBalance) {
                 throw new common_1.BadRequestException('Invoice is already fully paid.');
             }
-            if (input.amount > remaining) {
+            if (!fits) {
                 throw new common_1.BadRequestException(`Payment amount exceeds remaining balance (${remaining}).`);
             }
             const paymentInsert = await client.query(`INSERT INTO accounting_payments (company_id, invoice_id, payment_reference, amount, status, created_by)
@@ -297,14 +356,13 @@ let AccountingService = class AccountingService {
             await client.query(`INSERT INTO accounting_reconciliations (company_id, invoice_id, payment_id, amount)
          VALUES ($1,$2,$3,$4)`, [user.companyId, invoiceId, paymentId, input.amount]);
             await client.query(`UPDATE accounting_payments SET status = 'reconciled' WHERE id = $1`, [paymentId]);
-            const newRemaining = Number((remaining - input.amount).toFixed(4));
-            if (newRemaining <= 0.0001) {
+            if (settles) {
                 await client.query(`UPDATE sales_invoices SET status = 'paid' WHERE id = $1`, [invoiceId]);
             }
             await this.insertAudit(client, user, 'accounting.invoice.payment.registered', paymentId, {
                 invoice_id: invoiceId,
                 amount: input.amount,
-                remaining: Number(Math.max(0, newRemaining).toFixed(4)),
+                remaining: Number(newRemaining),
             });
             await client.query('COMMIT');
             return {
@@ -312,7 +370,7 @@ let AccountingService = class AccountingService {
                 paymentId,
                 paymentReference: input.paymentReference.trim(),
                 amount: input.amount,
-                remainingBalance: Number(Math.max(0, newRemaining).toFixed(4)),
+                remainingBalance: Number(newRemaining),
             };
         }
         catch (error) {
@@ -603,6 +661,17 @@ let AccountingService = class AccountingService {
         }
     }
     async getTrialBalance(user, fromDate, toDate) {
+        for (const [field, value] of [['fromDate', fromDate], ['toDate', toDate]]) {
+            if (value !== undefined && value !== '') {
+                if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith('0000') ||
+                    !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value) {
+                    throw new common_1.BadRequestException(`${field} must be a valid YYYY-MM-DD date.`);
+                }
+            }
+        }
+        if (fromDate && toDate && fromDate > toDate) {
+            throw new common_1.BadRequestException('fromDate must not be later than toDate.');
+        }
         const params = [user.companyId];
         let dateFilter = '';
         if (fromDate) {
@@ -620,11 +689,13 @@ let AccountingService = class AccountingService {
               COALESCE(SUM(jl.credit), 0)::text AS credit,
               COALESCE(SUM(jl.debit - jl.credit), 0)::text AS balance
        FROM accounting_accounts a
-       LEFT JOIN accounting_journal_lines jl ON jl.account_id = a.id
-       LEFT JOIN accounting_journal_entries je ON je.id = jl.journal_entry_id
+       LEFT JOIN (
+         SELECT line.account_id, line.debit, line.credit
+         FROM accounting_journal_lines line
+         JOIN accounting_journal_entries je ON je.id = line.journal_entry_id
+         WHERE je.company_id = $1 AND je.status = 'posted' ${dateFilter}
+       ) jl ON jl.account_id = a.id
        WHERE a.company_id = $1
-         AND (je.id IS NULL OR je.status = 'posted')
-         ${dateFilter}
        GROUP BY a.code, a.name, a.account_type
        ORDER BY a.code ASC`, params);
         const totals = rows.rows.reduce((acc, row) => {

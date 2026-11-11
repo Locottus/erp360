@@ -46,6 +46,9 @@ let CommerceController = class CommerceController {
     confirmQuotation(request, quotationId, body) {
         return this.commerceService.confirmQuotation(request.user, quotationId, body?.orderNumber);
     }
+    reviseQuotationValidity(request, id, body) {
+        return this.commerceService.reviseQuotationValidity(request.user, id, body);
+    }
     issueInvoice(request, salesOrderId, body) {
         return this.commerceService.issueInvoice(request.user, salesOrderId, body?.invoiceNumber);
     }
@@ -54,6 +57,12 @@ let CommerceController = class CommerceController {
     }
     listPurchaseRequests(request) {
         return this.commerceService.listPurchaseRequests(request.user);
+    }
+    purchaseRequestDetails(request, id) {
+        return this.commerceService.purchaseRequestDetails(request.user, id);
+    }
+    rejectPurchaseRequest(request, id, input) {
+        return this.commerceService.rejectPurchaseRequest(request.user, id, input);
     }
     approvePurchaseRequest(request, requestId, body) {
         return this.commerceService.approvePurchaseRequest(request.user, requestId, body?.orderNumber);
@@ -85,6 +94,7 @@ __decorate([
 ], CommerceController.prototype, "cancelPurchase", null);
 __decorate([
     (0, common_1.Get)('sales/invoices/:id/pdf'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -102,6 +112,7 @@ __decorate([
 ], CommerceController.prototype, "createQuotation", null);
 __decorate([
     (0, common_1.Get)('sales/quotations'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -109,6 +120,7 @@ __decorate([
 ], CommerceController.prototype, "listQuotations", null);
 __decorate([
     (0, common_1.Get)('sales/orders'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -116,6 +128,7 @@ __decorate([
 ], CommerceController.prototype, "listSalesOrders", null);
 __decorate([
     (0, common_1.Get)('sales/invoices'),
+    (0, roles_decorator_1.Roles)('admin', 'sales'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -131,6 +144,16 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", void 0)
 ], CommerceController.prototype, "confirmQuotation", null);
+__decorate([
+    (0, common_1.Patch)('sales/quotations/:id/validity'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "reviseQuotationValidity", null);
 __decorate([
     (0, common_1.Post)('sales/orders/:id/invoice'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -152,11 +175,31 @@ __decorate([
 ], CommerceController.prototype, "createPurchaseRequest", null);
 __decorate([
     (0, common_1.Get)('purchases/requests'),
+    (0, roles_decorator_1.Roles)('admin', 'purchases'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], CommerceController.prototype, "listPurchaseRequests", null);
+__decorate([
+    (0, common_1.Get)('purchases/requests/:id'),
+    (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "purchaseRequestDetails", null);
+__decorate([
+    (0, common_1.Post)('purchases/requests/:id/reject'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "rejectPurchaseRequest", null);
 __decorate([
     (0, common_1.Post)('purchases/requests/:id/approve'),
     (0, roles_decorator_1.Roles)('admin'),

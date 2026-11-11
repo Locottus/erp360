@@ -1,3 +1,6 @@
+import { requiredDecimal as requiredMoney } from '../common/decimal-input';
+export { requiredDate } from '../common/iso-date';
+export { requiredMoney };
 export declare const SAAS_MODULES: readonly ["base", "sales", "purchases", "inventory", "accounting", "store", "people"];
 export type SaasModuleCode = (typeof SAAS_MODULES)[number];
 export type SaasRole = 'owner' | 'billing' | 'viewer';
@@ -9,8 +12,6 @@ export declare function objectInput(input: unknown, label?: string): Record<stri
 export declare function requiredText(input: unknown, field: string, maxLength: number, options?: {
     lowerCase?: boolean;
 }): string;
-export declare function requiredDate(input: unknown, field: string): string;
-export declare function requiredMoney(input: unknown, field: string, allowZero?: boolean): string;
 export declare function requiredReference(input: unknown): string;
 export declare function requiredReason(input: unknown, field?: string): string;
 export declare function parseModulePrices(input: unknown): ModulePrice[];

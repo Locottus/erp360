@@ -14,13 +14,21 @@ export declare class CompaniesService {
         name: string;
         tax_id: string | null;
         is_active: boolean;
+        profile_revision: number;
     }>;
+    updateCurrentCompany(user: AuthenticatedUser, input: {
+        name: string;
+        taxId: string | null;
+        expectedRevision: number;
+        reason: string;
+    }): Promise<any>;
     getCompanyById(id: string, user: AuthenticatedUser): Promise<{
         id: string;
         code: string;
         name: string;
         tax_id: string | null;
         is_active: boolean;
+        profile_revision: number;
     }>;
     private logAudit;
 }

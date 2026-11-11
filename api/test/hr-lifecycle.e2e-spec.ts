@@ -23,6 +23,27 @@ describe('Audited HR lifecycle', () => {
   });
   afterAll(async () => { await app.close(); });
 
+  it('lists old open attendance independently of the 500 most recent records', async () => {
+    const oldEmployee = (await post('/hr/employees', { employeeCode: 'EMP-OLD', fullName: 'Old open attendance' }).expect(201)).body.id as string;
+    const open = (await post('/hr/attendance/check-in', { employeeId: oldEmployee, checkInAt: '2020-01-01T08:00:00Z' }).expect(201)).body.id as string;
+    const db = app.get(DatabaseService);
+    await db.query(
+      `INSERT INTO hr_attendance (company_id, employee_id, check_in_at, check_out_at, total_minutes, status, created_by)
+       SELECT e.company_id, e.id, '2021-01-01T08:00:00Z'::timestamptz + n * interval '1 day',
+              '2021-01-01T09:00:00Z'::timestamptz + n * interval '1 day', 60, 'closed', e.created_by
+       FROM hr_employees e CROSS JOIN generate_series(1, 501) AS n WHERE e.id = $1`,
+      [oldEmployee],
+    );
+    const history = await request(app.getHttpServer()).get('/hr/attendance').auth(token, { type: 'bearer' }).expect(200);
+    expect(history.body).toHaveLength(500);
+    expect(history.body.some((row: { id: string }) => row.id === open)).toBe(false);
+    const pending = await request(app.getHttpServer()).get('/hr/attendance?status=open').auth(token, { type: 'bearer' }).expect(200);
+    expect(pending.body.map((row: { id: string }) => row.id)).toContain(open);
+    expect(pending.body.every((row: { status: string }) => row.status === 'open')).toBe(true);
+    await request(app.getHttpServer()).get('/hr/attendance?status=closed').auth(token, { type: 'bearer' }).expect(400);
+    await post('/hr/attendance/check-out', { attendanceId: open, checkOutAt: '2020-01-01T09:00:00Z' }).expect(201);
+  });
+
   it('serializes check-in, blocks invalid checkout, keeps revisions and prevents attendance/leave overlaps', async () => {
     const checks = await Promise.all([
       post('/hr/attendance/check-in', { employeeId, checkInAt: '2026-01-02T08:00:00Z' }),
@@ -91,10 +112,30 @@ describe('Audited HR lifecycle', () => {
       companyCode: `HROTHER-${suffix}`, companyName: 'Other company', email, fullName: 'Other admin', password: 'HrLifecycle123!',
     }).expect(201);
     const otherToken = (await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'HrLifecycle123!' })).body.access_token;
+    const openEmployee = (await post('/hr/employees', { employeeCode: 'EMP-PRIVATE', fullName: 'Private attendance' }).expect(201)).body.id as string;
+    const openId = (await post('/hr/attendance/check-in', { employeeId: openEmployee, checkInAt: '2026-01-01T08:00:00Z' }).expect(201)).body.id as string;
+    const otherAttendance = await request(app.getHttpServer()).get('/hr/attendance?status=open').auth(otherToken, { type: 'bearer' }).expect(200);
+    expect(otherAttendance.body.some((row: { id: string }) => row.id === openId)).toBe(false);
+    await post('/hr/attendance/check-out', { attendanceId: openId, checkOutAt: '2026-01-01T09:00:00Z' }).expect(201);
     await request(app.getHttpServer()).post(endpoint).auth(otherToken, { type: 'bearer' }).send(input).expect(404);
     const invite = await post('/auth/users', { email: `hr-employee-${suffix}@example.test`, fullName: 'Employee user', roles: ['employee'] }).expect(201);
     await request(app.getHttpServer()).post('/auth/reset-password').send({ token: invite.body.activationToken, password: 'HrLifecycle123!' }).expect(201);
     const employeeToken = (await request(app.getHttpServer()).post('/auth/login').send({ email: `hr-employee-${suffix}@example.test`, password: 'HrLifecycle123!' })).body.access_token;
+    for (const path of ['/hr/employees', '/hr/attendance', '/hr/attendance?status=open', '/hr/leave-requests']) {
+      await request(app.getHttpServer()).get(path).auth(employeeToken, { type: 'bearer' }).expect(403);
+      await request(app.getHttpServer()).get(path).auth(token, { type: 'bearer' }).expect(200);
+    }
+    const employeeRpc = (rpcToken: string) => `<?xml version="1.0"?><methodCall><methodName>object.execute_kw</methodName><params>
+      <param><value><string>${rpcToken}</string></value></param>
+      <param><value><string>hr.employee</string></value></param>
+      <param><value><string>search_read</string></value></param>
+      </params></methodCall>`;
+    const deniedRpc = await request(app.getHttpServer()).post('/rpc/xmlrpc').send({ xml: employeeRpc(employeeToken) }).expect(200);
+    expect(deniedRpc.text).toContain('<fault>');
+    expect(deniedRpc.text).not.toContain('Private attendance');
+    const adminRpc = await request(app.getHttpServer()).post('/rpc/xmlrpc').send({ xml: employeeRpc(token) }).expect(200);
+    expect(adminRpc.text).not.toContain('<fault>');
+    expect(adminRpc.text).toContain('Private attendance');
     await request(app.getHttpServer()).post(endpoint).auth(employeeToken, { type: 'bearer' }).send(input).expect(403);
     await patch(`/hr/employees/${leave.employee_id}`, { ...employee, expectedRevision: 0 }).expect(200);
     await post(endpoint, input).expect(201);

@@ -200,5 +200,26 @@ describe('Inventory and billing workflows (e2e)', () => {
     expect(Number(finalInvoice.total_paid)).toBe(70);
     expect(Number(finalInvoice.balance_due)).toBe(30);
     expect(finalInvoice.is_posted).toBe(true);
+
+    const paymentEndpoint = `/accounting/sales-invoices/${invoice.id}/payments`;
+    await request(app.getHttpServer()).post(paymentEndpoint).set('Authorization', `Bearer ${token}`)
+      .send({ paymentReference: `TOO-PRECISE-${suffix}`, amount: 0.00001 }).expect(400);
+    const partial = await request(app.getHttpServer()).post(paymentEndpoint).set('Authorization', `Bearer ${token}`)
+      .send({ paymentReference: `PARTIAL-${suffix}`, amount: 29.9999 }).expect(201);
+    expect(partial.body.remainingBalance).toBe(0.0001);
+    const beforeFinal = await request(app.getHttpServer()).get('/commerce/sales/invoices')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    const unpaid = beforeFinal.body.find((row: { id: string }) => row.id === invoice.id);
+    expect(unpaid.status).not.toBe('paid');
+    expect(unpaid.balance_due).toBe('0.0001');
+    await request(app.getHttpServer()).post(paymentEndpoint).set('Authorization', `Bearer ${token}`)
+      .send({ paymentReference: `OVER-${suffix}`, amount: 0.0002 }).expect(400);
+    const lastPayments = await Promise.all(['A', 'B'].map(reference => request(app.getHttpServer())
+      .post(paymentEndpoint).set('Authorization', `Bearer ${token}`)
+      .send({ paymentReference: `LAST-${reference}-${suffix}`, amount: 0.0001 })));
+    expect(lastPayments.map(result => result.status).sort()).toEqual([201, 400]);
+    const completed = await request(app.getHttpServer()).get('/commerce/sales/invoices')
+      .set('Authorization', `Bearer ${token}`).expect(200);
+    expect(completed.body.find((row: { id: string }) => row.id === invoice.id).status).toBe('paid');
   });
 });

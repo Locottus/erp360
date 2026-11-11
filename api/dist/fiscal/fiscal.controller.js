@@ -69,6 +69,7 @@ __decorate([
 ], FiscalController.prototype, "submitFiscalDocument", null);
 __decorate([
     (0, common_1.Get)('documents/:id'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -77,6 +78,7 @@ __decorate([
 ], FiscalController.prototype, "getFiscalDocument", null);
 __decorate([
     (0, common_1.Get)('documents'),
+    (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('countryCode')),
     __metadata("design:type", Function),

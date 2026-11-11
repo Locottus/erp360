@@ -9,7 +9,7 @@ import { RouterLink } from '@angular/router';
         <p>Conoce el orden correcto, los requisitos y el canal disponible para cada operación.</p></header>
       <article class="surface-card"><h2>Qué puedes hacer desde el navegador</h2>
         <p>Acceso, dashboard, catálogos, ventas, compras, inventario, facturación, RRHH, contabilidad, fiscal sandbox, tienda y portal cliente.</p>
-        <p>Usuarios gestiona invitaciones y roles. Recepciones permite entregas parciales y devolución al proveedor; Control operativo ofrece créditos y retorno total de ventas. Nómina, fiscal certificado, pagos en línea y créditos parciales de venta siguen pendientes. No introduzcas credenciales en el chat.</p>
+        <p>Usuarios y Mi empresa permiten cambios revisionados con motivo. Inventario sugiere reposición por ubicación y Contabilidad muestra el libro mayor. Recepciones permite entregas parciales y devolución al proveedor; Control operativo ofrece créditos y retorno total de ventas. Nómina, fiscal certificado, pagos en línea y créditos parciales de venta siguen pendientes. No introduzcas credenciales en el chat.</p>
         <div class="quick-actions"><a class="btn btn-secondary" routerLink="/operations">Abrir operaciones</a><a class="btn btn-secondary" routerLink="/receiving">Recepciones y devoluciones</a><a class="btn btn-secondary" routerLink="/ecommerce/admin">Diseñar tienda online</a></div>
       </article>
       <div class="panel-grid">
@@ -34,14 +34,17 @@ export class ProcessesComponent {
       steps: ['Crear proveedor y productos.', 'Crear solicitud con cantidades y costos.', 'Aprobar para generar orden.', 'Recibir cantidades reales por entrega: lote e inventario en un paso.', 'Completar y contabilizar; devolver al proveedor con crédito proporcional cuando corresponda.'],
       control: 'No aplicar una recepción total histórica después de lotes nuevos. El devengo se realiza al completar la orden.' },
     { title: 'Inventario', icon: 'bi-box-seam', channel: 'Pantalla web + API',
-      steps: ['Consultar saldos y kardex con filtros.', 'Registrar ajustes justificados.', 'Reservar pedidos confirmados.', 'Confirmar despacho en la misma ubicación de reserva.'],
-      control: 'Evitar ajustes para simular operaciones que ya tienen recepción o despacho.' },
+      steps: ['Consultar saldos y kardex con filtros.', 'Registrar ajustes justificados.', 'Reservar pedidos confirmados.', 'Confirmar despacho en la misma ubicación de reserva.', 'Configurar mínimo/objetivo por ubicación y revisar sugerencias de reposición.'],
+      control: 'Reposición no descuenta compras en tránsito ni crea pedidos. Evitar ajustes para simular recepciones o despachos.' },
     { title: 'Facturación y cobros', icon: 'bi-receipt', channel: 'Pantalla web + API contable',
       steps: ['Emitir desde pedido confirmado con folio manual o automático.', 'Descargar PDF comercial e inicializar/postear al libro.', 'Registrar pagos reales hasta el saldo pendiente.', 'Usar Control operativo para crédito total y reembolso confirmado.'],
       control: 'Moneda explícita solo en documentos nuevos; los históricos pueden no tenerla. No hay certificación fiscal ni crédito parcial.' },
-    { title: 'Contabilidad', icon: 'bi-journal-check', channel: 'API administrativa',
-      steps: ['Inicializar plan de cuentas base.', 'Postear facturas y órdenes de compra.', 'Registrar pagos con su referencia.', 'Consultar balance de comprobación.', 'Validar y cerrar el período.'],
+    { title: 'Contabilidad', icon: 'bi-journal-check', channel: 'Libro mayor + Operaciones + API',
+      steps: ['Inicializar plan de cuentas base.', 'Postear facturas y órdenes de compra.', 'Registrar pagos con su referencia.', 'Consultar Contabilidad: apertura, movimientos y acumulado exacto por cuenta.', 'Consultar balance de comprobación y revisar/cerrar el período.'],
       control: 'El cierre requiere revisión de un responsable contable; no es una certificación legal.' },
+    { title: 'Usuarios y empresa', icon: 'bi-building', channel: 'Usuarios + Mi empresa',
+      steps: ['Invitar cuentas y entregar claves por canal privado.', 'Editar roles/estado con motivo y revisión original.', 'Actualizar nombre e identificación tributaria de la empresa autenticada.', 'Ante conflicto recargar y revisar antes de volver a guardar.'],
+      control: 'No se elimina al último administrador ni se cambia tenant, código, moneda o contrato. Los PDF legados sin instantánea pueden mostrar el nombre actual con aviso.' },
     { title: 'Fiscal', icon: 'bi-file-earmark-check', channel: 'API · homologación sandbox',
       steps: ['Configurar proveedor de pruebas y país GT/SV/DO.', 'Generar documento desde factura emitida.', 'Enviar al adaptador sandbox.', 'Revisar estado y trazabilidad.'],
       control: 'Los adaptadores actuales son simuladores. No hay emisión fiscal certificada en producción.' },

@@ -10,6 +10,20 @@ import { AccountingService } from './accounting.service';
 export class AccountingController {
   constructor(private readonly accountingService: AccountingService) {}
 
+  @Get('accounts')
+  @Roles('admin')
+  accounts(@Req() request: AuthenticatedRequest) {
+    return this.accountingService.listAccounts(request.user);
+  }
+
+  @Get('reports/general-ledger')
+  @Roles('admin')
+  generalLedger(@Req() request: AuthenticatedRequest,
+    @Query('accountCode') accountCode?: string, @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
+  }
+
   @Post('purchase-orders/:id/returns')
   @Roles('admin')
   returnToSupplier(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
@@ -99,6 +113,7 @@ export class AccountingController {
   }
 
   @Get('reports/trial-balance')
+  @Roles('admin')
   getTrialBalance(
     @Req() request: AuthenticatedRequest,
     @Query('fromDate') fromDate?: string,

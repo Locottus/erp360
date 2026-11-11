@@ -49,8 +49,8 @@ type Leave = { id: string; full_name: string; start_date: string; end_date: stri
               }</select></label>
             @if (attendance) {
               <form class="form-grid" #attendanceForm="ngForm" (ngSubmit)="saveAttendance()">
-                <label>Entrada UTC<input name="checkInAt" type="datetime-local" [(ngModel)]="correction.checkInAt" required /></label>
-                <label>Salida UTC<input name="checkOutAt" type="datetime-local" [(ngModel)]="correction.checkOutAt" required /></label>
+                <label>Entrada UTC<input name="checkInAt" type="datetime-local" step="0.001" [(ngModel)]="correction.checkInAt" required /></label>
+                <label>Salida UTC<input name="checkOutAt" type="datetime-local" step="0.001" [(ngModel)]="correction.checkOutAt" required /></label>
                 <label>Motivo<input name="attendanceReason" [(ngModel)]="correction.reason" minlength="10" maxlength="1000" required /></label>
                 <button class="btn btn-primary" type="submit" [disabled]="busy || attendanceForm.invalid">Corregir y auditar</button>
               </form>
@@ -117,7 +117,11 @@ export class PeopleComponent {
       hireDate: this.employee.hire_date.slice(0, 10), status: this.employee.status, reason: '' };
   }
   selectAttendance() {
-    if (this.attendance) this.correction = { checkInAt: this.attendance.check_in_at.slice(0, 16), checkOutAt: this.attendance.check_out_at?.slice(0, 16) ?? '', reason: '' };
+    if (this.attendance) this.correction = {
+      checkInAt: new Date(this.attendance.check_in_at).toISOString().slice(0, 23),
+      checkOutAt: this.attendance.check_out_at ? new Date(this.attendance.check_out_at).toISOString().slice(0, 23) : '',
+      reason: '',
+    };
   }
   private async load() {
     const user = this.session.user();
@@ -146,20 +150,22 @@ export class PeopleComponent {
   }
   async saveEmployee() {
     if (!this.employee) { this.error = 'Selecciona un expediente.'; return; }
-    const employee = this.employee;
+    const user = this.session.user(); const employee = this.employee;
     await this.perform(async () => {
       await firstValueFrom(this.http.patch(`${API_BASE_URL}/hr/employees/${employee.id}`, { ...this.person, expectedRevision: employee.revision }));
+      if (this.session.user() !== user) return;
       this.message = 'Expediente actualizado, historial conservado.'; await this.load();
     });
   }
   async saveAttendance() {
     if (!this.attendance) { this.error = 'Selecciona una jornada cerrada.'; return; }
-    const attendance = this.attendance;
+    const user = this.session.user(); const attendance = this.attendance;
     await this.perform(async () => {
       await firstValueFrom(this.http.patch(`${API_BASE_URL}/hr/attendance/${attendance.id}`, {
-        checkInAt: `${this.correction.checkInAt}:00Z`, checkOutAt: `${this.correction.checkOutAt}:00Z`,
+        checkInAt: `${this.correction.checkInAt}Z`, checkOutAt: `${this.correction.checkOutAt}Z`,
         reason: this.correction.reason, expectedRevision: attendance.revision,
       }));
+      if (this.session.user() !== user) return;
       this.message = 'Jornada corregida; antes y después registrados en auditoría.'; await this.load();
     });
   }

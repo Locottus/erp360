@@ -162,18 +162,21 @@ export class HrService {
     return result.rows;
   }
 
-  async listAttendance(user: AuthUser) {
+  async listAttendance(user: AuthUser, status?: string) {
+    if (status !== undefined && status !== 'open') {
+      throw new BadRequestException('Only the open attendance status can be filtered.');
+    }
     const result = await this.db.query(
       `SELECT a.id, a.employee_id, e.employee_code, e.full_name, e.job_title,
               a.check_in_at, a.check_out_at, a.total_minutes, a.status, a.revision
        FROM hr_attendance a
        JOIN hr_employees e ON e.id = a.employee_id AND e.company_id = a.company_id
-       WHERE a.company_id = $1
+       WHERE a.company_id = $1 AND ($2::text IS NULL OR a.status = $2)
        ORDER BY a.check_in_at DESC, a.id DESC
-       LIMIT 500`,
-      [user.companyId],
+       LIMIT CASE WHEN $2::text IS NULL THEN 500 ELSE NULL END`,
+      [user.companyId, status ?? null],
     );
-    await this.insertAuditDirect(user, 'hr.attendance.list', user.companyId, { total: result.rows.length });
+    await this.insertAuditDirect(user, 'hr.attendance.list', user.companyId, { total: result.rows.length, status: status ?? null });
     return result.rows;
   }
 

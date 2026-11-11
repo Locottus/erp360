@@ -18,7 +18,7 @@ export declare class HrController {
         employee_code: string;
     }>;
     listEmployees(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
-    listAttendance(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    listAttendance(request: AuthenticatedRequest, status?: string): Promise<import("pg").QueryResultRow[]>;
     checkIn(request: AuthenticatedRequest, body: CheckInInput): Promise<{
         id: string;
         employeeId: string;

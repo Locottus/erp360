@@ -1,15 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.SAAS_MODULES = void 0;
+exports.SAAS_MODULES = exports.requiredMoney = exports.requiredDate = void 0;
 exports.objectInput = objectInput;
 exports.requiredText = requiredText;
-exports.requiredDate = requiredDate;
-exports.requiredMoney = requiredMoney;
 exports.requiredReference = requiredReference;
 exports.requiredReason = requiredReason;
 exports.parseModulePrices = parseModulePrices;
 exports.requireSaasRole = requireSaasRole;
 const common_1 = require("@nestjs/common");
+const decimal_input_1 = require("../common/decimal-input");
+Object.defineProperty(exports, "requiredMoney", { enumerable: true, get: function () { return decimal_input_1.requiredDecimal; } });
+var iso_date_1 = require("../common/iso-date");
+Object.defineProperty(exports, "requiredDate", { enumerable: true, get: function () { return iso_date_1.requiredDate; } });
 exports.SAAS_MODULES = [
     'base',
     'sales',
@@ -36,29 +38,6 @@ function requiredText(input, field, maxLength, options = {}) {
         throw new common_1.BadRequestException(`${field} is required and must be at most ${maxLength} characters.`);
     }
     return options.lowerCase ? value.toLowerCase() : value;
-}
-function requiredDate(input, field) {
-    if (typeof input !== 'string' || !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(input)) {
-        throw new common_1.BadRequestException(`${field} must be a valid YYYY-MM-DD date.`);
-    }
-    const date = new Date(`${input}T00:00:00.000Z`);
-    if (Number.isNaN(date.getTime()) ||
-        date.toISOString().slice(0, 10) !== input) {
-        throw new common_1.BadRequestException(`${field} must be a valid YYYY-MM-DD date.`);
-    }
-    return input;
-}
-function requiredMoney(input, field, allowZero = false) {
-    if (typeof input !== 'string' ||
-        !/^(?:0|[1-9]\d{0,11})(?:\.\d{1,4})?$/.test(input)) {
-        throw new common_1.BadRequestException(`${field} must be a decimal string with at most four fractional digits.`);
-    }
-    const [whole, fraction = ''] = input.split('.');
-    const normalized = `${whole}.${fraction.padEnd(4, '0')}`;
-    if (!allowZero && normalized === '0.0000') {
-        throw new common_1.BadRequestException(`${field} must be greater than zero.`);
-    }
-    return normalized;
 }
 function requiredReference(input) {
     return requiredText(input, 'reference', 120);
@@ -89,7 +68,7 @@ function parseModulePrices(input) {
         seen.add(code);
         return {
             code: code,
-            price: requiredMoney(row.price, `modules[${index}].price`, true),
+            price: (0, decimal_input_1.requiredDecimal)(row.price, `modules[${index}].price`, true),
         };
     });
     if (!seen.has('base')) {

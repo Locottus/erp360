@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards, StreamableFile } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards, StreamableFile } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -23,6 +23,7 @@ export class CommerceController {
   }
 
   @Get('sales/invoices/:id/pdf')
+  @Roles('admin', 'sales')
   async invoicePdf(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return new StreamableFile(await this.commerceService.invoicePdf(request.user, id),
       { type: 'application/pdf', disposition: 'attachment; filename="factura-comercial.pdf"' });
@@ -35,16 +36,19 @@ export class CommerceController {
   }
 
   @Get('sales/quotations')
+  @Roles('admin', 'sales')
   listQuotations(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listQuotations(request.user);
   }
 
   @Get('sales/orders')
+  @Roles('admin', 'sales')
   listSalesOrders(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listSalesOrders(request.user);
   }
 
   @Get('sales/invoices')
+  @Roles('admin', 'sales')
   listSalesInvoices(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listSalesInvoices(request.user);
   }
@@ -57,6 +61,16 @@ export class CommerceController {
     @Body() body: { orderNumber: string },
   ) {
     return this.commerceService.confirmQuotation(request.user, quotationId, body?.orderNumber);
+  }
+
+  @Patch('sales/quotations/:id/validity')
+  @Roles('admin')
+  reviseQuotationValidity(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { validUntil: string | null; expectedRevision: number; reason: string },
+  ) {
+    return this.commerceService.reviseQuotationValidity(request.user, id, body);
   }
 
   @Post('sales/orders/:id/invoice')
@@ -76,8 +90,22 @@ export class CommerceController {
   }
 
   @Get('purchases/requests')
+  @Roles('admin', 'purchases')
   listPurchaseRequests(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listPurchaseRequests(request.user);
+  }
+
+  @Get('purchases/requests/:id')
+  @Roles('admin', 'purchases')
+  purchaseRequestDetails(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.commerceService.purchaseRequestDetails(request.user, id);
+  }
+
+  @Post('purchases/requests/:id/reject')
+  @Roles('admin')
+  rejectPurchaseRequest(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string }) {
+    return this.commerceService.rejectPurchaseRequest(request.user, id, input);
   }
 
   @Post('purchases/requests/:id/approve')

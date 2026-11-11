@@ -4,6 +4,29 @@ import { type QuantityDocument } from '../common/quantity-document';
 export declare class InventoryService {
     private readonly db;
     constructor(db: DatabaseService);
+    listReplenishment(user: AuthUser, locationCode?: string): Promise<import("pg").QueryResultRow[]>;
+    purchaseCommitments(user: AuthUser, productId: string): Promise<import("pg").QueryResultRow[]>;
+    createReplenishmentProposal(user: AuthUser, productId: string, input: {
+        locationCode: string;
+        expectedRevision: number;
+        supplierId: string;
+        requestNumber: string;
+        quantity: string;
+        unitCost: string;
+        reason: string;
+        reviewedCommitments: boolean;
+    }): Promise<{
+        id: string;
+        requestNumber: string;
+        status: string;
+    }>;
+    setReplenishment(user: AuthUser, productId: string, input: {
+        locationCode: string;
+        minimumQuantity: string;
+        targetQuantity: string;
+        expectedRevision: number;
+        reason: string;
+    }): Promise<any>;
     purchaseReceiptDetails(user: AuthUser, id: string): Promise<{
         order: import("pg").QueryResultRow;
         lines: import("pg").QueryResultRow[];

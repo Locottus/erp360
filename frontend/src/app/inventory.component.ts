@@ -6,6 +6,7 @@ import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
 import { EmptyStateComponent } from './shared/empty-state.component';
+import { ReplenishmentComponent } from './replenishment.component';
 
 type StockRow = {
   product_id: string;
@@ -43,7 +44,7 @@ type FulfillmentOrder = {
 @Component({
   selector: 'app-inventory',
   standalone: true,
-  imports: [CommonModule, FormsModule, EmptyStateComponent],
+  imports: [CommonModule, FormsModule, EmptyStateComponent, ReplenishmentComponent],
   template: `
     <section class="page-shell">
       <header class="page-header">
@@ -68,7 +69,7 @@ type FulfillmentOrder = {
               }
             </select>
           </label>
-          <button type="button" class="btn btn-primary" (click)="refresh()" [disabled]="loading">
+          <button type="button" class="btn btn-primary" (click)="applyFilters()" [disabled]="loading">
             {{ loading ? 'Actualizando…' : 'Actualizar inventario' }}
           </button>
         </div>
@@ -178,7 +179,8 @@ type FulfillmentOrder = {
           <p class="muted">No hay movimientos que coincidan con el filtro.</p>
         }
       </article>
-      <p class="muted">Este módulo todavía no calcula costo promedio/PEPS, lotes, series, caducidad, transferencias entre bodegas, conteos físicos ni devoluciones.</p>
+      <app-replenishment />
+      <p class="muted">La valoración de inventario, lotes, series y caducidad aún no están disponibles. Transferencias y conteos se realizan desde Control operativo.</p>
     </section>
   `,
 })
@@ -207,6 +209,12 @@ export class InventoryComponent implements OnInit {
   get totalReserved() { return this.stock.reduce((sum, row) => sum + Number(row.reserved), 0); }
   get movementPages() { return Math.max(1, Math.ceil(this.movements.total / this.movements.pageSize)); }
 
+  async applyFilters() {
+    if (this.loading) return;
+    this.movements = { ...this.movements, page: 1 };
+    await this.refresh();
+  }
+
   async refresh() {
     if (this.loading) return;
     this.loading = true; this.error = '';
@@ -218,7 +226,7 @@ export class InventoryComponent implements OnInit {
           ...(this.productFilter ? { productId: this.productFilter } : {}),
         } })),
         firstValueFrom(this.http.get<ProductRow[]>(`${this.api}/masters/products`)),
-        firstValueFrom(this.http.get<FulfillmentOrder[]>(`${this.api}/inventory/sales-orders`)),
+        this.isAdmin ? firstValueFrom(this.http.get<FulfillmentOrder[]>(`${this.api}/inventory/sales-orders`)) : Promise.resolve([]),
       ]);
       this.stock = stock;
       this.movements = movements;
