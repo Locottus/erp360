@@ -1,6 +1,9 @@
 import { Component, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
+import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
+import { API_BASE_URL } from './core/api';
 import { Router } from '@angular/router';
 import { SessionService } from './core/session.service';
 
@@ -24,9 +27,18 @@ import { SessionService } from './core/session.service';
           <input id="login-password" name="password" [(ngModel)]="password" [type]="showPassword ? 'text' : 'password'" required autocomplete="current-password" />
           <button type="button" class="btn btn-secondary" (click)="showPassword = !showPassword" [attr.aria-pressed]="showPassword">{{ showPassword ? 'Ocultar' : 'Mostrar' }} contraseña</button>
           <button type="submit" class="btn btn-primary" [disabled]="loading || loginForm.invalid">{{ loading ? 'Ingresando…' : 'Entrar a mi empresa' }}</button>
-          <p class="muted">¿Olvidaste la contraseña? Contacta al administrador. No hay recuperación automática configurada.</p>
+          <p class="muted">¿Olvidaste la contraseña? Solicita una clave de recuperación al administrador.</p>
         </form>
       </article>
+      <details class="surface-card">
+        <summary>Activar cuenta o restablecer contraseña</summary>
+        <p>Usa la clave de un solo uso entregada por el administrador. No la compartas ni la incluyas en la URL.</p>
+        <form class="form-grid" #resetForm="ngForm" (ngSubmit)="resetPassword()">
+          <label>Clave privada<input name="resetToken" type="password" [(ngModel)]="resetToken" required autocomplete="off" /></label>
+          <label>Nueva contraseña<input name="newPassword" type="password" [(ngModel)]="newPassword" minlength="12" maxlength="256" required autocomplete="new-password" /></label>
+          <button class="btn btn-primary" type="submit" [disabled]="loading || resetForm.invalid">Guardar nueva contraseña</button>
+        </form>
+      </details>
       <details class="surface-card">
         <summary>Alta inicial de una empresa nueva · solo instalaciones autorizadas</summary>
         <p>El servidor debe habilitar temporalmente el registro. No permite agregar administradores a empresas existentes.</p>
@@ -52,8 +64,21 @@ import { SessionService } from './core/session.service';
 export class AuthConsoleComponent {
   private readonly session = inject(SessionService);
   private readonly router = inject(Router);
+  private readonly http = inject(HttpClient);
+  resetToken = ''; newPassword = '';
   email = ''; password = ''; companyCode = ''; companyName = ''; fullName = '';
   adminEmail = ''; adminPassword = ''; loading = false; error = ''; success = ''; showPassword = false;
+
+  async resetPassword() {
+    if (this.loading) return;
+    this.loading = true; this.error = ''; this.success = '';
+    try {
+      await firstValueFrom(this.http.post(`${API_BASE_URL}/auth/reset-password`, { token: this.resetToken, password: this.newPassword }));
+      this.resetToken = ''; this.newPassword = '';
+      this.success = 'Contraseña guardada. Inicia sesión con tu nueva contraseña.';
+    } catch { this.error = 'No se pudo cambiar la contraseña. Comprueba la clave, su vigencia y la longitud de contraseña.'; }
+    finally { this.loading = false; }
+  }
 
   async login() {
     if (this.loading) return;

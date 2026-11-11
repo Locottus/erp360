@@ -54,5 +54,9 @@ export declare class MastersService {
         code: string;
         name: string;
     }>;
+    updateRecord(user: AuthUser, kind: string, id: string, input: unknown): Promise<any>;
+    importRecords(user: AuthUser, kind: string, records: unknown): Promise<{
+        imported: number;
+    }>;
     private logAudit;
 }

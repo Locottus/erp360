@@ -3,6 +3,7 @@ export type AuthTokenPayload = {
   email: string;
   companyId: string;
   roles: string[];
+  sessionVersion?: number;
 };
 
 export type BootstrapAdminInput = {

@@ -22,6 +22,33 @@ let AccountingController = class AccountingController {
     constructor(accountingService) {
         this.accountingService = accountingService;
     }
+    returnToSupplier(request, id, input) {
+        return this.accountingService.returnToSupplier(request.user, id, input);
+    }
+    credit(request, id, input) {
+        return this.accountingService.creditInvoice(request.user, id, input);
+    }
+    credits(request) { return this.accountingService.listCredits(request.user); }
+    refund(request, id, input) {
+        return this.accountingService.refundCredit(request.user, id, input);
+    }
+    returnCreditedStock(request, id, input) {
+        return this.accountingService.returnCreditedStock(request.user, id, input);
+    }
+    payables(request) { return this.accountingService.listPayables(request.user); }
+    supplierRefunds(request, id) {
+        return this.accountingService.supplierRefundHistory(request.user, id);
+    }
+    supplierRefund(request, id, input) {
+        return this.accountingService.receiveSupplierRefund(request.user, id, input);
+    }
+    paySupplier(request, id, input) {
+        return this.accountingService.paySupplier(request.user, id, input);
+    }
+    periods(request) { return this.accountingService.listPeriods(request.user); }
+    reopen(request, input) {
+        return this.accountingService.reopenPeriod(request.user, input);
+    }
     bootstrapAccounts(request) {
         return this.accountingService.bootstrapDefaultAccounts(request.user);
     }
@@ -42,6 +69,108 @@ let AccountingController = class AccountingController {
     }
 };
 exports.AccountingController = AccountingController;
+__decorate([
+    (0, common_1.Post)('purchase-orders/:id/returns'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "returnToSupplier", null);
+__decorate([
+    (0, common_1.Post)('sales-invoices/:id/credit'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "credit", null);
+__decorate([
+    (0, common_1.Get)('credits'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "credits", null);
+__decorate([
+    (0, common_1.Post)('credits/:id/refunds'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "refund", null);
+__decorate([
+    (0, common_1.Post)('credits/:id/stock-return'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "returnCreditedStock", null);
+__decorate([
+    (0, common_1.Get)('payables'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "payables", null);
+__decorate([
+    (0, common_1.Get)('purchase-orders/:id/refunds'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "supplierRefunds", null);
+__decorate([
+    (0, common_1.Post)('purchase-orders/:id/refunds'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "supplierRefund", null);
+__decorate([
+    (0, common_1.Post)('purchase-orders/:id/payments'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "paySupplier", null);
+__decorate([
+    (0, common_1.Get)('periods'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "periods", null);
+__decorate([
+    (0, common_1.Post)('periods/reopen'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "reopen", null);
 __decorate([
     (0, common_1.Post)('bootstrap-accounts'),
     (0, roles_decorator_1.Roles)('admin'),

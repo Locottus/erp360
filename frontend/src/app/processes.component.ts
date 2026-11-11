@@ -9,8 +9,8 @@ import { RouterLink } from '@angular/router';
         <p>Conoce el orden correcto, los requisitos y el canal disponible para cada operación.</p></header>
       <article class="surface-card"><h2>Qué puedes hacer desde el navegador</h2>
         <p>Acceso, dashboard, catálogos, ventas, compras, inventario, facturación, RRHH, contabilidad, fiscal sandbox, tienda y portal cliente.</p>
-        <p>La gestión de usuarios, nómina, fiscal certificado, pagos en línea y devoluciones requieren integraciones o módulos adicionales. No introduzcas credenciales en el chat.</p>
-        <div class="quick-actions"><a class="btn btn-secondary" routerLink="/operations">Abrir operaciones</a><a class="btn btn-secondary" routerLink="/ecommerce/admin">Diseñar tienda online</a></div>
+        <p>Usuarios gestiona invitaciones y roles. Recepciones permite entregas parciales y devolución al proveedor; Control operativo ofrece créditos y retorno total de ventas. Nómina, fiscal certificado, pagos en línea y créditos parciales de venta siguen pendientes. No introduzcas credenciales en el chat.</p>
+        <div class="quick-actions"><a class="btn btn-secondary" routerLink="/operations">Abrir operaciones</a><a class="btn btn-secondary" routerLink="/receiving">Recepciones y devoluciones</a><a class="btn btn-secondary" routerLink="/ecommerce/admin">Diseñar tienda online</a></div>
       </article>
       <div class="panel-grid">
         @for (flow of flows; track flow.title) {
@@ -30,15 +30,15 @@ export class ProcessesComponent {
     { title: 'Ventas', icon: 'bi-receipt', channel: 'Pantallas de inventario y facturación + API comercial',
       steps: ['Crear cliente, productos e impuesto.', 'Crear cotización y revisar totales.', 'Confirmar para generar pedido.', 'Reservar stock y despachar desde inventario.', 'Emitir factura y contabilizar.'],
       control: 'Confirmación comercial, reserva física y contabilización son operaciones distintas.' },
-    { title: 'Compras', icon: 'bi-truck', channel: 'Centro de operaciones + API',
-      steps: ['Crear proveedor y productos.', 'Crear solicitud con cantidades y costos.', 'Aprobar para generar orden.', 'Registrar recepción comercial.', 'Aplicar recepción de inventario y devengo contable.'],
-      control: 'La recepción comercial no sustituye el movimiento de inventario.' },
+    { title: 'Compras', icon: 'bi-truck', channel: 'Operaciones + Recepciones + API',
+      steps: ['Crear proveedor y productos.', 'Crear solicitud con cantidades y costos.', 'Aprobar para generar orden.', 'Recibir cantidades reales por entrega: lote e inventario en un paso.', 'Completar y contabilizar; devolver al proveedor con crédito proporcional cuando corresponda.'],
+      control: 'No aplicar una recepción total histórica después de lotes nuevos. El devengo se realiza al completar la orden.' },
     { title: 'Inventario', icon: 'bi-box-seam', channel: 'Pantalla web + API',
       steps: ['Consultar saldos y kardex con filtros.', 'Registrar ajustes justificados.', 'Reservar pedidos confirmados.', 'Confirmar despacho en la misma ubicación de reserva.'],
       control: 'Evitar ajustes para simular operaciones que ya tienen recepción o despacho.' },
     { title: 'Facturación y cobros', icon: 'bi-receipt', channel: 'Pantalla web + API contable',
-      steps: ['Emitir desde un pedido confirmado con folio manual.', 'Inicializar y postear al libro contable.', 'Registrar pagos parciales hasta el saldo pendiente.', 'Consultar estado, total pagado y saldo.'],
-      control: 'La moneda debe confirmarse; no incluye PDF, folios automáticos, notas de crédito ni certificación fiscal.' },
+      steps: ['Emitir desde pedido confirmado con folio manual o automático.', 'Descargar PDF comercial e inicializar/postear al libro.', 'Registrar pagos reales hasta el saldo pendiente.', 'Usar Control operativo para crédito total y reembolso confirmado.'],
+      control: 'Moneda explícita solo en documentos nuevos; los históricos pueden no tenerla. No hay certificación fiscal ni crédito parcial.' },
     { title: 'Contabilidad', icon: 'bi-journal-check', channel: 'API administrativa',
       steps: ['Inicializar plan de cuentas base.', 'Postear facturas y órdenes de compra.', 'Registrar pagos con su referencia.', 'Consultar balance de comprobación.', 'Validar y cerrar el período.'],
       control: 'El cierre requiere revisión de un responsable contable; no es una certificación legal.' },

@@ -22,6 +22,12 @@ let HrController = class HrController {
     constructor(hrService) {
         this.hrService = hrService;
     }
+    updateEmployee(request, id, input) {
+        return this.hrService.updateEmployee(request.user, id, input);
+    }
+    correctAttendance(request, id, input) {
+        return this.hrService.correctAttendance(request.user, id, input);
+    }
     createEmployee(request, body) {
         return this.hrService.createEmployee(request.user, body);
     }
@@ -49,8 +55,31 @@ let HrController = class HrController {
     listLeaveRequests(request) {
         return this.hrService.listLeaveRequests(request.user);
     }
+    cancelLeaveRequest(request, id, input) {
+        return this.hrService.cancelLeaveRequest(request.user, id, input);
+    }
 };
 exports.HrController = HrController;
+__decorate([
+    (0, common_1.Patch)('employees/:id'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "updateEmployee", null);
+__decorate([
+    (0, common_1.Patch)('attendance/:id'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "correctAttendance", null);
 __decorate([
     (0, common_1.Post)('employees'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -128,6 +157,16 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listLeaveRequests", null);
+__decorate([
+    (0, common_1.Post)('leave-requests/:id/cancel'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "cancelLeaveRequest", null);
 exports.HrController = HrController = __decorate([
     (0, common_1.Controller)('hr'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),

@@ -9,7 +9,7 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   if (!request.url.startsWith(`${API_BASE_URL}/`)) return next(request);
   const session = inject(SessionService);
   const help = inject(HelpService);
-  const publicRequest = /\/(auth\/(login|bootstrap-admin)|ecommerce\/storefront|portal\/public)(\/|$)/.test(request.url);
+  const publicRequest = /\/(auth\/(login|bootstrap-admin|reset-password)|ecommerce\/storefront|portal\/public)(\/|$)/.test(request.url);
   const token = session.getAccessToken();
   const outgoing = token && !publicRequest
     ? request.clone({ setHeaders: { Authorization: `Bearer ${token}` } })

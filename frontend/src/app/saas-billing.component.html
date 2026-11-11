@@ -1,0 +1,182 @@
+<section class="page-shell">
+  <header class="page-header">
+    <p class="eyebrow"><i class="bi bi-buildings" aria-hidden="true"></i> PLATAFORMA · SaaS</p>
+    <h1>Suscripciones y cartera</h1>
+    <p>Administración comercial de ERP360, separada de la facturación operativa de cada empresa.</p>
+  </header>
+  @if (saas.error()) { <p class="status status-error" role="alert">{{ saas.error() }}</p><button class="btn btn-secondary" (click)="saas.loadOperator()" [disabled]="saas.loading()">Reintentar autorización</button> }
+  @if (saas.loading()) { <p role="status">Comprobando permisos de plataforma…</p> }
+  @if (!saas.identity()) { <p class="status" role="alert">Inicia sesión para consultar esta sección.</p> }
+  @else if (!saas.loading() && !saas.role()) { <p class="status" role="alert">Acceso exclusivo de operadores de plataforma. Ser administrador de empresa no concede este permiso.</p> }
+  @if (error) { <p class="status status-error" role="alert">{{ error }}</p> }
+  @if (message) { <p class="status status-success" role="status">{{ message }}</p> }
+  @if (saas.role()) {
+    <aside class="surface-card notice"><strong>Registro administrativo · {{ saas.role() }}</strong>
+      <p>Pasarela, cobro automático y envío de correo: no configurados. No se restringe el acceso a módulos por deuda. Un seguimiento de correo solo deja constancia manual.</p>
+      @if (!saas.writable()) { <p>Modo consulta: no puedes crear ni modificar registros.</p> }
+    </aside>
+    <article class="surface-card">
+      <div class="section-heading"><h2>Cartera al corte</h2><span class="chip">USD · sin conversión</span></div>
+      <form class="toolbar" (ngSubmit)="refresh()">
+        <label>Fecha de corte<input name="asOf" type="date" [(ngModel)]="asOf" required /></label>
+        <button class="btn btn-primary" type="submit" [disabled]="busy || !asOf">Consultar cartera</button>
+        <button class="btn btn-secondary" type="button" (click)="exportCsv()" [disabled]="busy || !reportDate">Exportar CSV</button>
+      </form>
+      <p>Reporte histórico al {{ reportDate || '—' }}. Los detalles y acciones de abajo muestran el estado actual, no una reconstrucción al corte.</p>
+      @if (asOf !== reportDate && reportDate) { <p role="status">Fecha modificada: pulsa Consultar cartera para aplicar el nuevo corte.</p> }
+      @if (busy) { <p role="status">Procesando solicitud…</p> }
+      @for (total of portfolio.totals; track total.currency) {
+        <h3>Totales · {{ total.currency }}</h3>
+        <div class="metrics">
+          <div><span>Saldo abierto</span><strong>{{ total.open_balance }} {{ total.currency }}</strong></div>
+          <div><span>Vencido</span><strong>{{ total.overdue_balance }} {{ total.currency }}</strong></div>
+          <div><span>Cobrado en mes al corte</span><strong>{{ total.collected_month }} {{ total.currency }}</strong></div>
+          <div><span>Clientes al día / vencidos</span><strong>{{ total.clients_current }} / {{ total.clients_overdue }}</strong></div>
+        </div>
+        <div class="table-scroll"><table class="table-list aging"><caption>Antigüedad del saldo vencido · {{ total.currency }}</caption><thead><tr><th>1–30 días</th><th>31–60 días</th><th>61–90 días</th><th>Más de 90 días</th></tr></thead><tbody><tr><td>{{ total.bucket_1_30 }}</td><td>{{ total.bucket_31_60 }}</td><td>{{ total.bucket_61_90 }}</td><td>{{ total.bucket_90_plus }}</td></tr></tbody></table></div>
+      }
+      <div class="filters">
+        <label>Buscar cliente<input [(ngModel)]="search" placeholder="Nombre o correo" type="search" /></label>
+        <label>Estado de cartera<select [(ngModel)]="status"><option value="">Todos</option><option value="al_dia">Al día</option><option value="overdue">Vencido</option><option value="no_contract">Sin contrato</option></select></label>
+        <label>Módulo contratado<select [(ngModel)]="moduleFilter"><option value="">Todos</option>@for (code of moduleCodes; track code) { <option [value]="code">{{ code }}</option> }</select></label>
+        <label>Seguimiento<select [(ngModel)]="followupFilter"><option value="">Todos</option><option value="overdue">Vencido</option><option value="scheduled">Programado</option><option value="none">Sin seguimiento</option></select></label>
+      </div>
+      <div class="table-scroll"><table class="table-list portfolio"><caption>Clientes · {{ filteredClients.length }} resultados al {{ reportDate || '—' }}</caption>
+        <thead><tr><th>Cliente</th><th>Estado</th><th>Abierto</th><th>Vencido / días</th><th>Módulos</th><th>Próximo seguimiento</th><th>Detalle actual</th></tr></thead>
+        <tbody>@for (row of filteredClients; track row.id) {
+          <tr [class.selected]="selectedId === row.id"><th scope="row">{{ row.name }}<small>{{ row.billing_email }}</small></th><td>{{ statusLabel(row.status) }}</td><td class="amount">{{ row.open_balance }} {{ row.currency }}</td><td class="amount">{{ row.overdue_balance }} {{ row.currency }}<small>{{ row.days_overdue }} días</small></td><td>{{ row.modules.join(', ') || 'Sin módulos' }}</td><td>{{ row.next_followup?.due_on?.slice(0, 10) || 'Sin seguimiento' }} @if (row.followup_overdue) { <strong>Vencido</strong> }</td><td><button class="btn btn-secondary" type="button" (click)="selectAccount(row.id)" [disabled]="busy" [attr.aria-label]="'Ver cuenta ' + row.name">Ver cuenta</button></td></tr>
+        } @empty { <tr><td colspan="7">No hay clientes para estos filtros. Un error no significa saldo cero.</td></tr> }</tbody>
+      </table></div>
+    </article>
+    <details class="surface-card"><summary>Agenda interna de cobranza</summary>
+      <p>Etapas D−3, D0, D+3 y D+7. Solo prepara tareas internas con idempotencia; no envía correos, no ejecuta cargos ni restringe acceso.</p>
+      <button class="btn btn-secondary" (click)="loadQueue()" [disabled]="busy || !asOf">Consultar agenda interna</button>
+      @if (queue; as agenda) {
+        <p>Agenda al {{ agenda.as_of }}. Los documentos se validan de nuevo al preparar.</p>
+        <div class="table-scroll"><table class="table-list followups"><caption>Candidatos de seguimiento interno</caption><thead><tr><th>Cuenta / empresa</th><th>Factura / vence</th><th>Saldo</th><th>Etapa</th><th>Preparación</th></tr></thead><tbody>@for (item of agenda.items; track item.invoice_id + item.stage) { <tr><th scope="row">{{ item.account_name }}<small>{{ item.company_name }}</small></th><td>{{ item.reference }}<small>{{ item.due_on.slice(0, 10) }}</small></td><td class="amount">{{ item.balance }} {{ item.currency }}</td><td>{{ item.stage }}</td><td>{{ item.paused ? 'Pausado' : item.already_prepared ? 'Ya preparado' : 'Pendiente' }}</td></tr> }@empty { <tr><td colspan="5">Sin candidatos para este corte.</td></tr> }</tbody></table></div>
+        @if (saas.writable()) {
+          <label class="consent"><input type="checkbox" [(ngModel)]="queueConfirmed" />Confirmo preparar únicamente tareas internas, sin envío de correos ni cobros.</label>
+          <button class="btn btn-primary" (click)="prepareQueue()" [disabled]="busy || !queueConfirmed || agenda.as_of !== asOf">Preparar seguimiento interno</button>
+        }
+      }
+    </details>
+    @if (saas.writable()) {
+      <details class="surface-card"><summary>Crear cuenta de facturación SaaS</summary>
+        <form class="form-grid" data-testid="account-form" aria-label="Crear cuenta SaaS" #accountNg="ngForm" (ngSubmit)="createAccount()">
+          <label>Nombre de cuenta<input name="accountName" [(ngModel)]="accountForm.name" required maxlength="180" /></label>
+          <label>Correo de facturación<input name="billingEmail" [(ngModel)]="accountForm.billingEmail" type="email" email required maxlength="255" /></label>
+          <button class="btn btn-primary" [disabled]="busy || accountNg.invalid || !accountForm.name.trim()">Crear cuenta</button>
+        </form>
+      </details>
+    }
+    @if (detailBusy) { <p role="status">Cargando detalle actual…</p> }
+    @if (detail; as d) {
+      <article class="surface-card" aria-label="Detalle actual de cuenta">
+        <header class="section-heading"><div><p class="eyebrow">ESTADO ACTUAL · NO AL CORTE</p><h2>{{ d.account.name }}</h2><p>{{ d.account.billing_email }}</p></div><button class="btn btn-secondary" (click)="selectAccount(selectedId)" [disabled]="busy">Actualizar detalle</button></header>
+        <h3>Contratos por empresa</h3>
+        <div class="table-scroll"><table class="table-list contracts"><caption>Precios periódicos vigentes · derechos informativos</caption>
+          <thead><tr><th>Empresa</th><th>Vigencia / renovación</th><th>Módulos y precios</th><th>Revisión / estado</th>@if (saas.writable()) { <th>Editar</th> }</tr></thead>
+          <tbody>@for (row of d.subscriptions; track row.id) {
+            <tr><th scope="row">{{ companyName(row.company_id) }}</th><td>{{ row.starts_on.slice(0, 10) }}<small>Renueva {{ row.renews_on.slice(0, 10) }}</small></td><td>@for (m of row.modules; track m.code) { <span class="module-price">{{ m.code }} · {{ m.price }} {{ row.currency }}</span> }</td><td>r{{ row.revision }} · {{ row.status }}</td>@if (saas.writable()) { <td><button class="btn btn-secondary" (click)="editContract(row)" [disabled]="busy">Revisar contrato</button></td> }</tr>
+          } @empty { <tr><td colspan="5">Sin contratos registrados.</td></tr> }</tbody>
+        </table></div>
+        @if (saas.writable()) {
+          <details class="editor" [open]="!!contract.id"><summary>Alta o revisión de contrato</summary>
+            <p>Los nuevos precios aplican a futuras facturas. No modifican instantáneas de facturas anteriores. El servidor valida la revisión y conserva el historial.</p>
+            <form class="form-grid" [attr.data-testid]="contract.id ? 'contract-change-form' : 'subscription-form'" aria-label="Contrato SaaS" #contractNg="ngForm" (ngSubmit)="saveContract()">
+              <label>Empresa del contrato<select name="companyId" [(ngModel)]="contract.companyId" required [disabled]="!!contract.id"><option value="">Selecciona empresa</option>@for (company of companies; track company.id) { <option [value]="company.id">{{ company.code }} · {{ company.name }}</option> }</select></label>
+              <label>Moneda<select name="currency" [(ngModel)]="contract.currency" disabled><option value="USD">USD</option></select></label>
+              <label>Inicio de contrato<input name="startsOn" [(ngModel)]="contract.startsOn" type="date" required [disabled]="!!contract.id" /></label>
+              <label>Próxima renovación<input name="renewsOn" [(ngModel)]="contract.renewsOn" type="date" required /></label>
+              <fieldset><legend>Módulos y precio por período (hasta 4 decimales; base obligatorio)</legend>
+                @for (m of contract.modules; track m.code) {
+                  <div class="module-editor"><label class="consent"><input [name]="'enable-' + m.code" [(ngModel)]="m.enabled" type="checkbox" [disabled]="m.code === 'base'" />{{ m.code }}</label><label>Precio {{ m.code }} (USD)<input [name]="'price-' + m.code" [(ngModel)]="m.price" inputmode="decimal" pattern="[0-9]{1,12}(\.[0-9]{1,4})?" step="0.0001" [disabled]="!m.enabled" [required]="m.enabled" /></label></div>
+                }
+              </fieldset>
+              @if (contract.id) { <p>Revisión esperada: <strong>{{ contract.expectedRevision }}</strong></p><label>Motivo de revisión<input name="contractReason" [(ngModel)]="contract.reason" minlength="10" maxlength="2000" required /></label> }
+              <div class="toolbar"><button class="btn btn-primary" [disabled]="busy || contractNg.invalid || !contractValid">{{ contract.id ? 'Guardar revisión futura' : 'Crear contrato' }}</button><button type="button" class="btn btn-secondary" (click)="contract = emptyContract()">Nuevo / descartar edición</button></div>
+            </form>
+          </details>
+        }
+      </article>
+      <article class="surface-card">
+        <h2>Facturas SaaS · instantáneas históricas</h2>
+        <div class="table-scroll"><table class="table-list invoices"><caption>Documentos administrativos actuales (no facturas operativas ni fiscales certificadas)</caption><thead><tr><th>Referencia / período</th><th>Vence / estado</th><th>Total</th><th>Cobrado</th><th>Crédito</th><th>Saldo</th><th>Conceptos / créditos</th></tr></thead><tbody>
+          @for (row of d.invoices; track row.id) { <tr><th scope="row">{{ row.reference }}<small>{{ row.period_start.slice(0, 10) }} — {{ row.period_end.slice(0, 10) }}</small></th><td>{{ row.due_on.slice(0, 10) }}<small>{{ row.payment_status || row.status }}</small></td><td class="amount">{{ row.total }} {{ row.currency }}</td><td class="amount">{{ row.paid_amount }} {{ row.currency }}</td><td class="amount">{{ row.credited_amount }} {{ row.currency }}</td><td class="amount">{{ row.balance }} {{ row.currency }}</td><td>@for (line of row.lines; track $index) { <span class="module-price">{{ line.description || line.module_code }} · {{ line.amount }} {{ row.currency }}</span> }@for (credit of row.credits || []; track credit.id) { <p>Crédito {{ credit.reference }} · {{ credit.amount }} {{ row.currency }} · {{ credit.issued_on.slice(0, 10) }}<small>{{ credit.reason }}</small></p> }</td></tr> }
+          @empty { <tr><td colspan="7">Sin facturas SaaS.</td></tr> }
+        </tbody></table></div>
+        @if (saas.writable()) {
+          <details class="editor"><summary>Emitir instantánea de factura</summary><p>El servidor copia los precios del contrato; emitir no cobra dinero.</p>
+            <form class="form-grid" data-testid="invoice-form" aria-label="Crear factura SaaS" #invoiceNg="ngForm" (ngSubmit)="createInvoice()">
+              <label>Contrato a facturar<select name="invoiceSubscription" [(ngModel)]="invoiceForm.subscriptionId" required><option value="">Selecciona contrato</option>@for (row of d.subscriptions; track row.id) { <option [value]="row.id">{{ companyName(row.company_id) }} · r{{ row.revision }}</option> }</select></label>
+              <label>Referencia de factura<input name="invoiceReference" [(ngModel)]="invoiceForm.reference" required maxlength="120" /></label>
+              <label>Inicio del período<input name="periodStart" [(ngModel)]="invoiceForm.periodStart" type="date" required /></label>
+              <label>Fin del período<input name="periodEnd" [(ngModel)]="invoiceForm.periodEnd" type="date" required /></label>
+              <label>Vencimiento de factura<input name="dueOn" [(ngModel)]="invoiceForm.dueOn" type="date" required /></label>
+              <button class="btn btn-primary" [disabled]="busy || invoiceNg.invalid || !invoiceValid">Crear factura SaaS</button>
+            </form>
+          </details>
+        }
+      </article>
+      <article class="surface-card">
+        <h2>Pagos recibidos e historial</h2>
+        <div class="table-scroll"><table class="table-list payments"><caption>Registros de dinero recibido; no es una pasarela</caption><thead><tr><th>Referencia / factura</th><th>Fecha / método</th><th>Importe</th><th>Reversado</th><th>Estado / motivo</th></tr></thead><tbody>@for (row of d.payments; track row.id) { <tr><th scope="row">{{ row.reference }}<small>{{ invoiceLabel(row.invoice_id) }}</small></th><td>{{ row.paid_on.slice(0, 10) }}<small>{{ row.method }}</small></td><td class="amount">{{ row.amount }}</td><td class="amount">{{ row.reversed_amount }}</td><td>{{ row.status }}<small>{{ row.reason }}</small></td></tr> }@empty { <tr><td colspan="5">Sin pagos registrados.</td></tr> }</tbody></table></div>
+        @if (saas.writable()) {
+          <details class="editor"><summary>Registrar pago, crédito o reversión</summary>
+            <form class="form-grid" data-testid="payment-form" aria-label="Registrar operación financiera SaaS" #moneyNg="ngForm" (ngSubmit)="recordMoney()">
+              <label>Operación financiera<select name="moneyKind" [(ngModel)]="money.kind" (ngModelChange)="money.confirmed = false"><option value="payment">Pago recibido</option><option value="credit">Crédito comercial</option><option value="reverse">Reversión de pago registrado</option></select></label>
+              @if (money.kind === 'reverse') {
+                <label>Pago a reversar<select name="paymentId" [(ngModel)]="money.paymentId" required><option value="">Selecciona pago</option>@for (row of d.payments; track row.id) { <option [value]="row.id">{{ row.reference }} · {{ row.amount }} · {{ row.status }}</option> }</select></label>
+                <p>Revierte el registro contable completo. No devuelve dinero por banco ni ejecuta reembolso.</p>
+              } @else {
+                <label>Factura de destino<select name="invoiceId" [(ngModel)]="money.invoiceId" required><option value="">Selecciona una factura</option>@for (row of d.invoices; track row.id) { <option [value]="row.id">{{ row.reference }} · saldo {{ row.balance }} {{ row.currency }}</option> }</select></label>
+                <label>Importe (hasta 4 decimales)<input name="moneyAmount" [(ngModel)]="money.amount" inputmode="decimal" pattern="[0-9]{1,12}(\.[0-9]{1,4})?" step="0.0001" required /></label>
+                <label>Fecha de operación<input name="moneyDate" [(ngModel)]="money.date" type="date" required /></label>
+                @if (money.kind === 'payment') { <label>Método de recepción<select name="moneyMethod" [(ngModel)]="money.method"><option value="transfer">Transferencia</option><option value="cash">Efectivo</option><option value="other">Otro</option></select></label> }
+              }
+              <label>Referencia única de operación<input name="moneyReference" [(ngModel)]="money.reference" required maxlength="120" /></label>
+              <label>Motivo de operación<input name="moneyReason" [(ngModel)]="money.reason" required minlength="10" maxlength="2000" /></label>
+              <label class="consent"><input name="moneyConfirmed" [(ngModel)]="money.confirmed" type="checkbox" required />
+                {{ money.kind === 'payment' ? 'Confirmo que el dinero fue realmente recibido para esta única factura.' : money.kind === 'credit' ? 'Confirmo el crédito comercial indicado. No implica devolución de dinero.' : 'Confirmo la reversión del registro seleccionado y su motivo. No implica reembolso bancario.' }}
+              </label>
+              <button class="btn btn-primary" [disabled]="busy || moneyNg.invalid || !moneyValid">Confirmar registro financiero</button>
+            </form>
+          </details>
+        }
+      </article>
+      <article class="surface-card">
+        <h2>Seguimiento manual de cobranza</h2><p>Correo es una anotación de gestión manual: esta pantalla no envía mensajes ni cobra promesas.</p>
+        <div class="table-scroll"><table class="table-list followups"><caption>Gestiones y promesas actuales</caption><thead><tr><th>Tipo / nota</th><th>Fecha límite / promesa</th><th>Responsable</th><th>Estado / revisión</th>@if (saas.writable()) { <th>Actualizar</th> }</tr></thead><tbody>@for (row of d.followups; track row.id) { <tr><th scope="row">{{ row.kind }}<small>{{ row.note }}</small></th><td>{{ row.due_on.slice(0, 10) }}<small>Promesa: {{ row.promised_on?.slice(0, 10) || '—' }}</small></td><td>{{ row.owner_name || 'Sin asignar' }}</td><td>{{ statusLabel(row.status) }} · r{{ row.revision }}</td>@if (saas.writable()) { <td><button class="btn btn-secondary" (click)="editFollowup(row)" [disabled]="busy">Actualizar gestión</button></td> }</tr> }@empty { <tr><td colspan="5">Sin gestiones registradas.</td></tr> }</tbody></table></div>
+        @if (saas.writable()) {
+          <div class="panel-grid">
+            <details class="editor"><summary>Crear seguimiento</summary>
+              <form class="form-grid" data-testid="followup-form" aria-label="Crear seguimiento manual" #followNg="ngForm" (ngSubmit)="createFollowup()">
+                <label>Tipo de gestión<select name="followKind" [(ngModel)]="followup.kind"><option value="call">Llamada</option><option value="email">Correo (registro manual)</option><option value="note">Nota</option><option value="promise">Promesa de pago</option></select></label>
+                <label>Nota de seguimiento<input name="followNote" [(ngModel)]="followup.note" required maxlength="2000" /></label>
+                <label>Fecha límite de gestión<input name="followDue" [(ngModel)]="followup.dueOn" type="date" required /></label>
+                <label>Fecha prometida<input name="promiseDate" [(ngModel)]="followup.promisedOn" type="date" [required]="followup.kind === 'promise'" /></label>
+                <label>Responsable de gestión<select name="followOwner" [(ngModel)]="followup.ownerId"><option value="">Sin asignar</option>@for (row of operators; track row.user_id) { <option [value]="row.user_id">{{ row.full_name }} · {{ row.role }}</option> }</select></label>
+                <button class="btn btn-primary" [disabled]="busy || followNg.invalid || !followup.note.trim()">Crear seguimiento</button>
+              </form>
+            </details>
+            @if (followupEdit.id) {
+              <form class="form-grid editor" #editFollowNg="ngForm" (ngSubmit)="saveFollowup()"><h3>Actualizar gestión · r{{ followupEdit.expectedRevision }}</h3>
+                <label>Nuevo estado de gestión<select name="followStatus" [(ngModel)]="followupEdit.status"><option value="open">Abierto</option><option value="done">Hecho</option><option value="paused">Pausado</option></select></label>
+                <label>Nota de actualización<input name="followEditNote" [(ngModel)]="followupEdit.note" required maxlength="2000" /></label>
+                <button class="btn btn-primary" [disabled]="busy || editFollowNg.invalid || !followupEdit.note.trim()">Guardar estado de gestión</button>
+              </form>
+            }
+          </div>
+        }
+      </article>
+      <div class="panel-grid">
+        <article class="surface-card"><h2>Usuarios vinculados</h2>
+          <div class="table-scroll"><table class="table-list users"><caption>Identidades de las empresas contratadas</caption><thead><tr><th>Nombre</th><th>Correo</th><th>Estado</th></tr></thead><tbody>@for (row of d.users; track $index) { <tr><th scope="row">{{ row.full_name }}</th><td>{{ row.email }}</td><td>{{ row.is_active === false ? 'Inactivo' : row.is_active === true ? 'Activo' : 'Consultar empresa' }}</td></tr> }@empty { <tr><td colspan="3">Sin usuarios vinculados.</td></tr> }</tbody></table></div>
+        </article>
+        <article class="surface-card"><h2>Auditoría administrativa</h2>
+          <ol class="audit">@for (row of d.audit; track row.id) { <li><strong>{{ row.action }}</strong><small>{{ row.occurred_at | date:'yyyy-MM-dd HH:mm':'UTC' }} UTC · {{ row.actor_name || row.actor_user_id || 'Sistema' }}</small><span>{{ row.entity_type || 'Registro' }} · {{ row.entity_id || '—' }}</span>@if (row.reason) { <p>{{ row.reason }}</p> }</li> }@empty { <li>Sin eventos de auditoría.</li> }</ol>
+        </article>
+      </div>
+    }
+  }
+</section>

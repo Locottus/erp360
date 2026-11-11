@@ -1,12 +1,15 @@
 {
   "base": "http://127.0.0.1:4201",
-  "capturedAt": "2026-11-11T00:35:58.023Z",
+  "companyCode": "GUIA-20261110221129",
+  "capturedAt": "2026-11-11T04:11:30.690Z",
   "flows": [
     "Login with Enter, session-only token, real dashboard week series and data table",
+    "Browser writes: two partial receipts (2+3), full purchase accrual, supplier return/credit, deferred sales stock return; stock 104 and supplier credit 300 verified",
+    "Browser writes: received supplier refund 100 reduces outstanding credit from 300 to 200; approved leave cancelled at revision 2 with original decision preserved",
     "Store load, quantity 2, add/remove, checkout, inventory reserved increased by exactly 2",
     "Explicit marketing consent, server-side subscriber registration",
     "Portal real documents, password-masked input, no token persistence, clear, revoke and rejected reuse; sanitized help",
-    "24 route/viewport checks, mobile keyboard menu, dark persistence, logout"
+    "52 route/viewport checks, mobile keyboard menu, dark persistence, logout"
   ],
   "responsive": [
     {
@@ -40,6 +43,41 @@
       "scroll": 320
     },
     {
+      "route": "/users",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/catalogs",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/controls",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/people",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/invoicing",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/ecommerce/admin",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/receiving",
+      "width": 320,
+      "scroll": 320
+    },
+    {
       "route": "/",
       "width": 390,
       "scroll": 390
@@ -70,6 +108,41 @@
       "scroll": 390
     },
     {
+      "route": "/users",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/catalogs",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/controls",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/people",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/invoicing",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/ecommerce/admin",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/receiving",
+      "width": 390,
+      "scroll": 390
+    },
+    {
       "route": "/",
       "width": 768,
       "scroll": 768
@@ -100,6 +173,41 @@
       "scroll": 768
     },
     {
+      "route": "/users",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/catalogs",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/controls",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/people",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/invoicing",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/ecommerce/admin",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/receiving",
+      "width": 768,
+      "scroll": 768
+    },
+    {
       "route": "/",
       "width": 1440,
       "scroll": 1440
@@ -126,6 +234,41 @@
     },
     {
       "route": "/processes",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/users",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/catalogs",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/controls",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/people",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/invoicing",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/ecommerce/admin",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/receiving",
       "width": 1440,
       "scroll": 1440
     }

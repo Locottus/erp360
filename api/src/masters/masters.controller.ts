@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Patch, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -14,6 +14,20 @@ import { MastersService } from './masters.service';
 @UseGuards(AuthGuard)
 export class MastersController {
   constructor(private readonly mastersService: MastersService) {}
+
+  @Patch(':kind/:id')
+  @Roles('admin')
+  update(@Req() request: AuthenticatedRequest, @Param('kind') kind: string,
+    @Param('id', ParseUUIDPipe) id: string, @Body() input: unknown) {
+    return this.mastersService.updateRecord(request.user, kind, id, input);
+  }
+
+  @Post(':kind/import')
+  @Roles('admin')
+  import(@Req() request: AuthenticatedRequest, @Param('kind') kind: string,
+    @Body() body: { records: unknown }) {
+    return this.mastersService.importRecords(request.user, kind, body.records);
+  }
 
   @Get('customers')
   listCustomers(@Req() request: AuthenticatedRequest) {

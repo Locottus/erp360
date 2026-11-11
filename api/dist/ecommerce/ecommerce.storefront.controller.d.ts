@@ -3,6 +3,11 @@ import { EcommerceService } from './ecommerce.service';
 export declare class EcommerceStorefrontController {
     private readonly ecommerceService;
     constructor(ecommerceService: EcommerceService);
+    unsubscribe(companyCode: string, input: {
+        token: string;
+    }): Promise<{
+        status: string;
+    }>;
     getStorefrontBySlug(storeSlug: string, query?: string, categoryCode?: string): Promise<{
         store: import("pg").QueryResultRow;
         categories: import("pg").QueryResultRow[];
@@ -21,6 +26,7 @@ export declare class EcommerceStorefrontController {
     subscribe(companyCode: string, body: SubscribeInput): Promise<{
         id: string;
         status: string;
+        unsubscribeToken: string;
     }>;
     getCart(companyCode: string, cartId: string, cartToken?: string): Promise<{
         cart: {
@@ -60,11 +66,21 @@ export declare class EcommerceStorefrontController {
     }>;
     checkoutCart(companyCode: string, cartId: string, cartToken: string | undefined, body: CheckoutCartInput): Promise<{
         cartId: string;
+        orderId: string;
+        orderNumber: string;
+        checkoutNumber: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+        replayed: boolean;
+    } | {
+        cartId: string;
         checkoutNumber: string;
         orderId: string;
         orderNumber: string;
         subtotal: number;
         taxTotal: number;
         grandTotal: number;
+        replayed?: undefined;
     }>;
 }

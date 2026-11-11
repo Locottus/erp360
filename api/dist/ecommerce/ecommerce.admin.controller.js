@@ -22,6 +22,10 @@ let EcommerceAdminController = class EcommerceAdminController {
     constructor(ecommerceService) {
         this.ecommerceService = ecommerceService;
     }
+    fulfillments(request) { return this.ecommerceService.listFulfillments(request.user); }
+    fulfillment(request, id, input) {
+        return this.ecommerceService.updateFulfillment(request.user, id, input);
+    }
     getSettings(request) {
         return this.ecommerceService.getAdminSettings(request.user);
     }
@@ -51,6 +55,22 @@ let EcommerceAdminController = class EcommerceAdminController {
     }
 };
 exports.EcommerceAdminController = EcommerceAdminController;
+__decorate([
+    (0, common_1.Get)('fulfillments'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], EcommerceAdminController.prototype, "fulfillments", null);
+__decorate([
+    (0, common_1.Patch)('fulfillments/:id'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], EcommerceAdminController.prototype, "fulfillment", null);
 __decorate([
     (0, common_1.Get)('settings'),
     __param(0, (0, common_1.Req)()),

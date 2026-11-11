@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -9,6 +9,20 @@ import { HrService } from './hr.service';
 @UseGuards(AuthGuard)
 export class HrController {
   constructor(private readonly hrService: HrService) {}
+
+  @Patch('employees/:id')
+  @Roles('admin')
+  updateEmployee(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<HrService['updateEmployee']>[2]) {
+    return this.hrService.updateEmployee(request.user, id, input);
+  }
+
+  @Patch('attendance/:id')
+  @Roles('admin')
+  correctAttendance(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<HrService['correctAttendance']>[2]) {
+    return this.hrService.correctAttendance(request.user, id, input);
+  }
 
   @Post('employees')
   @Roles('admin')
@@ -67,5 +81,12 @@ export class HrController {
   @Get('leave-requests')
   listLeaveRequests(@Req() request: AuthenticatedRequest) {
     return this.hrService.listLeaveRequests(request.user);
+  }
+
+  @Post('leave-requests/:id/cancel')
+  @Roles('admin')
+  cancelLeaveRequest(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<HrService['cancelLeaveRequest']>[2]) {
+    return this.hrService.cancelLeaveRequest(request.user, id, input);
   }
 }

@@ -5,5 +5,5 @@ export declare class AuthGuard implements CanActivate {
     private readonly authService;
     private readonly reflector;
     constructor(authService: AuthService, reflector: Reflector);
-    canActivate(context: ExecutionContext): boolean;
+    canActivate(context: ExecutionContext): Promise<boolean>;
 }

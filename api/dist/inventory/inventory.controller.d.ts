@@ -4,6 +4,30 @@ import { InventoryService } from './inventory.service';
 export declare class InventoryController {
     private readonly inventoryService;
     constructor(inventoryService: InventoryService);
+    receiptDetails(request: AuthenticatedRequest, id: string): Promise<{
+        order: import("pg").QueryResultRow;
+        lines: import("pg").QueryResultRow[];
+        receipts: import("pg").QueryResultRow[];
+        legacyReceipts: import("pg").QueryResultRow[];
+        returns: import("pg").QueryResultRow[];
+    }>;
+    partialReceipt(request: AuthenticatedRequest, id: string, input: Parameters<InventoryService['receivePartialPurchase']>[2]): Promise<{
+        receiptId: string;
+        replayed: boolean;
+        status?: undefined;
+    } | {
+        receiptId: string;
+        status: string;
+        replayed: boolean;
+    }>;
+    transfer(request: AuthenticatedRequest, input: Parameters<InventoryService['moveOrCount']>[2]): Promise<{
+        id: string;
+        replayed: boolean;
+    }>;
+    count(request: AuthenticatedRequest, input: Parameters<InventoryService['moveOrCount']>[2]): Promise<{
+        id: string;
+        replayed: boolean;
+    }>;
     applyPurchaseReceipt(request: AuthenticatedRequest, purchaseOrderId: string, body: {
         locationCode?: string;
     }): Promise<{

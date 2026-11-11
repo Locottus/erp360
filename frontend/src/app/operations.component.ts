@@ -59,6 +59,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
         </nav>
 
         @if (activeTab === 'masters') {
+          <a class="btn btn-secondary" routerLink="/catalogs">Editar, desactivar, importar o exportar catálogos</a>
           <div class="panel-grid">
             <article class="surface-card"><h2>Clientes</h2>
               <form class="form-grid" #customerForm="ngForm" (ngSubmit)="createMaster('customers', customer)">
@@ -161,12 +162,12 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               <tbody>@for (item of purchaseRequests; track item.id) { <tr><th scope="row">{{ item.request_number }}<br><small>{{ item.supplier_name }}</small></th><td>{{ item.grand_total | number:'1.2-4' }}</td><td>{{ item.status }}</td>
                 <td>{{ item.purchase_order_number || '—' }}<br><small>{{ item.purchase_order_status || '' }}</small></td>
                 <td>@if (!item.purchase_order_id) { <div class="inline-action"><input [name]="'po-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número de orden de compra" placeholder="Orden de compra" /><button class="btn btn-secondary" type="button" (click)="approvePurchase(item)" [disabled]="busy || !orderNumbers[item.id]">Aprobar</button></div> }
-                  @else if (item.purchase_order_status === 'ordered') { <div class="inline-action"><input [name]="'receipt-' + item.id" [(ngModel)]="receiptNumbers[item.id]" aria-label="Número de recepción" placeholder="Recepción" /><button class="btn btn-secondary" type="button" (click)="receivePurchase(item)" [disabled]="busy || !receiptNumbers[item.id]">Recibir</button></div> }
+                  @else if (item.purchase_order_status === 'ordered' || item.purchase_order_status === 'partially_received') { <a class="btn btn-secondary" routerLink="/receiving">Recibir por cantidades</a> }
                   @else if (item.purchase_order_status === 'received' && !item.inventory_received) { <div class="inline-action"><input [name]="'location-' + item.id" [(ngModel)]="locations[item.id]" aria-label="Ubicación de recepción" placeholder="MAIN" /><button class="btn btn-secondary" type="button" (click)="applyReceipt(item)" [disabled]="busy">Aplicar a inventario</button></div> }
                   @else if (item.purchase_order_status === 'received' && !item.is_posted) { <button class="btn btn-secondary" type="button" (click)="postPurchase(item)" [disabled]="busy">Contabilizar</button> }
                   @else { <span>Proceso completado</span> }</td></tr> }</tbody>
             </table></div> } @else { <p class="muted">Sin solicitudes de compra.</p> }
-            <p class="muted">La recepción comercial, el ingreso físico y el devengo contable son pasos separados; usa el número de documento de cada paso.</p>
+            <p class="muted">Las recepciones nuevas por cantidades ingresan inventario en un solo paso. Contabiliza al completar la compra. Solo los documentos históricos conservan la aplicación física separada.</p>
           </article>
         }
 
@@ -249,6 +250,8 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
 
         @if (activeTab === 'overview') {
           <div class="panel-grid module-shortcuts">
+            <a class="surface-card" routerLink="/users"><i class="bi bi-people" aria-hidden="true"></i><h2>Usuarios y permisos</h2><p>Invitaciones, cuentas, recuperación y revocación.</p></a>
+            <a class="surface-card" routerLink="/catalogs"><i class="bi bi-collection" aria-hidden="true"></i><h2>Catálogos</h2><p>Edición, desactivación e intercambio de datos.</p></a>
             <a class="surface-card" routerLink="/inventory"><i class="bi bi-box-seam" aria-hidden="true"></i><h2>Inventario</h2><p>Saldos, kardex, reservas y despacho.</p></a>
             <a class="surface-card" routerLink="/invoicing"><i class="bi bi-receipt" aria-hidden="true"></i><h2>Facturación</h2><p>Emisión comercial, contabilización y pagos.</p></a>
             <a class="surface-card" routerLink="/ecommerce/admin"><i class="bi bi-shop-window" aria-hidden="true"></i><h2>Diseñador eCommerce</h2><p>Marca, portada, catálogo y audiencia.</p></a>

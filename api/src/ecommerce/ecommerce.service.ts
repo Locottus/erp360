@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { DatabaseService } from '../common/database.service';
+import { nextDocumentNumber } from '../common/document-sequence';
 import type {
   AddCartItemInput,
   AuthUser,
@@ -16,6 +17,68 @@ type DbClient = Awaited<ReturnType<DatabaseService['connect']>>;
 @Injectable()
 export class EcommerceService {
   constructor(private readonly db: DatabaseService) {}
+
+  async listFulfillments(user: AuthUser) {
+    return (await this.db.query(
+      `SELECT f.id,f.sales_order_id,so.order_number,c.name AS customer_name,f.delivery_method,f.address,f.phone,
+              CASE WHEN so.status='cancelled' THEN 'cancelled' ELSE f.status END AS status,
+              f.courier,f.tracking_code,f.updated_at
+       FROM ecommerce_fulfillments f JOIN sales_orders so ON so.id=f.sales_order_id AND so.company_id=f.company_id
+       JOIN customers c ON c.id=so.customer_id AND c.company_id=so.company_id
+       WHERE f.company_id=$1 ORDER BY f.updated_at DESC LIMIT 500`, [user.companyId],
+    )).rows;
+  }
+
+  async updateFulfillment(user: AuthUser, id: string, input: { status: string; expectedStatus: string; courier?: string; trackingCode?: string }) {
+    if (!['preparing', 'ready', 'shipped', 'delivered'].includes(input.status) || typeof input.expectedStatus !== 'string' ||
+        [input.courier, input.trackingCode].some(value => value !== undefined && (typeof value !== 'string' || value.length > 120))) {
+      throw new BadRequestException('Invalid fulfillment status or tracking details.');
+    }
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const source = await client.query<{ sales_order_id: string }>('SELECT sales_order_id FROM ecommerce_fulfillments WHERE id=$1 AND company_id=$2', [id, user.companyId]);
+      if (!source.rows[0]) throw new NotFoundException('Fulfillment not found.');
+      const order = await client.query<{ status: string }>('SELECT status FROM sales_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [source.rows[0].sales_order_id, user.companyId]);
+      if (order.rows[0].status === 'cancelled') throw new BadRequestException('Order is cancelled.');
+      const row = await client.query<{ status: string; delivery_method: string }>('SELECT status,delivery_method FROM ecommerce_fulfillments WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+      if (row.rows[0].status !== input.expectedStatus) throw new ConflictException('Fulfillment changed. Refresh first.');
+      const path = row.rows[0].delivery_method === 'delivery' ? ['requested', 'preparing', 'shipped', 'delivered'] : ['requested', 'preparing', 'ready', 'delivered'];
+      if (path[path.indexOf(row.rows[0].status) + 1] !== input.status) throw new BadRequestException('Invalid fulfillment transition.');
+      if (input.status === 'shipped' || input.status === 'delivered') {
+        const dispatch = await client.query(
+          `SELECT id FROM inventory_reservations WHERE company_id=$1 AND sales_order_id=$2 AND status='fulfilled'`,
+          [user.companyId, source.rows[0].sales_order_id],
+        );
+        if (!dispatch.rows.length) throw new BadRequestException('Confirm physical dispatch in inventory first.');
+      }
+      if (input.status === 'shipped' && (!input.courier?.trim() || !input.trackingCode?.trim())) throw new BadRequestException('Courier and tracking code are required for shipment.');
+      await client.query(
+        `UPDATE ecommerce_fulfillments SET status=$1,courier=COALESCE($2,courier),tracking_code=COALESCE($3,tracking_code),updated_at=NOW()
+         WHERE id=$4 AND company_id=$5`,
+        [input.status, input.courier?.trim() || null, input.trackingCode?.trim() || null, id, user.companyId],
+      );
+      await this.insertAuditTx(client, user.companyId, user.sub, 'ecommerce.fulfillment.update', id, { from: input.expectedStatus, to: input.status });
+      await client.query('COMMIT');
+      return { id, status: input.status };
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
+
+  async publicUnsubscribe(companyCode: string, token: string) {
+    if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new BadRequestException('A valid private unsubscribe key is required.');
+    const company = await this.resolveCompanyByCode(companyCode);
+    const result = await this.db.query<{ id: string }>(
+      `UPDATE ecommerce_subscribers SET status='unsubscribed',unsubscribed_at=COALESCE(unsubscribed_at,NOW()),updated_at=NOW()
+       WHERE company_id=$1 AND unsubscribe_token_hash=$2 RETURNING id`, [company.id, this.hashSecret(token)],
+    );
+    if (!result.rows[0]) throw new NotFoundException('Unsubscribe key not found.');
+    await this.db.query(
+      `INSERT INTO audit_log(company_id,event_name,entity_name,entity_id) VALUES($1,$2,'ecommerce',$3)`,
+      [company.id, 'ecommerce.subscription.self_unsubscribe', result.rows[0].id],
+    );
+    return { status: 'unsubscribed' };
+  }
 
   async getAdminSettings(user: AuthUser) {
     const result = await this.db.query(
@@ -36,8 +99,12 @@ export class EcommerceService {
       throw new BadRequestException('storeSlug must contain lowercase letters, numbers and internal hyphens.');
     }
     const currencyCode = (input.currencyCode ?? 'USD').trim().toUpperCase();
-    if (currencyCode.length < 3 || currencyCode.length > 8) {
+    if (!/^[A-Z]{3}$/.test(currencyCode)) {
       throw new BadRequestException('currencyCode must be a valid code.');
+    }
+    const companyCurrency = await this.db.query<{ currency_code: string }>('SELECT currency_code FROM companies WHERE id=$1', [user.companyId]);
+    if (companyCurrency.rows[0]?.currency_code !== currencyCode) {
+      throw new BadRequestException('Store currency must match the company accounting currency. Currency conversion is not configured.');
     }
     if (input.supportEmail?.trim() && !this.isValidEmail(input.supportEmail.trim())) {
       throw new BadRequestException('supportEmail must be a valid email address.');
@@ -306,6 +373,7 @@ export class EcommerceService {
        LEFT JOIN (
          SELECT company_id, product_id, SUM(on_hand - reserved) AS available
          FROM inventory_stock_balances
+         WHERE location_code='MAIN'
          GROUP BY company_id, product_id
        ) stock ON stock.company_id = l.company_id AND stock.product_id = l.product_id
        ${filters}
@@ -403,7 +471,9 @@ export class EcommerceService {
   }
 
   async addCartItem(companyCode: string, cartId: string, cartToken: string, input: AddCartItemInput) {
-    if (!input.listingId?.trim() || input.quantity <= 0) {
+    if (typeof input.listingId !== 'string' || !input.listingId.trim() ||
+        typeof input.quantity !== 'number' || !Number.isFinite(input.quantity) || input.quantity <= 0 ||
+        Math.round(input.quantity * 10000) / 10000 !== input.quantity) {
       throw new BadRequestException('listingId and quantity > 0 are required.');
     }
     const { companyId, cart } = await this.assertCartAccess(companyCode, cartId, cartToken);
@@ -411,7 +481,12 @@ export class EcommerceService {
       throw new BadRequestException('Cart is not open.');
     }
 
-    const listing = await this.db.query<{
+    const client = await this.db.connect();
+    try {
+    await client.query('BEGIN');
+    const locked = await client.query<{ status: string }>('SELECT status FROM ecommerce_carts WHERE id=$1 AND company_id=$2 FOR UPDATE', [cart.id, companyId]);
+    if (locked.rows[0]?.status !== 'open') throw new BadRequestException('Cart is not open.');
+    const listing = await client.query<{
       id: string;
       product_id: string;
       unit_price: string;
@@ -429,14 +504,14 @@ export class EcommerceService {
       throw new NotFoundException('Listing not available.');
     }
     const quantity = Number(input.quantity);
-    const available = await this.getAvailableStock(companyId, listing.rows[0].product_id);
+    const available = await this.getAvailableStockTx(client, companyId, listing.rows[0].product_id);
     if (available < quantity) {
       throw new BadRequestException('Insufficient stock for this product.');
     }
 
     const unitPrice = Number(listing.rows[0].unit_price);
     const lineTotal = Number((unitPrice * quantity).toFixed(4));
-    await this.db.query(
+    await client.query(
       `INSERT INTO ecommerce_cart_items (cart_id, listing_id, product_id, quantity, unit_price, line_total, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,NOW())
        ON CONFLICT (cart_id, listing_id)
@@ -447,7 +522,12 @@ export class EcommerceService {
          updated_at = NOW()`,
       [cart.id, listing.rows[0].id, listing.rows[0].product_id, quantity, unitPrice, lineTotal],
     );
-    await this.recalculateCartTotals(companyId, cart.id);
+    const totals = await this.computeCartTotalsWithTax(client, companyId, cart.id);
+    await client.query('UPDATE ecommerce_carts SET subtotal=$1,tax_total=$2,grand_total=$3,updated_at=NOW() WHERE id=$4',
+      [totals.subtotal, totals.taxTotal, totals.grandTotal, cart.id]);
+    await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
     return this.getCart(companyCode, cartId, cartToken);
   }
 
@@ -456,23 +536,58 @@ export class EcommerceService {
     if (cart.status !== 'open') {
       throw new BadRequestException('Cart is not open.');
     }
-    await this.db.query(`DELETE FROM ecommerce_cart_items WHERE id = $1 AND cart_id = $2`, [itemId, cart.id]);
-    await this.recalculateCartTotals(companyId, cart.id);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query<{ status: string }>('SELECT status FROM ecommerce_carts WHERE id=$1 AND company_id=$2 FOR UPDATE', [cart.id, companyId]);
+      if (locked.rows[0]?.status !== 'open') throw new BadRequestException('Cart is not open.');
+      await client.query(`DELETE FROM ecommerce_cart_items WHERE id = $1 AND cart_id = $2`, [itemId, cart.id]);
+      const totals = await this.computeCartTotalsWithTax(client, companyId, cart.id);
+      await client.query('UPDATE ecommerce_carts SET subtotal=$1,tax_total=$2,grand_total=$3,updated_at=NOW() WHERE id=$4',
+        [totals.subtotal, totals.taxTotal, totals.grandTotal, cart.id]);
+      await client.query('COMMIT');
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
     return this.getCart(companyCode, cartId, cartToken);
   }
 
   async checkoutCart(companyCode: string, cartId: string, cartToken: string, input: CheckoutCartInput) {
-    if (!input.customerName?.trim() || !input.customerEmail?.trim()) {
+    if (typeof input.customerName !== 'string' || !input.customerName.trim() || input.customerName.length > 200 ||
+        typeof input.customerEmail !== 'string' || !this.isValidEmail(input.customerEmail.trim()) ||
+        (input.notes !== undefined && (typeof input.notes !== 'string' || input.notes.length > 1000))) {
       throw new BadRequestException('customerName and customerEmail are required.');
     }
-    const { companyId, cart } = await this.assertCartAccess(companyCode, cartId, cartToken);
-    if (cart.status !== 'open') {
-      throw new BadRequestException('Cart is not open.');
+    const method = input.deliveryMethod ?? 'pickup';
+    if (!['pickup', 'delivery'].includes(method) ||
+        (input.deliveryAddress !== undefined && (typeof input.deliveryAddress !== 'string' || input.deliveryAddress.length > 1000)) ||
+        (input.phone !== undefined && (typeof input.phone !== 'string' || input.phone.length > 40)) ||
+        (method === 'delivery' && (!input.deliveryAddress?.trim() || !input.phone?.trim()))) {
+      throw new BadRequestException('Delivery requires address and phone (maximum 1000 / 40 characters).');
     }
-
+    const { companyId, cart } = await this.assertCartAccess(companyCode, cartId, cartToken);
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      const locked = await client.query<{ status: string; currency_code: string }>(
+        'SELECT status,currency_code FROM ecommerce_carts WHERE id=$1 AND company_id=$2 FOR UPDATE', [cart.id, companyId],
+      );
+      if (locked.rows[0]?.status === 'checked_out') {
+        const prior = await client.query<{ sales_order_id: string; checkout_number: string; order_number: string; subtotal: string; tax_total: string; grand_total: string }>(
+          `SELECT ec.sales_order_id,ec.checkout_number,so.order_number,c.subtotal,c.tax_total,c.grand_total FROM ecommerce_checkouts ec
+           JOIN ecommerce_carts c ON c.id=ec.cart_id JOIN sales_orders so ON so.id=ec.sales_order_id AND so.company_id=ec.company_id
+           WHERE ec.company_id=$1 AND ec.cart_id=$2`, [companyId, cart.id],
+        );
+        if (!prior.rows[0]) throw new ConflictException('Checkout requires reconciliation.');
+        await client.query('COMMIT');
+        return { cartId: cart.id, orderId: prior.rows[0].sales_order_id, orderNumber: prior.rows[0].order_number, checkoutNumber: prior.rows[0].checkout_number,
+          subtotal: Number(prior.rows[0].subtotal), taxTotal: Number(prior.rows[0].tax_total), grandTotal: Number(prior.rows[0].grand_total), replayed: true };
+      }
+      if (locked.rows[0]?.status !== 'open') throw new BadRequestException('Cart is not open.');
+      const currency = await client.query<{ currency_code: string }>(
+        `SELECT c.currency_code FROM companies c JOIN ecommerce_storefront_settings s ON s.company_id=c.id
+         WHERE c.id=$1 AND s.is_active=TRUE AND c.currency_code=s.currency_code`, [companyId],
+      );
+      if (currency.rows[0]?.currency_code !== locked.rows[0].currency_code) throw new ConflictException('Store currency changed. Create a new cart.');
       const cartItems = await client.query<{
         listing_id: string;
         product_id: string;
@@ -482,7 +597,7 @@ export class EcommerceService {
       }>(
         `SELECT listing_id, product_id, quantity, unit_price, line_total
          FROM ecommerce_cart_items
-         WHERE cart_id = $1`,
+         WHERE cart_id = $1 ORDER BY product_id`,
         [cart.id],
       );
       if (cartItems.rows.length === 0) {
@@ -490,6 +605,14 @@ export class EcommerceService {
       }
 
       for (const item of cartItems.rows) {
+        const current = await client.query<{ unit_price: string }>(
+          `SELECT l.unit_price FROM ecommerce_product_listings l JOIN products p ON p.id=l.product_id AND p.company_id=l.company_id
+           WHERE l.id=$1 AND l.company_id=$2 AND l.is_published=TRUE AND p.is_active=TRUE FOR SHARE OF l,p`,
+          [item.listing_id, companyId],
+        );
+        if (!current.rows[0] || Number(current.rows[0].unit_price) !== Number(item.unit_price)) {
+          throw new ConflictException('A product or price changed. Review the catalog and update your cart before confirming.');
+        }
         const available = await this.getAvailableStockTx(client, companyId, item.product_id);
         if (available < Number(item.quantity)) {
           throw new BadRequestException(`Insufficient stock for product ${item.product_id}.`);
@@ -498,16 +621,16 @@ export class EcommerceService {
 
       const customerId = await this.resolveOrCreateCustomer(client, companyId, input);
       const { subtotal, taxTotal, grandTotal } = await this.computeCartTotalsWithTax(client, companyId, cart.id);
-      const quoteNumber = await this.nextSequence(client, companyId, 'WEBQ', 'sales_quotations', 'quotation_number');
-      const orderNumber = await this.nextSequence(client, companyId, 'WEBO', 'sales_orders', 'order_number');
-      const checkoutNumber = await this.nextSequence(client, companyId, 'CHKO', 'ecommerce_checkouts', 'checkout_number');
+      const quoteNumber = await nextDocumentNumber(client, companyId, 'WEBQ');
+      const orderNumber = await nextDocumentNumber(client, companyId, 'WEBO');
+      const checkoutNumber = await nextDocumentNumber(client, companyId, 'CHKO');
 
       const quotation = await client.query<{ id: string }>(
         `INSERT INTO sales_quotations
-          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by)
-         VALUES ($1,$2,$3,'approved',$4,$5,$6,$7,NULL)
+          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by, currency_code)
+         VALUES ($1,$2,$3,'approved',$4,$5,$6,$7,NULL,(SELECT currency_code FROM ecommerce_carts WHERE id=$8))
          RETURNING id`,
-        [companyId, customerId, quoteNumber, subtotal, taxTotal, grandTotal, input.notes ?? 'Checkout eCommerce'],
+        [companyId, customerId, quoteNumber, subtotal, taxTotal, grandTotal, input.notes ?? 'Checkout eCommerce', cart.id],
       );
       for (const item of cartItems.rows) {
         await client.query(
@@ -519,10 +642,10 @@ export class EcommerceService {
 
       const order = await client.query<{ id: string }>(
         `INSERT INTO sales_orders
-          (company_id, customer_id, quotation_id, order_number, status, subtotal, tax_total, grand_total, created_by)
-         VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,NULL)
+          (company_id, customer_id, quotation_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
+         VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,NULL,(SELECT currency_code FROM ecommerce_carts WHERE id=$8))
          RETURNING id`,
-        [companyId, customerId, quotation.rows[0].id, orderNumber, subtotal, taxTotal, grandTotal],
+        [companyId, customerId, quotation.rows[0].id, orderNumber, subtotal, taxTotal, grandTotal, cart.id],
       );
       for (const item of cartItems.rows) {
         await client.query(
@@ -533,6 +656,10 @@ export class EcommerceService {
       }
 
       await this.reserveSalesOrderStockTx(client, companyId, order.rows[0].id, 'MAIN');
+      await client.query(
+        `INSERT INTO ecommerce_fulfillments(company_id,sales_order_id,delivery_method,address,phone) VALUES($1,$2,$3,$4,$5)`,
+        [companyId, order.rows[0].id, method, method === 'delivery' ? input.deliveryAddress!.trim() : null, input.phone?.trim() || null],
+      );
 
       await client.query(
         `INSERT INTO ecommerce_checkouts
@@ -577,11 +704,13 @@ export class EcommerceService {
   }
 
   async subscribe(companyCode: string, input: SubscribeInput) {
-    const email = input.email?.trim().toLowerCase();
-    if (!email || !this.isValidEmail(email)) {
+    const email = typeof input.email === 'string' ? input.email.trim().toLowerCase() : '';
+    if (!email || email.length > 255 || !this.isValidEmail(email) ||
+        (input.fullName !== undefined && (typeof input.fullName !== 'string' || input.fullName.length > 200)) ||
+        (input.consentVersion !== undefined && (typeof input.consentVersion !== 'string' || !input.consentVersion.trim() || input.consentVersion.length > 32))) {
       throw new BadRequestException('A valid email is required.');
     }
-    if (!input.acceptsMarketing) {
+    if (input.acceptsMarketing !== true) {
       throw new BadRequestException('acceptsMarketing must be true to subscribe.');
     }
     const company = await this.resolveCompanyByCode(companyCode);
@@ -592,10 +721,11 @@ export class EcommerceService {
        LIMIT 1`,
       [company.id, email],
     );
+    const unsubscribeToken = randomBytes(32).toString('hex');
     const result = await this.db.query<{ id: string; status: string }>(
       `INSERT INTO ecommerce_subscribers
-        (company_id, customer_id, email, full_name, status, source, consent_version, consent_at, unsubscribed_at, updated_at)
-       VALUES ($1,$2,$3,$4,'subscribed','storefront',$5,NOW(),NULL,NOW())
+        (company_id, customer_id, email, full_name, status, source, consent_version, consent_at, unsubscribed_at, updated_at,unsubscribe_token_hash)
+       VALUES ($1,$2,$3,$4,'subscribed','storefront',$5,NOW(),NULL,NOW(),$6)
        ON CONFLICT (company_id, email)
        DO UPDATE SET
          customer_id = COALESCE(EXCLUDED.customer_id, ecommerce_subscribers.customer_id),
@@ -604,16 +734,17 @@ export class EcommerceService {
          consent_version = EXCLUDED.consent_version,
          consent_at = NOW(),
          unsubscribed_at = NULL,
+         unsubscribe_token_hash = EXCLUDED.unsubscribe_token_hash,
          updated_at = NOW()
        RETURNING id, status`,
-      [company.id, customer.rows[0]?.id ?? null, email, input.fullName?.trim() || null, input.consentVersion ?? 'v1'],
+      [company.id, customer.rows[0]?.id ?? null, email, input.fullName?.trim() || null, input.consentVersion ?? 'v1', this.hashSecret(unsubscribeToken)],
     );
     await this.db.query(
       `INSERT INTO audit_log (company_id, actor_user_id, event_name, entity_name, entity_id, payload)
        VALUES ($1,$2,$3,$4,$5,$6)`,
       [company.id, null, 'ecommerce.subscription.subscribe', 'ecommerce', result.rows[0].id, JSON.stringify({ email })],
     );
-    return { id: result.rows[0].id, status: result.rows[0].status };
+    return { id: result.rows[0].id, status: result.rows[0].status, unsubscribeToken };
   }
 
   async listSubscribers(user: AuthUser) {
@@ -762,7 +893,7 @@ export class EcommerceService {
     const result = await this.db.query<{ available: string | null }>(
       `SELECT COALESCE(SUM(on_hand - reserved), 0)::text AS available
        FROM inventory_stock_balances
-       WHERE company_id = $1 AND product_id = $2`,
+       WHERE company_id = $1 AND product_id = $2 AND location_code='MAIN'`,
       [companyId, productId],
     );
     return Number(result.rows[0].available ?? '0');
@@ -772,7 +903,7 @@ export class EcommerceService {
     const result = await client.query<{ available: string | null }>(
       `SELECT COALESCE(SUM(on_hand - reserved), 0)::text AS available
        FROM inventory_stock_balances
-       WHERE company_id = $1 AND product_id = $2`,
+       WHERE company_id = $1 AND product_id = $2 AND location_code='MAIN'`,
       [companyId, productId],
     );
     return Number(result.rows[0].available ?? '0');
@@ -835,30 +966,8 @@ export class EcommerceService {
 
   private async resolveOrCreateCustomer(client: DbClient, companyId: string, input: CheckoutCartInput) {
     const email = input.customerEmail.trim().toLowerCase();
-    const codeHint = input.customerCode?.trim().toUpperCase();
-    if (codeHint) {
-      const byCode = await client.query<{ id: string }>(
-        `SELECT id
-         FROM customers
-         WHERE company_id = $1 AND code = $2
-         LIMIT 1`,
-        [companyId, codeHint],
-      );
-      if (byCode.rows[0]) {
-        return byCode.rows[0].id;
-      }
-    }
-    const byEmail = await client.query<{ id: string }>(
-      `SELECT id
-       FROM customers
-       WHERE company_id = $1 AND email = $2
-       LIMIT 1`,
-      [companyId, email],
-    );
-    if (byEmail.rows[0]) {
-      return byEmail.rows[0].id;
-    }
-    const customerCode = codeHint ?? `ECOM-${Math.floor(Date.now() / 1000)}`;
+    // Guest checkout must not attach an order to an existing identity using an unverified email/code.
+    const customerCode = `ECOM-${randomBytes(12).toString('hex')}`;
     const created = await client.query<{ id: string }>(
       `INSERT INTO customers (company_id, code, name, email, tax_id, is_active)
        VALUES ($1,$2,$3,$4,$5,TRUE)
@@ -868,28 +977,11 @@ export class EcommerceService {
     return created.rows[0].id;
   }
 
-  private async nextSequence(
-    client: DbClient,
-    companyId: string,
-    prefix: string,
-    tableName: string,
-    columnName: string,
-  ) {
-    const count = await client.query<{ total: string }>(
-      `SELECT COUNT(*)::text AS total
-       FROM ${tableName}
-       WHERE company_id = $1`,
-      [companyId],
-    );
-    const next = Number(count.rows[0].total) + 1;
-    return `${prefix}-${next.toString().padStart(6, '0')}`;
-  }
-
   private async reserveSalesOrderStockTx(client: DbClient, companyId: string, salesOrderId: string, locationCode: string) {
     const lines = await client.query<{ product_id: string; quantity: string }>(
       `SELECT product_id, quantity
        FROM sales_order_lines
-       WHERE order_id = $1`,
+       WHERE order_id = $1 ORDER BY product_id`,
       [salesOrderId],
     );
     for (const line of lines.rows) {

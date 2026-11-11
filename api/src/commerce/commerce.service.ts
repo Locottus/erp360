@@ -1,5 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../common/database.service';
+import { nextDocumentNumber } from '../common/document-sequence';
+import PDFDocument from 'pdfkit';
 import type {
   AuthUser,
   CreatePurchaseRequestInput,
@@ -12,8 +14,108 @@ import type {
 export class CommerceService {
   constructor(private readonly db: DatabaseService) {}
 
+  async cancelOrder(user: AuthUser, id: string, type: 'sales' | 'purchase', reason: string) {
+    if (typeof reason !== 'string' || reason.trim().length < 10 || reason.length > 1000) {
+      throw new BadRequestException('A reason of 10 to 1000 characters is required.');
+    }
+    const table = type === 'sales' ? 'sales_orders' : 'purchase_orders';
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const order = await client.query<{ status: string }>(`SELECT status FROM ${table} WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, user.companyId]);
+      if (!order.rows[0]) throw new NotFoundException('Order not found.');
+      if (order.rows[0].status === 'cancelled') throw new ConflictException('Order already cancelled.');
+      if (type === 'sales') {
+        const invoice = await client.query('SELECT id FROM sales_invoices WHERE order_id=$1 AND company_id=$2', [id, user.companyId]);
+        const dispatched = await client.query(
+          `SELECT id FROM inventory_reservations WHERE sales_order_id=$1 AND company_id=$2 AND status='fulfilled'`, [id, user.companyId],
+        );
+        if (invoice.rows.length || dispatched.rows.length) throw new BadRequestException('Invoiced or dispatched orders require a credit/return process.');
+        const reservations = await client.query<{ id: string; product_id: string; location_code: string; quantity: string }>(
+          `SELECT id,product_id,location_code,quantity FROM inventory_reservations
+           WHERE sales_order_id=$1 AND company_id=$2 AND status='reserved' ORDER BY product_id,location_code FOR UPDATE`, [id, user.companyId],
+        );
+        for (const row of reservations.rows) {
+          const updated = await client.query(
+            `UPDATE inventory_stock_balances SET reserved=reserved-$1,updated_at=NOW()
+             WHERE company_id=$2 AND product_id=$3 AND location_code=$4 AND reserved>=$1 RETURNING id`,
+            [row.quantity, user.companyId, row.product_id, row.location_code],
+          );
+          if (!updated.rows[0]) throw new BadRequestException('Reservation balance is inconsistent.');
+          await client.query(`UPDATE inventory_reservations SET status='released',updated_at=NOW() WHERE id=$1`, [row.id]);
+          await client.query(
+            `INSERT INTO inventory_movements(company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by)
+             VALUES($1,$2,$3,'reservation_release',$4,'sales_order',$5,$6,$7)`,
+            [user.companyId, row.location_code, row.product_id, row.quantity, id, reason.trim(), user.sub],
+          );
+        }
+      } else {
+        const receipts = await client.query('SELECT id FROM purchase_receipts WHERE purchase_order_id=$1 AND company_id=$2', [id, user.companyId]);
+        const posted = await client.query(
+          `SELECT id FROM accounting_journal_entries WHERE company_id=$1 AND source_id=$2 AND source_type='purchase_order' AND status='posted'`,
+          [user.companyId, id],
+        );
+        if (receipts.rows.length || posted.rows.length || order.rows[0].status === 'received') {
+          throw new BadRequestException('Received or posted purchases require a supplier return process.');
+        }
+      }
+      await client.query(`UPDATE ${table} SET status='cancelled',updated_at=NOW() WHERE id=$1 AND company_id=$2`, [id, user.companyId]);
+      await this.insertAudit(client, user, `commerce.${type}.order.cancel`, id, { reason: reason.trim() });
+      await client.query('COMMIT');
+      return { id, status: 'cancelled' };
+    } catch (error) { await client.query('ROLLBACK'); throw error; }
+    finally { client.release(); }
+  }
+
+  async invoicePdf(user: AuthUser, id: string): Promise<Buffer> {
+    const result = await this.db.query<{
+      invoice_number: string; subtotal: string; tax_total: string; grand_total: string;
+      issued_at: Date; currency_code: string | null; company_name: string; customer_name: string; status: string;
+      document_snapshot: { companyName: string; customerName: string; lines: { name: string; quantity: string; unit_price: string; line_total: string }[] } | null;
+    }>(
+      `SELECT si.invoice_number,si.subtotal,si.tax_total,si.grand_total,si.issued_at,si.currency_code,si.status,si.document_snapshot,
+              c.name AS company_name,cu.name AS customer_name
+       FROM sales_invoices si JOIN companies c ON c.id=si.company_id
+       JOIN sales_orders so ON so.id=si.order_id AND so.company_id=si.company_id
+       JOIN customers cu ON cu.id=so.customer_id AND cu.company_id=so.company_id
+       WHERE si.id=$1 AND si.company_id=$2`, [id, user.companyId],
+    );
+    if (!result.rows[0]) throw new NotFoundException('Invoice not found.');
+    const invoice = result.rows[0];
+    const snapshot = invoice.document_snapshot;
+    const lines = snapshot?.lines ?? (await this.db.query<{ name: string; quantity: string; unit_price: string; line_total: string }>(
+      `SELECT p.name,l.quantity,l.unit_price,l.line_total FROM sales_order_lines l
+       JOIN sales_invoices si ON si.order_id=l.order_id
+       JOIN products p ON p.id=l.product_id AND p.company_id=si.company_id
+       WHERE si.id=$1 AND si.company_id=$2 ORDER BY l.id`, [id, user.companyId],
+    )).rows;
+    const doc = new PDFDocument({ margin: 48, size: 'A4', info: { Title: `Factura comercial ${invoice.invoice_number}` } });
+    const chunks: Buffer[] = [];
+    const completed = new Promise<Buffer>((resolve, reject) => {
+      doc.on('data', (chunk: Buffer) => chunks.push(chunk));
+      doc.on('end', () => resolve(Buffer.concat(chunks))); doc.on('error', reject);
+    });
+    doc.fontSize(22).text(snapshot?.companyName ?? invoice.company_name);
+    doc.moveDown().fontSize(16).text(`Factura comercial ${invoice.invoice_number}`);
+    doc.fontSize(10).text('Documento comercial. No constituye comprobante fiscal certificado.');
+    doc.text(`Cliente: ${snapshot?.customerName ?? invoice.customer_name}`).text(`Fecha: ${invoice.issued_at.toISOString().slice(0, 10)}`);
+    if (!snapshot) doc.text('Registro historico: datos descriptivos actuales, sin snapshot de emision.');
+    doc.text(`Estado: ${invoice.status} | Moneda: ${invoice.currency_code ?? 'NO DEFINIDA - registro historico'}`);
+    doc.moveDown();
+    for (const line of lines) {
+      doc.fontSize(11).text(line.name);
+      doc.fontSize(10).text(`Cantidad ${line.quantity} x ${line.unit_price} = ${line.line_total}`).moveDown(0.5);
+    }
+    doc.moveDown().text(`Subtotal: ${invoice.subtotal}`).text(`Impuestos: ${invoice.tax_total}`)
+      .fontSize(14).text(`Total: ${invoice.grand_total} ${invoice.currency_code ?? ''}`);
+    doc.end();
+    await this.insertAuditDirect(user, 'commerce.invoice.pdf', id, {});
+    return completed;
+  }
+
   async createQuotation(user: AuthUser, input: CreateQuotationInput) {
     this.validateSalesInput(input.quotationNumber, input.customerId, input.lines);
+    if (/^WEBQ-/i.test(input.quotationNumber.trim())) throw new BadRequestException('WEBQ- is reserved for automatic storefront numbering.');
     const taxRate = await this.resolveTaxRatePercent(user.companyId, input.taxRateCode);
     const client = await this.db.connect();
     try {
@@ -23,8 +125,8 @@ export class CommerceService {
       const { subtotal, taxTotal, grandTotal } = this.calculateTotals(lineCalc.subtotal, taxRate);
       const quotation = await client.query<{ id: string; quotation_number: string }>(
         `INSERT INTO sales_quotations
-          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by)
-         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8)
+          (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by, currency_code)
+         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,(SELECT currency_code FROM companies WHERE id=$1))
          RETURNING id, quotation_number`,
         [
           user.companyId,
@@ -95,7 +197,7 @@ export class CommerceService {
 
   async listSalesOrders(user: AuthUser) {
     const result = await this.db.query(
-      `SELECT so.id, so.order_number, so.status, so.subtotal, so.tax_total, so.grand_total,
+      `SELECT so.id, so.order_number, so.status, so.subtotal, so.tax_total, so.grand_total, so.currency_code,
               so.created_at, c.name AS customer_name
        FROM sales_orders so
        JOIN customers c ON c.id = so.customer_id AND c.company_id = so.company_id
@@ -108,10 +210,10 @@ export class CommerceService {
 
   async listSalesInvoices(user: AuthUser) {
     const result = await this.db.query(
-      `SELECT si.id, si.invoice_number, si.status, si.subtotal, si.tax_total, si.grand_total,
+      `SELECT si.id, si.invoice_number, si.status, si.subtotal, si.tax_total, si.grand_total, si.currency_code,
               si.issued_at, so.id AS sales_order_id, so.order_number, c.name AS customer_name,
               COALESCE(pay.total_paid, 0)::text AS total_paid,
-              GREATEST(si.grand_total - COALESCE(pay.total_paid, 0), 0)::text AS balance_due,
+              CASE WHEN si.status='void' THEN 0 ELSE GREATEST(si.grand_total - COALESCE(pay.total_paid, 0), 0) END::text AS balance_due,
               EXISTS (
                 SELECT 1 FROM accounting_journal_entries je
                 WHERE je.company_id = si.company_id
@@ -139,6 +241,7 @@ export class CommerceService {
     if (!orderNumber?.trim()) {
       throw new BadRequestException('orderNumber is required.');
     }
+    if (/^WEBO-/i.test(orderNumber.trim())) throw new BadRequestException('WEBO- is reserved for automatic storefront numbering.');
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
@@ -169,8 +272,8 @@ export class CommerceService {
 
       const order = await client.query<{ id: string; order_number: string }>(
         `INSERT INTO sales_orders
-          (company_id, customer_id, quotation_id, order_number, status, subtotal, tax_total, grand_total, created_by)
-         VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,$8)
+          (company_id, customer_id, quotation_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
+         VALUES ($1,$2,$3,$4,'confirmed',$5,$6,$7,$8,(SELECT currency_code FROM sales_quotations WHERE id=$3))
          RETURNING id, order_number`,
         [
           user.companyId,
@@ -234,9 +337,10 @@ export class CommerceService {
   }
 
   async issueInvoice(user: AuthUser, salesOrderId: string, invoiceNumber: string) {
-    if (!invoiceNumber?.trim()) {
-      throw new BadRequestException('invoiceNumber is required.');
+    if (invoiceNumber !== undefined && (typeof invoiceNumber !== 'string' || invoiceNumber.length > 64)) {
+      throw new BadRequestException('invoiceNumber must be a string of at most 64 characters.');
     }
+    if (/^AUTO-INV-/i.test(invoiceNumber?.trim() ?? '')) throw new BadRequestException('AUTO-INV- is reserved for automatic invoice numbering. Leave the field empty.');
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
@@ -266,13 +370,19 @@ export class CommerceService {
 
       const invoice = await client.query<{ id: string; invoice_number: string }>(
         `INSERT INTO sales_invoices
-          (company_id, order_id, invoice_number, status, subtotal, tax_total, grand_total)
-         VALUES ($1,$2,$3,'issued',$4,$5,$6)
+          (company_id, order_id, invoice_number, status, subtotal, tax_total, grand_total, currency_code,document_snapshot)
+         VALUES ($1,$2,$3,'issued',$4,$5,$6,(SELECT currency_code FROM sales_orders WHERE id=$2),
+           jsonb_build_object(
+             'companyName',(SELECT name FROM companies WHERE id=$1),
+             'customerName',(SELECT c.name FROM customers c JOIN sales_orders so ON so.customer_id=c.id AND so.company_id=c.company_id WHERE so.id=$2 AND so.company_id=$1),
+             'lines',(SELECT jsonb_agg(jsonb_build_object('name',p.name,'quantity',l.quantity::text,'unit_price',l.unit_price::text,'line_total',l.line_total::text) ORDER BY l.id)
+                      FROM sales_order_lines l JOIN products p ON p.id=l.product_id AND p.company_id=$1 WHERE l.order_id=$2)
+           ))
          RETURNING id, invoice_number`,
         [
           user.companyId,
           order.rows[0].id,
-          invoiceNumber.trim(),
+          invoiceNumber?.trim() || await nextDocumentNumber(client, user.companyId, 'AUTO-INV'),
           order.rows[0].subtotal,
           order.rows[0].tax_total,
           order.rows[0].grand_total,
@@ -317,8 +427,8 @@ export class CommerceService {
 
       const requestRec = await client.query<{ id: string; request_number: string }>(
         `INSERT INTO purchase_requests
-          (company_id, supplier_id, request_number, status, subtotal, tax_total, grand_total, created_by)
-         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7)
+          (company_id, supplier_id, request_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
+         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,(SELECT currency_code FROM companies WHERE id=$1))
          RETURNING id, request_number`,
         [
           user.companyId,
@@ -382,8 +492,9 @@ export class CommerceService {
               (po.id IS NOT NULL AND EXISTS (
                 SELECT 1 FROM inventory_movements im
                 WHERE im.company_id = pr.company_id
-                  AND im.reference_type = 'purchase_order'
-                  AND im.reference_id = po.id
+                  AND ((im.reference_type = 'purchase_order' AND im.reference_id = po.id)
+                    OR (im.reference_type = 'purchase_receipt' AND EXISTS (
+                      SELECT 1 FROM purchase_receipts r WHERE r.id=im.reference_id AND r.purchase_order_id=po.id AND r.company_id=po.company_id)))
                   AND im.movement_type = 'purchase_receipt'
               )) AS inventory_received,
               (po.id IS NOT NULL AND EXISTS (
@@ -440,8 +551,8 @@ export class CommerceService {
 
       const po = await client.query<{ id: string; order_number: string }>(
         `INSERT INTO purchase_orders
-          (company_id, supplier_id, request_id, order_number, status, subtotal, tax_total, grand_total, created_by)
-         VALUES ($1,$2,$3,$4,'ordered',$5,$6,$7,$8)
+          (company_id, supplier_id, request_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
+         VALUES ($1,$2,$3,$4,'ordered',$5,$6,$7,$8,(SELECT currency_code FROM purchase_requests WHERE id=$3))
          RETURNING id, order_number`,
         [
           user.companyId,
@@ -686,7 +797,7 @@ export class CommerceService {
     customerId: string,
   ) {
     const customer = await client.query<{ id: string }>(
-      `SELECT id FROM customers WHERE id = $1 AND company_id = $2 LIMIT 1`,
+      `SELECT id FROM customers WHERE id = $1 AND company_id = $2 AND is_active = TRUE LIMIT 1`,
       [customerId, companyId],
     );
     if (!customer.rows[0]) {
@@ -700,7 +811,7 @@ export class CommerceService {
     supplierId: string,
   ) {
     const supplier = await client.query<{ id: string }>(
-      `SELECT id FROM suppliers WHERE id = $1 AND company_id = $2 LIMIT 1`,
+      `SELECT id FROM suppliers WHERE id = $1 AND company_id = $2 AND is_active = TRUE LIMIT 1`,
       [supplierId, companyId],
     );
     if (!supplier.rows[0]) {

@@ -22,6 +22,15 @@ let CommerceController = class CommerceController {
     constructor(commerceService) {
         this.commerceService = commerceService;
     }
+    cancelSale(request, id, input) {
+        return this.commerceService.cancelOrder(request.user, id, 'sales', input.reason);
+    }
+    cancelPurchase(request, id, input) {
+        return this.commerceService.cancelOrder(request.user, id, 'purchase', input.reason);
+    }
+    async invoicePdf(request, id) {
+        return new common_1.StreamableFile(await this.commerceService.invoicePdf(request.user, id), { type: 'application/pdf', disposition: 'attachment; filename="factura-comercial.pdf"' });
+    }
     createQuotation(request, body) {
         return this.commerceService.createQuotation(request.user, body);
     }
@@ -54,6 +63,34 @@ let CommerceController = class CommerceController {
     }
 };
 exports.CommerceController = CommerceController;
+__decorate([
+    (0, common_1.Post)('sales/orders/:id/cancel'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "cancelSale", null);
+__decorate([
+    (0, common_1.Post)('purchases/orders/:id/cancel'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "cancelPurchase", null);
+__decorate([
+    (0, common_1.Get)('sales/invoices/:id/pdf'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", Promise)
+], CommerceController.prototype, "invoicePdf", null);
 __decorate([
     (0, common_1.Post)('sales/quotations'),
     (0, roles_decorator_1.Roles)('admin'),

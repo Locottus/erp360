@@ -22,6 +22,39 @@ export declare class AuthController {
             roles: string[];
         };
     }>;
+    resetPassword(body: {
+        token: string;
+        password: string;
+    }): Promise<{
+        changed: boolean;
+    }>;
+    logout(request: AuthenticatedRequest): Promise<{
+        revoked: boolean;
+    }>;
+    users(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    createUser(request: AuthenticatedRequest, body: {
+        email: string;
+        fullName: string;
+        roles: string[];
+    }): Promise<{
+        id: string;
+        activationToken: string;
+        expiresInHours: number;
+    }>;
+    updateUser(request: AuthenticatedRequest, id: string, body: {
+        fullName: string;
+        roles: string[];
+        isActive: boolean;
+    }): Promise<{
+        id: string;
+    }>;
+    issueReset(request: AuthenticatedRequest, id: string): Promise<{
+        resetToken: string;
+        expiresInHours: number;
+    }>;
+    revokeSessions(request: AuthenticatedRequest, id: string): Promise<{
+        revoked: boolean;
+    }>;
     me(request: AuthenticatedRequest): Promise<{
         id: string;
         email: string;

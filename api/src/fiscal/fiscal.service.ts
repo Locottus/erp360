@@ -63,7 +63,7 @@ export class FiscalService {
         `SELECT id, invoice_number, status, subtotal, tax_total, grand_total, order_id
          FROM sales_invoices
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1 FOR UPDATE`,
         [invoiceId, user.companyId],
       );
       if (!invoice.rows[0]) {
@@ -165,21 +165,33 @@ export class FiscalService {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      const source = await client.query<{ sales_invoice_id: string }>(
+        'SELECT sales_invoice_id FROM fiscal_documents WHERE id=$1 AND company_id=$2', [fiscalDocumentId, user.companyId],
+      );
+      if (!source.rows[0]) throw new NotFoundException('Fiscal document not found.');
+      const invoice = await client.query<{ status: string }>(
+        'SELECT status FROM sales_invoices WHERE id=$1 AND company_id=$2 FOR UPDATE', [source.rows[0].sales_invoice_id, user.companyId],
+      );
+      if (!invoice.rows[0] || !['issued', 'paid'].includes(invoice.rows[0].status)) {
+        throw new BadRequestException('Credited or void invoices cannot be submitted. A commercial credit is not a fiscal cancellation.');
+      }
       const doc = await client.query<{
         id: string;
         country_code: CountryCode;
         provider_code: string;
         payload: Record<string, unknown>;
+        status: string;
       }>(
-        `SELECT id, country_code, provider_code, payload
+        `SELECT id, country_code, provider_code, payload, status
          FROM fiscal_documents
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1 FOR UPDATE`,
         [fiscalDocumentId, user.companyId],
       );
       if (!doc.rows[0]) {
         throw new NotFoundException('Fiscal document not found.');
       }
+      if (doc.rows[0].status === 'accepted') throw new ConflictException('Fiscal document already accepted; it cannot be submitted again.');
       const config = await this.getProviderConfig(client, user.companyId, doc.rows[0].country_code);
       const adapter = buildFiscalAdapter(doc.rows[0].country_code);
       const result = await adapter.submit(doc.rows[0].payload, {

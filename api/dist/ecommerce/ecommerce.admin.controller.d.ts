@@ -4,6 +4,11 @@ import { EcommerceService } from './ecommerce.service';
 export declare class EcommerceAdminController {
     private readonly ecommerceService;
     constructor(ecommerceService: EcommerceService);
+    fulfillments(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    fulfillment(request: AuthenticatedRequest, id: string, input: Parameters<EcommerceService['updateFulfillment']>[2]): Promise<{
+        id: string;
+        status: string;
+    }>;
     getSettings(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow>;
     listProducts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     upsertSettings(request: AuthenticatedRequest, body: UpsertStorefrontSettingsInput): Promise<{

@@ -47,6 +47,9 @@ export type CheckoutCartInput = {
   customerCode?: string;
   customerTaxId?: string;
   notes?: string;
+  deliveryMethod?: 'pickup' | 'delivery';
+  deliveryAddress?: string;
+  phone?: string;
 };
 
 export type SubscribeInput = {

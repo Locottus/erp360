@@ -3,6 +3,11 @@ import { Routes } from '@angular/router';
 export const routes: Routes = [
   { path: '', title: 'Inicio · ERP360', loadComponent: () => import('./home.component').then(m => m.HomeComponent) },
   { path: 'login', title: 'Acceso · ERP360', loadComponent: () => import('./auth-console.component').then(m => m.AuthConsoleComponent) },
+  { path: 'users', title: 'Usuarios · ERP360', loadComponent: () => import('./users.component').then(m => m.UsersComponent) },
+  { path: 'catalogs', title: 'Catálogos · ERP360', loadComponent: () => import('./catalogs.component').then(m => m.CatalogsComponent) },
+  { path: 'controls', title: 'Control operativo · ERP360', loadComponent: () => import('./operational-controls.component').then(m => m.OperationalControlsComponent) },
+  { path: 'receiving', title: 'Recepciones y devoluciones · ERP360', loadComponent: () => import('./purchase-receiving.component').then(m => m.PurchaseReceivingComponent) },
+  { path: 'people', title: 'Personas · ERP360', loadComponent: () => import('./people.component').then(m => m.PeopleComponent) },
   { path: 'workspace', title: 'Dashboard · ERP360', loadComponent: () => import('./workspace.component').then(m => m.WorkspaceComponent) },
   { path: 'store', title: 'Tienda · ERP360', loadComponent: () => import('./ecommerce-storefront.component').then(m => m.EcommerceStorefrontComponent) },
   { path: 'shop/:storeSlug', title: 'Tienda online · ERP360', loadComponent: () => import('./ecommerce-storefront.component').then(m => m.EcommerceStorefrontComponent) },
@@ -11,6 +16,8 @@ export const routes: Routes = [
   { path: 'operations', title: 'Operaciones · ERP360', loadComponent: () => import('./operations.component').then(m => m.OperationsComponent) },
   { path: 'inventory', title: 'Inventario · ERP360', loadComponent: () => import('./inventory.component').then(m => m.InventoryComponent) },
   { path: 'invoicing', title: 'Facturación · ERP360', loadComponent: () => import('./invoicing.component').then(m => m.InvoicingComponent) },
+  { path: 'subscription', title: 'Mi suscripción · ERP360', loadComponent: () => import('./subscription.component').then(m => m.SubscriptionComponent) },
+  { path: 'platform/billing', title: 'Administración SaaS · ERP360', loadComponent: () => import('./saas-billing.component').then(m => m.SaasBillingComponent) },
   { path: 'processes', title: 'Procesos · ERP360', loadComponent: () => import('./processes.component').then(m => m.ProcessesComponent) },
   { path: '**', redirectTo: '' },
 ];

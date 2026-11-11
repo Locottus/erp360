@@ -112,6 +112,14 @@ export class SessionService {
     sessionStorage.removeItem(TOKEN_STORAGE_KEY);
   }
 
+  async signOut() {
+    this.error.set('');
+    try { await firstValueFrom(this.http.post(`${API_BASE_URL}/auth/logout`, {})); }
+    catch {
+      this.error.set('La sesión local se cerró, pero no se pudo confirmar la revocación en servidor. Contacta al administrador.');
+    } finally { this.logout(); }
+  }
+
   private async refreshCompany(revision: number) {
     try {
       const company = await firstValueFrom(this.http.get<CurrentCompany>(`${API_BASE_URL}/companies/current`));

@@ -4,6 +4,15 @@ import { HrService } from './hr.service';
 export declare class HrController {
     private readonly hrService;
     constructor(hrService: HrService);
+    updateEmployee(request: AuthenticatedRequest, id: string, input: Parameters<HrService['updateEmployee']>[2]): Promise<{
+        id: string;
+        revision: number;
+    }>;
+    correctAttendance(request: AuthenticatedRequest, id: string, input: Parameters<HrService['correctAttendance']>[2]): Promise<{
+        id: string;
+        revision: number;
+        totalMinutes: number;
+    }>;
     createEmployee(request: AuthenticatedRequest, body: CreateEmployeeInput): Promise<{
         id: string;
         employee_code: string;
@@ -37,4 +46,9 @@ export declare class HrController {
         status: "approved" | "rejected";
     }>;
     listLeaveRequests(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    cancelLeaveRequest(request: AuthenticatedRequest, id: string, input: Parameters<HrService['cancelLeaveRequest']>[2]): Promise<{
+        id: string;
+        status: string;
+        revision: number;
+    }>;
 }

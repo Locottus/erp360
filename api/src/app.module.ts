@@ -13,6 +13,7 @@ import { HrModule } from './hr/hr.module';
 import { RpcLegacyModule } from './rpc-legacy/rpc-legacy.module';
 import { EcommerceModule } from './ecommerce/ecommerce.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { SaasModule } from './saas/saas.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     RpcLegacyModule,
     EcommerceModule,
     DashboardModule,
+    SaasModule,
   ],
   controllers: [AppController],
   providers: [AppService],

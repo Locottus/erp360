@@ -22,6 +22,18 @@ let InventoryController = class InventoryController {
     constructor(inventoryService) {
         this.inventoryService = inventoryService;
     }
+    receiptDetails(request, id) {
+        return this.inventoryService.purchaseReceiptDetails(request.user, id);
+    }
+    partialReceipt(request, id, input) {
+        return this.inventoryService.receivePartialPurchase(request.user, id, input);
+    }
+    transfer(request, input) {
+        return this.inventoryService.moveOrCount(request.user, 'transfer', input);
+    }
+    count(request, input) {
+        return this.inventoryService.moveOrCount(request.user, 'count', input);
+    }
     applyPurchaseReceipt(request, purchaseOrderId, body) {
         return this.inventoryService.receivePurchaseOrder(request.user, purchaseOrderId, body?.locationCode);
     }
@@ -45,6 +57,43 @@ let InventoryController = class InventoryController {
     }
 };
 exports.InventoryController = InventoryController;
+__decorate([
+    (0, common_1.Get)('purchases/orders/:id/receipts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "receiptDetails", null);
+__decorate([
+    (0, common_1.Post)('purchases/orders/:id/receipts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "partialReceipt", null);
+__decorate([
+    (0, common_1.Post)('transfers'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "transfer", null);
+__decorate([
+    (0, common_1.Post)('counts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "count", null);
 __decorate([
     (0, common_1.Post)('purchases/orders/:id/receive'),
     (0, roles_decorator_1.Roles)('admin'),

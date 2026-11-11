@@ -3,6 +3,11 @@ import type { AuthUser, CreatePurchaseRequestInput, CreateQuotationInput } from 
 export declare class CommerceService {
     private readonly db;
     constructor(db: DatabaseService);
+    cancelOrder(user: AuthUser, id: string, type: 'sales' | 'purchase', reason: string): Promise<{
+        id: string;
+        status: string;
+    }>;
+    invoicePdf(user: AuthUser, id: string): Promise<Buffer>;
     createQuotation(user: AuthUser, input: CreateQuotationInput): Promise<{
         id: string;
         quotationNumber: string;

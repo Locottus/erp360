@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -9,6 +9,32 @@ import { InventoryService } from './inventory.service';
 @UseGuards(AuthGuard)
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  @Get('purchases/orders/:id/receipts')
+  @Roles('admin')
+  receiptDetails(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.inventoryService.purchaseReceiptDetails(request.user, id);
+  }
+
+  @Post('purchases/orders/:id/receipts')
+  @Roles('admin')
+  partialReceipt(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<InventoryService['receivePartialPurchase']>[2]) {
+    return this.inventoryService.receivePartialPurchase(request.user, id, input);
+  }
+  @Post('transfers')
+  @Roles('admin')
+  transfer(@Req() request: AuthenticatedRequest,
+    @Body() input: Parameters<InventoryService['moveOrCount']>[2]) {
+    return this.inventoryService.moveOrCount(request.user, 'transfer', input);
+  }
+
+  @Post('counts')
+  @Roles('admin')
+  count(@Req() request: AuthenticatedRequest,
+    @Body() input: Parameters<InventoryService['moveOrCount']>[2]) {
+    return this.inventoryService.moveOrCount(request.user, 'count', input);
+  }
 
   @Post('purchases/orders/:id/receive')
   @Roles('admin')

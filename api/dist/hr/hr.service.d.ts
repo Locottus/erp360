@@ -3,6 +3,32 @@ import type { AuthUser, CheckInInput, CheckOutInput, CreateEmployeeInput, LeaveR
 export declare class HrService {
     private readonly db;
     constructor(db: DatabaseService);
+    updateEmployee(user: AuthUser, id: string, input: {
+        fullName: string;
+        email?: string;
+        jobTitle?: string;
+        hireDate: string;
+        status: string;
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        id: string;
+        revision: number;
+    }>;
+    correctAttendance(user: AuthUser, id: string, input: {
+        checkInAt: string;
+        checkOutAt: string;
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        id: string;
+        revision: number;
+        totalMinutes: number;
+    }>;
+    private validateReason;
+    private validateDate;
+    private timestamp;
+    private assertNoApprovedLeaveOverlap;
     createEmployee(user: AuthUser, input: CreateEmployeeInput): Promise<{
         id: string;
         employee_code: string;
@@ -26,6 +52,14 @@ export declare class HrService {
     decideLeaveRequest(user: AuthUser, leaveRequestId: string, decision: 'approved' | 'rejected', note?: string): Promise<{
         id: string;
         status: "approved" | "rejected";
+    }>;
+    cancelLeaveRequest(user: AuthUser, id: string, input: {
+        reason: string;
+        expectedRevision: number;
+    }): Promise<{
+        id: string;
+        status: string;
+        revision: number;
     }>;
     listLeaveRequests(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     private assertEmployeeOwnership;

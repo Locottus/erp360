@@ -21,7 +21,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const authorization = request.headers.authorization;
     if (!authorization || !authorization.startsWith('Bearer ')) {
@@ -33,7 +33,7 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Missing Bearer token.');
     }
 
-    request.user = this.authService.verifyAccessToken(token);
+    request.user = await this.authService.authenticateAccessToken(token);
 
     const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
       context.getHandler(),

@@ -57,7 +57,7 @@ describe('Dashboard temporal (e2e)', () => {
       })
       .overrideProvider(AuthService)
       .useValue({
-        verifyAccessToken: (role: string) => ({
+        authenticateAccessToken: async (role: string) => ({
           sub: 'test-user',
           email: 'dashboard@example.test',
           companyId,

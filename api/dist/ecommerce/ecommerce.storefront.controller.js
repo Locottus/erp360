@@ -20,6 +20,9 @@ let EcommerceStorefrontController = class EcommerceStorefrontController {
     constructor(ecommerceService) {
         this.ecommerceService = ecommerceService;
     }
+    unsubscribe(companyCode, input) {
+        return this.ecommerceService.publicUnsubscribe(companyCode, input.token);
+    }
     getStorefrontBySlug(storeSlug, query, categoryCode) {
         return this.ecommerceService.getStorefrontBySlug(storeSlug, query, categoryCode);
     }
@@ -46,6 +49,14 @@ let EcommerceStorefrontController = class EcommerceStorefrontController {
     }
 };
 exports.EcommerceStorefrontController = EcommerceStorefrontController;
+__decorate([
+    (0, common_1.Post)(':companyCode/unsubscribe'),
+    __param(0, (0, common_1.Param)('companyCode')),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", void 0)
+], EcommerceStorefrontController.prototype, "unsubscribe", null);
 __decorate([
     (0, common_1.Get)('by-slug/:storeSlug'),
     __param(0, (0, common_1.Param)('storeSlug')),

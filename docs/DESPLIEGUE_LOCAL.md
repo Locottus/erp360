@@ -43,6 +43,9 @@ if ($LASTEXITCODE -eq 0) { node --env-file=..\.env dist\main.js }
 
 Mantener `PORT=3001` y `BOOTSTRAP_ENABLED=false`. Comprobar
 `http://127.0.0.1:3001/health/ready`.
+Para restringir la API a esta máquina, definir `HOST=127.0.0.1` antes de iniciar.
+Sin HOST conserva escucha en todas las interfaces; detrás de contenedor/proxy
+elegir explícitamente la interfaz adecuada y reglas de red.
 
 ## Frontend (terminal 2)
 
@@ -69,16 +72,79 @@ argumento `--port` de Angular.
 5. Iniciar sesión desde **Acceso**. El dashboard muestra la empresa del usuario.
 
 Cada cuenta pertenece a una empresa y el correo es globalmente único. No existe
-selector para asumir otras empresas ni interfaz completa de gestión de usuarios,
-roles, recuperación de contraseñas o MFA.
+selector para asumir otras empresas. Usuarios permite invitar, asignar los roles
+existentes, activar/desactivar, generar claves privadas de recuperación y revocar
+sesiones. Entregar estas claves por un canal seguro; no hay correo automático.
+Cerrar sesión revoca todas las sesiones de la cuenta. MFA sigue pendiente.
+
+## Operadores de plataforma SaaS
+
+El rol `admin` de empresa no concede acceso global. Desde una terminal
+autorizada del servidor, elegir explícitamente una cuenta existente y activa:
+
+```powershell
+Set-Location C:\angular\erp360\erp360-modernizado\api
+node --env-file=..\.env dist\saas\provision-operator.js `
+  --email operador.existente@example.com --role owner --confirm-platform-operator
+```
+
+Sustituir el correo de ejemplo; el comando no crea usuarios. Los perfiles son
+`owner`, `billing` y `viewer`; consulta no permite registrar movimientos.
+La herramienta exige confirmación explícita y protege al último propietario.
+No se elige ni promueve automáticamente al primer administrador.
+
+Iniciar sesión normalmente y abrir `/platform/billing`. Un usuario de empresa
+sin membresía solo consulta `/subscription`. La membresía se comprueba en la
+base en cada operación global, no se confía en un rol enviado por el navegador.
+No provisionar cuentas de demostración en producción ni registrar contraseñas
+en scripts, capturas o historial de shell.
+
+La consola registra documentos internos e ingresos ya recibidos. Pasarela,
+correo y restricciones están sin configurar: no ofrece cargos ni envíos reales.
+
+## Actualización operativa
+
+Respaldar primero. En una base que ya tiene `0012`, aplicar en orden `0013` a
+`0023` usando el mismo control `ON_ERROR_STOP`. No volver a inicializar datos.
+`0017` agrega unicidad de jornada abierta: si existen jornadas duplicadas,
+la migración falla y requiere conciliación autorizada antes de continuar.
+
+- `0013`: versión de sesiones y claves privadas de activación/recuperación.
+- `0014`: secuencias, transferencias, conteos, pagos a proveedores y reapertura.
+- `0015`: moneda en documentos nuevos y notas de crédito totales.
+- `0016`: reembolsos de cliente.
+- `0017`: revisión optimista de empleados/asistencia y jornada abierta única.
+- `0018`: solicitud de entrega, seguimiento manual y hash de clave de baja.
+- `0019`: snapshot descriptivo de facturas nuevas para PDF estable.
+- `0020`: líneas de recepción parcial, costo snapshot, devolución al proveedor
+  y tipo de movimiento; no inventa lotes para recepciones antiguas.
+- `0021`: retorno físico posterior vinculado al crédito total de venta.
+- `0022`: ingresos recibidos por crédito proveedor y cancelación de ausencias
+  con revisión, actor/fecha/motivo conservando decisiones anteriores.
+- `0023`: control SaaS separado: operadores de plataforma, pagadores,
+  contratos/módulos versionados, facturas internas, pagos/créditos/reversiones,
+  cartera y seguimiento.
+
+Las migraciones no acreditan facturas existentes ni asignan USD a documentos
+históricos. USD es la moneda inicial de empresa para nuevas operaciones;
+antes de producción, definir moneda y política contable mediante un cambio
+administrativo revisado. No hay conversión multimoneda.
 
 ## Producción: condiciones previas
 
 - El centro de operaciones ofrece altas de maestros y procesos de ventas, compras,
   RRHH, contabilidad sandbox y administración de tokens del portal. Inventario,
   facturación comercial y editor eCommerce también tienen pantallas. Aún no hay
-  gestión completa de usuarios/roles, CRUD de edición/baja para todos los maestros,
-  nómina, conciliación bancaria, devoluciones ni pagos en línea.
+  MFA, membresías multiempresa, nómina, conciliación bancaria, valoración/COGS
+  ni pagos en línea. Recepciones permite cantidades parciales y devolución a
+  proveedor tras completar/contabilizar la compra. El devengo de cada recepción
+  parcial, la cancelación del remanente y devolución de recepciones históricas
+  requieren extensión. Los créditos de venta siguen siendo totales; su retorno
+  físico puede registrarse después, sin duplicar crédito ni reembolso.
+  Ningún crédito comercial anula documentos fiscales certificados.
+  Control operativo registra reembolsos recibidos del proveedor hasta el crédito
+  pendiente; no realiza cobros ni compensaciones entre compras. Personas
+  cancela ausencias con motivo, sin recalcular nómina ni vacaciones legales.
 - Fiscal es simulación sandbox. No confundir la factura comercial con una factura
   fiscal certificada ni considerar el checkout como un cobro.
 - Servir Angular compilado y API detrás de HTTPS y un reverse proxy que exponga
@@ -109,3 +175,7 @@ la base de este proyecto; no usar `down -v` para apagar una instalación con dat
 
 Ver [informe de revisión](REVISION_UI_SEGURIDAD_IA.md) y
 [manual de usuario](manual/MANUAL_ERP360_OPERACION_Y_CONFIGURACION.docx).
+El [modelo SaaS](MODELO_COMERCIAL_SAAS.md) distingue consola de control manual
+implementada de medición, pasarela y políticas futuras. No cobra tarjetas,
+envía correos ni bloquea módulos actualmente. La [bitácora](BITACORA_CONTINUIDAD.md) distingue lo terminado
+de las condiciones pendientes de producción.

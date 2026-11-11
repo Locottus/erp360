@@ -112,7 +112,7 @@ const defaultSections = ['hero', 'categories', 'products', 'newsletter'];
                         <div class="product-buy"><div><strong>{{ product.unit_price | currency:shop.store.currency_code:'symbol':'1.2-2' }}</strong>
                           @if (product.compare_at_price && +product.compare_at_price > +product.unit_price) { <del>{{ product.compare_at_price | currency:shop.store.currency_code:'symbol':'1.2-2' }}</del> }
                         </div><button class="btn btn-primary" type="button" (click)="addToCart(product.id)" [disabled]="busy || +product.available_stock <= 0"><i class="bi bi-plus-lg" aria-hidden="true"></i><span class="sr-only">Agregar {{ product.title }} al carrito</span><span aria-hidden="true">Agregar</span></button></div>
-                        @if (+product.available_stock > 0) { <label class="quantity-control">Cantidad<input type="number" min="1" [max]="+product.available_stock" step="1" [ngModel]="getQuantity(product.id)" (ngModelChange)="setQuantity(product.id, $event)" /></label> }
+                        @if (+product.available_stock > 0) { <label class="quantity-control">Cantidad<input [attr.aria-label]="'Cantidad para ' + product.title" type="number" min="1" [max]="+product.available_stock" step="1" [ngModel]="getQuantity(product.id)" (ngModelChange)="setQuantity(product.id, $event)" /></label> }
                       </div>
                     </article>
                   }
@@ -141,6 +141,12 @@ const defaultSections = ['hero', 'categories', 'products', 'newsletter'];
             </table></div>
             <aside class="cart-checkout"><p>Total del pedido <strong>{{ cartTotal | currency:shop.store.currency_code:'symbol':'1.2-2' }}</strong></p><form class="form-grid" #checkoutForm="ngForm" (ngSubmit)="checkout()">
               <label>Nombre<input name="customerName" [(ngModel)]="customerName" required autocomplete="name" /></label><label>Correo electrónico<input name="customerEmail" [(ngModel)]="customerEmail" type="email" email required autocomplete="email" /></label>
+              <label>Entrega<select name="deliveryMethod" [(ngModel)]="deliveryMethod"><option value="pickup">Recoger en tienda</option><option value="delivery">Solicitar envío</option></select></label>
+              @if (deliveryMethod === 'delivery') {
+                <label>Dirección completa<textarea name="deliveryAddress" [(ngModel)]="deliveryAddress" maxlength="1000" required autocomplete="street-address"></textarea></label>
+                <label>Teléfono de contacto<input name="deliveryPhone" [(ngModel)]="deliveryPhone" maxlength="40" type="tel" required autocomplete="tel" /></label>
+                <p>El envío requiere confirmación y cotización de la empresa; su costo no está incluido en el total mostrado.</p>
+              }
               <p>Al confirmar se crea un pedido en {{ shop.store.store_name }} y se reserva el inventario disponible. No se realiza un cobro en línea.</p>
               <button type="submit" class="btn btn-primary" [disabled]="busy || checkoutForm.invalid">Confirmar pedido <i class="bi bi-arrow-right" aria-hidden="true"></i></button>
             </form></aside></div>
@@ -148,6 +154,13 @@ const defaultSections = ['hero', 'categories', 'products', 'newsletter'];
         </section>
 
         <footer id="store-footer" class="store-footer"><div><strong>{{ shop.store.store_name }}</strong><p>{{ theme.footerText || 'Gracias por apoyar nuestro negocio.' }}</p></div>
+          <div>
+            @if (unsubscribeKey) { <label>Clave privada de baja (guárdala; se muestra ahora)<input readonly [value]="unsubscribeKey" autocomplete="off" /></label> }
+            <form class="form-grid" #unsubscribeForm="ngForm" (ngSubmit)="unsubscribe()">
+              <label>Dar de baja novedades<input name="unsubscribeToken" [(ngModel)]="unsubscribeInput" type="password" maxlength="64" required autocomplete="off" placeholder="Clave privada de baja" /></label>
+              <button class="btn btn-secondary" type="submit" [disabled]="busy || unsubscribeForm.invalid">Cancelar suscripción</button>
+            </form>
+          </div>
           <div><span>¿Necesitas ayuda?</span>@if (shop.store.support_email) { <a [href]="'mailto:' + shop.store.support_email">{{ shop.store.support_email }}</a> } @else { <span>Contacta a la empresa</span> }</div>
           <small>Los pedidos están sujetos a disponibilidad y confirmación de la empresa.</small>
         </footer>
@@ -183,6 +196,9 @@ export class EcommerceStorefrontComponent implements OnInit {
   subscriptionMessage = '';
   customerName = '';
   customerEmail = '';
+  deliveryMethod: 'pickup' | 'delivery' = 'pickup';
+  deliveryAddress = ''; deliveryPhone = '';
+  unsubscribeKey = ''; unsubscribeInput = '';
   subscriberName = '';
   subscriberEmail = '';
   searchTerm = '';
@@ -266,6 +282,7 @@ export class EcommerceStorefrontComponent implements OnInit {
   private async loadStoreFrom(url: string, codeHint?: string) {
     const sequence = ++this.storeLoadSequence;
     this.loadingStore = true; this.error = ''; this.checkoutMessage = ''; this.subscriptionMessage = '';
+    this.unsubscribeKey = ''; this.unsubscribeInput = ''; this.deliveryAddress = ''; this.deliveryPhone = '';
     this.store = null; this.activeCompanyCode = ''; this.clearCartState();
     try {
       const response = await firstValueFrom(this.http.get<StorefrontResponse>(url));
@@ -322,7 +339,9 @@ export class EcommerceStorefrontComponent implements OnInit {
     try {
       const result = await firstValueFrom(this.http.post<{ orderNumber: string }>(
         `${this.api}/ecommerce/storefront/${encodeURIComponent(companyCode)}/carts/${cart.cartId}/checkout`,
-        { customerName: this.customerName.trim(), customerEmail: this.customerEmail.trim() },
+        { customerName: this.customerName.trim(), customerEmail: this.customerEmail.trim(), deliveryMethod: this.deliveryMethod,
+          deliveryAddress: this.deliveryMethod === 'delivery' ? this.deliveryAddress.trim() : undefined,
+          phone: this.deliveryMethod === 'delivery' ? this.deliveryPhone.trim() : undefined },
         { headers: { 'x-cart-token': cart.cartToken } },
       ));
       if (!result.orderNumber) throw new Error('Checkout response did not include the order number.');
@@ -330,6 +349,7 @@ export class EcommerceStorefrontComponent implements OnInit {
         this.checkoutMessage = `Pedido ${result.orderNumber} confirmado. La empresa dará seguimiento al despacho.`;
         this.clearCartState();
         this.customerName = ''; this.customerEmail = '';
+        this.deliveryAddress = ''; this.deliveryPhone = ''; this.deliveryMethod = 'pickup';
         sessionStorage.removeItem(this.cartStorageKey(companyCode));
       }
     } catch (error) { this.error = this.errorMessage(error, 'No fue posible confirmar. Actualiza el carrito antes de volver a intentar.'); }
@@ -343,12 +363,23 @@ export class EcommerceStorefrontComponent implements OnInit {
     }
     this.error = ''; this.subscriptionMessage = ''; this.busy = true;
     try {
-      await firstValueFrom(this.http.post(`${this.api}/ecommerce/storefront/${encodeURIComponent(this.activeCompanyCode)}/subscribe`, {
+      const response = await firstValueFrom(this.http.post<{ unsubscribeToken: string }>(`${this.api}/ecommerce/storefront/${encodeURIComponent(this.activeCompanyCode)}/subscribe`, {
         email: this.subscriberEmail.trim(), fullName: this.subscriberName.trim() || undefined, acceptsMarketing: true,
       }));
       this.subscriptionMessage = 'Suscripción registrada. Gracias por unirte a la comunidad.';
+      this.unsubscribeKey = response.unsubscribeToken;
       this.subscriberEmail = ''; this.subscriberName = ''; this.acceptsMarketing = false;
     } catch (error) { this.error = this.errorMessage(error, 'No fue posible registrar la suscripción. Intenta de nuevo.'); }
+    finally { this.busy = false; }
+  }
+
+  async unsubscribe() {
+    if (this.busy || !this.activeCompanyCode) return;
+    this.busy = true; this.error = ''; this.subscriptionMessage = '';
+    try {
+      await firstValueFrom(this.http.post(`${this.api}/ecommerce/storefront/${encodeURIComponent(this.activeCompanyCode)}/unsubscribe`, { token: this.unsubscribeInput.trim() }));
+      this.subscriptionMessage = 'Suscripción cancelada.'; this.unsubscribeInput = ''; this.unsubscribeKey = '';
+    } catch (error) { this.error = this.errorMessage(error, 'No se pudo dar de baja. Revisa la clave privada o contacta a la empresa.'); }
     finally { this.busy = false; }
   }
 

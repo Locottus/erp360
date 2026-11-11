@@ -1,9 +1,23 @@
+import { StreamableFile } from '@nestjs/common';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
 import type { CreatePurchaseRequestInput, CreateQuotationInput } from './commerce.types';
 import { CommerceService } from './commerce.service';
 export declare class CommerceController {
     private readonly commerceService;
     constructor(commerceService: CommerceService);
+    cancelSale(request: AuthenticatedRequest, id: string, input: {
+        reason: string;
+    }): Promise<{
+        id: string;
+        status: string;
+    }>;
+    cancelPurchase(request: AuthenticatedRequest, id: string, input: {
+        reason: string;
+    }): Promise<{
+        id: string;
+        status: string;
+    }>;
+    invoicePdf(request: AuthenticatedRequest, id: string): Promise<StreamableFile>;
     createQuotation(request: AuthenticatedRequest, body: CreateQuotationInput): Promise<{
         id: string;
         quotationNumber: string;

@@ -28,6 +28,7 @@ type SalesInvoice = {
   order_number: string;
   customer_name: string;
   is_posted: boolean;
+  currency_code: string | null;
 };
 
 @Component({
@@ -41,7 +42,7 @@ type SalesInvoice = {
         <h1>Facturación</h1>
         <p>Emite desde pedidos confirmados, contabiliza y registra pagos recibidos.</p>
       </header>
-      <p class="status status-warning" role="note">La moneda no está configurada en la factura. Confirma moneda y reglas con contabilidad antes de emitir o registrar pagos. Este documento comercial no es una factura electrónica fiscal certificada.</p>
+      <p class="status status-warning" role="note">Documento comercial, no comprobante fiscal certificado. Las facturas históricas sin moneda explícita requieren revisión contable; no se les asigna una moneda retroactivamente.</p>
       <p *ngIf="error" class="status status-error" role="alert">{{ error }}</p>
       <p *ngIf="message" class="status status-success" role="status">{{ message }}</p>
 
@@ -59,12 +60,12 @@ type SalesInvoice = {
                   }
                 </select>
               </label>
-              <label>Número de factura (asignación manual)
-                <input name="invoiceNumber" [(ngModel)]="issue.invoiceNumber" maxlength="64" required autocomplete="off" />
+              <label>Número de factura (vacío = automático)
+                <input name="invoiceNumber" [(ngModel)]="issue.invoiceNumber" maxlength="64" autocomplete="off" />
               </label>
               <button type="submit" class="btn btn-primary" [disabled]="busy || issueForm.invalid">Emitir factura comercial</button>
             </form>
-            <p class="muted">No existe folio automático: verifica la secuencia autorizada antes de guardar. La emisión es irreversible en este flujo actual.</p>
+            <p class="muted">La secuencia automática es comercial y propia de esta empresa; no reemplaza numeración fiscal autorizada.</p>
           } @else {
             <p class="muted">No hay pedidos confirmados pendientes de factura.</p>
           }
@@ -73,11 +74,11 @@ type SalesInvoice = {
 
       <article class="surface-card">
         <div class="header-with-action">
-          <div><h2>Facturas</h2><p class="muted">{{ invoices.length }} documentos comerciales · importes sin moneda configurada</p></div>
+          <div><h2>Facturas</h2><p class="muted">{{ invoices.length }} documentos comerciales</p></div>
           <button class="btn btn-secondary" type="button" (click)="refresh()" [disabled]="loading">{{ loading ? 'Actualizando…' : 'Actualizar' }}</button>
         </div>
         @if (invoices.length) {
-          <div class="table-scroll"><table class="table-list">
+          <div class="table-scroll"><table class="table-list invoice-table">
             <caption>Facturas comerciales del tenant. Los saldos se calculan con pagos registrados en el sistema.</caption>
             <thead><tr><th scope="col">Factura / fecha</th><th scope="col">Pedido / cliente</th><th scope="col">Estado</th><th scope="col">Total</th><th scope="col">Pagado</th><th scope="col">Pendiente</th><th scope="col">Acciones</th></tr></thead>
             <tbody>@for (invoice of invoices; track invoice.id) {
@@ -85,8 +86,9 @@ type SalesInvoice = {
                 <th scope="row">{{ invoice.invoice_number }}<br><small>{{ invoice.issued_at | date:'short' }}</small></th>
                 <td>{{ invoice.order_number }}<br>{{ invoice.customer_name }}</td>
                 <td>{{ invoice.status }} · {{ invoice.is_posted ? 'Contabilizada' : 'Pendiente de contabilizar' }}</td>
-                <td>{{ invoice.grand_total | number:'1.2-4' }}</td><td>{{ invoice.total_paid | number:'1.2-4' }}</td><td>{{ invoice.balance_due | number:'1.2-4' }}</td>
+                <td>{{ invoice.grand_total | number:'1.2-4' }} {{ invoice.currency_code || 'Sin moneda histórica' }}</td><td>{{ invoice.total_paid | number:'1.2-4' }}</td><td>{{ invoice.balance_due | number:'1.2-4' }}</td>
                 <td>
+                  <button class="btn btn-secondary" type="button" (click)="downloadPdf(invoice)" [disabled]="busy">Descargar PDF</button>
                   @if (isAdmin && !invoice.is_posted && invoice.status !== 'void') {
                     <button class="btn btn-secondary" type="button" (click)="postInvoice(invoice)" [disabled]="busy">Contabilizar</button>
                   }
@@ -112,7 +114,7 @@ type SalesInvoice = {
           <app-empty-state title="Sin facturas" description="Emite una factura desde un pedido confirmado para verla aquí." icon="bi-receipt"></app-empty-state>
         }
       </article>
-      <p class="muted">Faltan folios automáticos, PDF, notas de crédito, anulación/devolución y transmisión fiscal certificada. No registrar cobros mediante esta pantalla si el dinero no se recibió.</p>
+      <p class="muted">La transmisión fiscal certificada requiere proveedor habilitado. No registrar cobros mediante esta pantalla si el dinero no se recibió.</p>
     </section>
   `,
 })
@@ -134,6 +136,18 @@ export class InvoicingComponent implements OnInit {
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   get invoiceableOrders() { return this.orders.filter(order => order.status === 'confirmed' && !this.invoices.some(invoice => invoice.sales_order_id === order.id)); }
   Number(value: string) { return Number(value); }
+
+  async downloadPdf(invoice: SalesInvoice) {
+    if (this.busy) return;
+    this.busy = true; this.error = '';
+    try {
+      const blob = await firstValueFrom(this.http.get(`${this.api}/commerce/sales/invoices/${invoice.id}/pdf`, { responseType: 'blob' }));
+      const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `${invoice.invoice_number.replace(/[^a-zA-Z0-9_-]/g, '_')}.pdf`;
+      anchor.click(); URL.revokeObjectURL(url);
+    } catch { this.error = 'No se pudo descargar el PDF.'; }
+    finally { this.busy = false; }
+  }
 
   async refresh() {
     if (this.loading) return;

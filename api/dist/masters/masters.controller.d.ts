@@ -4,6 +4,12 @@ import { MastersService } from './masters.service';
 export declare class MastersController {
     private readonly mastersService;
     constructor(mastersService: MastersService);
+    update(request: AuthenticatedRequest, kind: string, id: string, input: unknown): Promise<any>;
+    import(request: AuthenticatedRequest, kind: string, body: {
+        records: unknown;
+    }): Promise<{
+        imported: number;
+    }>;
     listCustomers(request: AuthenticatedRequest): Promise<{
         id: string;
         code: string;

@@ -54,7 +54,7 @@ let RpcLegacyService = class RpcLegacyService {
         }
         let auth;
         try {
-            auth = this.authService.verifyAccessToken(token);
+            auth = await this.authService.authenticateAccessToken(token);
         }
         catch {
             throw new common_1.UnauthorizedException('Invalid RPC token.');

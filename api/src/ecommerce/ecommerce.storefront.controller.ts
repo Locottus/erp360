@@ -6,6 +6,11 @@ import { EcommerceService } from './ecommerce.service';
 export class EcommerceStorefrontController {
   constructor(private readonly ecommerceService: EcommerceService) {}
 
+  @Post(':companyCode/unsubscribe')
+  unsubscribe(@Param('companyCode') companyCode: string, @Body() input: { token: string }) {
+    return this.ecommerceService.publicUnsubscribe(companyCode, input.token);
+  }
+
   @Get('by-slug/:storeSlug')
   getStorefrontBySlug(
     @Param('storeSlug') storeSlug: string,

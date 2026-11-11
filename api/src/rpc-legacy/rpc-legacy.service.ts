@@ -45,7 +45,7 @@ export class RpcLegacyService {
     }
     let auth: { sub: string; companyId: string; roles: string[] };
     try {
-      auth = this.authService.verifyAccessToken(token) as { sub: string; companyId: string; roles: string[] };
+      auth = await this.authService.authenticateAccessToken(token);
     } catch {
       throw new UnauthorizedException('Invalid RPC token.');
     }

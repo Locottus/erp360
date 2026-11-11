@@ -16,6 +16,40 @@ export declare class AuthService {
         };
     }>;
     verifyAccessToken(token: string): AuthTokenPayload;
+    authenticateAccessToken(token: string): Promise<AuthTokenPayload>;
+    revokeSessions(user: AuthTokenPayload, userId?: string): Promise<{
+        revoked: boolean;
+    }>;
+    listUsers(user: AuthTokenPayload): Promise<import("pg").QueryResultRow[]>;
+    createUser(user: AuthTokenPayload, input: {
+        email: string;
+        fullName: string;
+        roles: string[];
+    }): Promise<{
+        id: string;
+        activationToken: string;
+        expiresInHours: number;
+    }>;
+    updateUser(user: AuthTokenPayload, id: string, input: {
+        fullName: string;
+        roles: string[];
+        isActive: boolean;
+    }): Promise<{
+        id: string;
+    }>;
+    issuePasswordReset(user: AuthTokenPayload, id: string): Promise<{
+        resetToken: string;
+        expiresInHours: number;
+    }>;
+    resetPassword(input: {
+        token: string;
+        password: string;
+    }): Promise<{
+        changed: boolean;
+    }>;
+    private validateIdentity;
+    private hashResetToken;
+    private auditIdentity;
     getCurrentUser(userId: string): Promise<{
         id: string;
         email: string;

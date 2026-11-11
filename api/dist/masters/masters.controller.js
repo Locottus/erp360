@@ -22,6 +22,12 @@ let MastersController = class MastersController {
     constructor(mastersService) {
         this.mastersService = mastersService;
     }
+    update(request, kind, id, input) {
+        return this.mastersService.updateRecord(request.user, kind, id, input);
+    }
+    import(request, kind, body) {
+        return this.mastersService.importRecords(request.user, kind, body.records);
+    }
     listCustomers(request) {
         return this.mastersService.listCustomers(request.user);
     }
@@ -48,6 +54,27 @@ let MastersController = class MastersController {
     }
 };
 exports.MastersController = MastersController;
+__decorate([
+    (0, common_1.Patch)(':kind/:id'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('kind')),
+    __param(2, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(3, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, Object]),
+    __metadata("design:returntype", void 0)
+], MastersController.prototype, "update", null);
+__decorate([
+    (0, common_1.Post)(':kind/import'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('kind')),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], MastersController.prototype, "import", null);
 __decorate([
     (0, common_1.Get)('customers'),
     __param(0, (0, common_1.Req)()),

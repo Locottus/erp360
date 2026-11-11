@@ -32,9 +32,20 @@
       <a routerLink="/invoicing" routerLinkActive="active" ariaCurrentWhenActive="page">
         <i class="bi bi-receipt" aria-hidden="true"></i><span>Facturación</span>
       </a>
+      @if (session.isAuthenticated()) {
+        <a routerLink="/subscription" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-card-checklist" aria-hidden="true"></i><span>Mi suscripción</span></a>
+      }
+      @if (saas.role()) {
+        <a routerLink="/platform/billing" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-buildings" aria-hidden="true"></i><span>Administración SaaS</span></a>
+      }
       <a routerLink="/operations" routerLinkActive="active" ariaCurrentWhenActive="page">
         <i class="bi bi-kanban" aria-hidden="true"></i><span>Operaciones</span>
       </a>
+      <a routerLink="/users" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-people" aria-hidden="true"></i><span>Usuarios</span></a>
+      <a routerLink="/catalogs" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-collection" aria-hidden="true"></i><span>Catálogos</span></a>
+      <a routerLink="/controls" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-arrow-left-right" aria-hidden="true"></i><span>Control operativo</span></a>
+      <a routerLink="/receiving" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i><span>Recepciones</span></a>
+      <a routerLink="/people" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-person-badge" aria-hidden="true"></i><span>Personas</span></a>
       <a routerLink="/ecommerce/admin" routerLinkActive="active" ariaCurrentWhenActive="page">
         <i class="bi bi-palette" aria-hidden="true"></i><span>Diseñar tienda</span>
       </a>
@@ -79,7 +90,12 @@
             <button type="button" class="btn btn-secondary" (click)="helpOpen.set(false)">Cerrar ayuda</button>
           </div>
           <ol>@for (step of currentHelp.steps; track step) { <li>{{ step }}</li> }</ol>
-          <p>Asistencia local. El chat IA aún no está conectado. No compartas contraseñas ni tokens.</p>
+          <p>Asistente de demostración: respuestas locales predefinidas, sin IA externa ni acceso a tus documentos. No compartas contraseñas ni tokens.</p>
+          <form class="form-grid" (ngSubmit)="askMock()">
+            <label>Consulta de uso<input name="mockQuestion" [(ngModel)]="mockQuestion" maxlength="500" required placeholder="Ej.: no puedo reservar stock" /></label>
+            <button type="submit" class="btn btn-primary" [disabled]="!mockQuestion.trim()">Consultar mock</button>
+          </form>
+          @if (mockReply()) { <p role="status" class="status status-info">{{ mockReply() }}</p> }
           <button type="button" class="btn btn-secondary" (click)="showDiagnostic()">Preparar diagnóstico seguro</button>
           @if (diagnostic()) { <pre tabindex="0" aria-label="Diagnóstico sin datos personales">{{ diagnostic() }}</pre> }
         </aside>

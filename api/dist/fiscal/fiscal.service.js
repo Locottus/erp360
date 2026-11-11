@@ -59,7 +59,7 @@ let FiscalService = class FiscalService {
             const invoice = await client.query(`SELECT id, invoice_number, status, subtotal, tax_total, grand_total, order_id
          FROM sales_invoices
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`, [invoiceId, user.companyId]);
+         LIMIT 1 FOR UPDATE`, [invoiceId, user.companyId]);
             if (!invoice.rows[0]) {
                 throw new common_1.NotFoundException('Invoice not found.');
             }
@@ -142,13 +142,22 @@ let FiscalService = class FiscalService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            const doc = await client.query(`SELECT id, country_code, provider_code, payload
+            const source = await client.query('SELECT sales_invoice_id FROM fiscal_documents WHERE id=$1 AND company_id=$2', [fiscalDocumentId, user.companyId]);
+            if (!source.rows[0])
+                throw new common_1.NotFoundException('Fiscal document not found.');
+            const invoice = await client.query('SELECT status FROM sales_invoices WHERE id=$1 AND company_id=$2 FOR UPDATE', [source.rows[0].sales_invoice_id, user.companyId]);
+            if (!invoice.rows[0] || !['issued', 'paid'].includes(invoice.rows[0].status)) {
+                throw new common_1.BadRequestException('Credited or void invoices cannot be submitted. A commercial credit is not a fiscal cancellation.');
+            }
+            const doc = await client.query(`SELECT id, country_code, provider_code, payload, status
          FROM fiscal_documents
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`, [fiscalDocumentId, user.companyId]);
+         LIMIT 1 FOR UPDATE`, [fiscalDocumentId, user.companyId]);
             if (!doc.rows[0]) {
                 throw new common_1.NotFoundException('Fiscal document not found.');
             }
+            if (doc.rows[0].status === 'accepted')
+                throw new common_1.ConflictException('Fiscal document already accepted; it cannot be submitted again.');
             const config = await this.getProviderConfig(client, user.companyId, doc.rows[0].country_code);
             const adapter = (0, fiscal_adapters_1.buildFiscalAdapter)(doc.rows[0].country_code);
             const result = await adapter.submit(doc.rows[0].payload, {

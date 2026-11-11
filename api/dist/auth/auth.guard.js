@@ -21,7 +21,7 @@ let AuthGuard = class AuthGuard {
         this.authService = authService;
         this.reflector = reflector;
     }
-    canActivate(context) {
+    async canActivate(context) {
         const request = context.switchToHttp().getRequest();
         const authorization = request.headers.authorization;
         if (!authorization || !authorization.startsWith('Bearer ')) {
@@ -31,7 +31,7 @@ let AuthGuard = class AuthGuard {
         if (!token) {
             throw new common_1.UnauthorizedException('Missing Bearer token.');
         }
-        request.user = this.authService.verifyAccessToken(token);
+        request.user = await this.authService.authenticateAccessToken(token);
         const requiredRoles = this.reflector.getAllAndOverride(roles_decorator_1.ROLES_KEY, [
             context.getHandler(),
             context.getClass(),

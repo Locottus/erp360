@@ -31,7 +31,7 @@ Fase actual: **Etapa 2 — Ejecución técnica**.
   - completado.
 - **Lote 5**: contabilidad y cierre:
   - plan de cuentas base y posteo contable integrado.
-  - registro de pagos y conciliación básica.
+  - registro de pagos y conciliación básica del estado interno (no conciliación bancaria).
   - reporte de balance de comprobación y cierre de período.
   - completado.
 - **Lote 6**: facturación electrónica regional homologable:
@@ -64,6 +64,15 @@ Rutas principales:
 - `/store` — tienda eCommerce por empresa con carrito, checkout y suscripción.
 - `/portal` — consulta de cliente por token.
 - `/processes` — guía operativa y límites reales por módulo.
+- `/users` — invitación, activación, roles, recuperación y revocación por empresa.
+- `/catalogs` — edición, desactivación e importación atómica de maestros.
+- `/controls` — transferencias, conteos, pagos a proveedores, cancelaciones,
+  créditos totales, reembolsos, recuperación de crédito del proveedor con historial,
+  seguimiento de entregas y reapertura contable.
+- `/people` — edición/baja de empleados, corrección auditada de jornadas cerradas
+  y cancelación de ausencias pendientes/aprobadas conservando decisiones.
+- `/receiving` — recepciones parciales con ingreso físico inmediato, costos
+  snapshot, cantidades pendientes y devoluciones a proveedor con crédito contable.
 
 Mejoras UX adicionales:
 
@@ -80,7 +89,55 @@ La API contiene los módulos operativos; no todos disponen aún de formularios
 administrativos en Angular. El checkout crea pedido y reserva inventario, sin
 pasarela de pago. La fiscalidad es simulación sandbox, no emisión legal.
 La sesión JWT está en `sessionStorage` (no elimina el riesgo XSS); el chat IA
-todavía no está conectado. Ayuda permite preparar un contexto mínimo sin PII.
+todavía no está conectado a un proveedor. Ayuda incluye respuestas mock locales
+y permite preparar un contexto mínimo sin PII.
+
+### Ampliación operativa
+
+Migraciones nuevas `0013` a `0023`: identidad, controles de inventario/tesorería,
+moneda explícita en documentos nuevos, PDF y folios comerciales automáticos,
+créditos totales con devolución física opcional, reembolsos confirmados,
+revisiones de RRHH, entrega manual, clave privada de baja y snapshot de factura.
+`0020` agrega recepciones parciales y devoluciones por lote documental;
+`0021` permite registrar el retorno físico total posterior a un crédito de venta.
+`0022` agrega ingresos recibidos por crédito proveedor y cancelación auditada
+de ausencias con control de revisión. Recuperar crédito es registrar dinero
+ya recibido (no conectarse a bancos); cancelar ausencia no recalcula nómina.
+`0023` agrega la consola de cartera SaaS independiente y sus operadores,
+contratos, documentos internos, historial financiero y seguimiento.
+Los lotes nuevos ya ingresan inventario: no aplicar también una recepción total
+histórica. La devolución a proveedor exige compra completa/contabilizada y
+stock disponible en la ubicación original; registra crédito, no reembolso bancario.
+La devolución no reabre la orden. El devengo de cada recepción parcial, el
+crédito parcial de venta y la devolución de compras históricas siguen pendientes.
+La moneda inicial empresarial es USD; los documentos históricos permanecen
+sin moneda si no la tenían. No hay conversión multimoneda ni configuración
+monetaria administrativa completa. La tienda debe usar la moneda de la empresa.
+
+El checkout se serializa por carrito, verifica publicación/precio y reserva
+solo en MAIN; repetirlo devuelve el mismo pedido sin duplicar la reserva.
+Los clientes invitados no se vinculan a cuentas existentes por un correo/código
+no verificado. El costo de envío requiere cotización externa y no se incluye
+automáticamente. Ninguna pantalla mueve dinero real.
+
+### Administración SaaS y cobranza
+
+- `/platform/billing`: consola de plataforma con cartera por fecha/moneda,
+  contratos y módulos por empresa, documentos internos, historial de ingresos,
+  créditos/reversiones y tareas de seguimiento.
+- `/subscription`: consulta del contrato de la empresa autenticada.
+- La membresía de plataforma se concede explícitamente desde el servidor;
+  ser `admin` de empresa no permite consultar la cartera global.
+- Los ingresos registran dinero ya recibido; no hay cargos de tarjeta,
+  correo automático ni bloqueo comercial de módulos. No confundir contratos
+  informativos con derechos de acceso ya exigidos por cada endpoint.
+- La facturación SaaS está separada de las facturas operativas de los clientes.
+  Los precios de ejemplo, uso medido y prorrateos son propuestas, no cobros activos.
+
+Consultar [modelo de cobro SaaS y límites](docs/MODELO_COMERCIAL_SAAS.md) y
+[bitácora y continuación](docs/BITACORA_CONTINUIDAD.md).
+Para retomar el desarrollo en otra sesión:
+[pendientes priorizados y decisiones necesarias](docs/PENDIENTES_DESARROLLO.md).
 
 Arranque actualizado: [despliegue local](docs/DESPLIEGUE_LOCAL.md).
 Entregables: [manual ilustrado](docs/manual/MANUAL_ERP360_OPERACION_Y_CONFIGURACION.docx)

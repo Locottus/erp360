@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -10,6 +10,15 @@ import { EcommerceService } from './ecommerce.service';
 @Roles('admin')
 export class EcommerceAdminController {
   constructor(private readonly ecommerceService: EcommerceService) {}
+
+  @Get('fulfillments')
+  fulfillments(@Req() request: AuthenticatedRequest) { return this.ecommerceService.listFulfillments(request.user); }
+
+  @Patch('fulfillments/:id')
+  fulfillment(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<EcommerceService['updateFulfillment']>[2]) {
+    return this.ecommerceService.updateFulfillment(request.user, id, input);
+  }
 
   @Get('settings')
   getSettings(@Req() request: AuthenticatedRequest) {

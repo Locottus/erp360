@@ -1,0 +1,54 @@
+{
+  "base": "http://127.0.0.1:4201",
+  "capturedAt": "2026-11-11T04:10:19.569Z",
+  "companyCode": "GUIA-SAAS-20261110221018588",
+  "flows": [
+    "Actual browser account, company base contract 99, immutable invoice and confirmed partial payment25; single payment persisted",
+    "Actual browser promise followup with responsible operator and due date; promise never counted as payment",
+    "Own company subscription visible without arbitrary module disabling or payment-provider simulation",
+    "Platform membership removed: same tenant admin gets403 global portfolio while own subscription stays readable"
+  ],
+  "responsive": [
+    {
+      "route": "/platform/billing",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/subscription",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/platform/billing",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/subscription",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/platform/billing",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/subscription",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/platform/billing",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/subscription",
+      "width": 1440,
+      "scroll": 1440
+    }
+  ],
+  "pageErrors": 0
+}

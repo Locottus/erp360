@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards, StreamableFile } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -9,6 +9,24 @@ import { CommerceService } from './commerce.service';
 @UseGuards(AuthGuard)
 export class CommerceController {
   constructor(private readonly commerceService: CommerceService) {}
+
+  @Post('sales/orders/:id/cancel')
+  @Roles('admin')
+  cancelSale(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() input: { reason: string }) {
+    return this.commerceService.cancelOrder(request.user, id, 'sales', input.reason);
+  }
+
+  @Post('purchases/orders/:id/cancel')
+  @Roles('admin')
+  cancelPurchase(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() input: { reason: string }) {
+    return this.commerceService.cancelOrder(request.user, id, 'purchase', input.reason);
+  }
+
+  @Get('sales/invoices/:id/pdf')
+  async invoicePdf(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return new StreamableFile(await this.commerceService.invoicePdf(request.user, id),
+      { type: 'application/pdf', disposition: 'attachment; filename="factura-comercial.pdf"' });
+  }
 
   @Post('sales/quotations')
   @Roles('admin')

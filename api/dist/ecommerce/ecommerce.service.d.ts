@@ -3,6 +3,19 @@ import type { AddCartItemInput, AuthUser, CheckoutCartInput, CreateCategoryInput
 export declare class EcommerceService {
     private readonly db;
     constructor(db: DatabaseService);
+    listFulfillments(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    updateFulfillment(user: AuthUser, id: string, input: {
+        status: string;
+        expectedStatus: string;
+        courier?: string;
+        trackingCode?: string;
+    }): Promise<{
+        id: string;
+        status: string;
+    }>;
+    publicUnsubscribe(companyCode: string, token: string): Promise<{
+        status: string;
+    }>;
     getAdminSettings(user: AuthUser): Promise<import("pg").QueryResultRow>;
     upsertAdminSettings(user: AuthUser, input: UpsertStorefrontSettingsInput): Promise<{
         id: string;
@@ -70,16 +83,27 @@ export declare class EcommerceService {
     }>;
     checkoutCart(companyCode: string, cartId: string, cartToken: string, input: CheckoutCartInput): Promise<{
         cartId: string;
+        orderId: string;
+        orderNumber: string;
+        checkoutNumber: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+        replayed: boolean;
+    } | {
+        cartId: string;
         checkoutNumber: string;
         orderId: string;
         orderNumber: string;
         subtotal: number;
         taxTotal: number;
         grandTotal: number;
+        replayed?: undefined;
     }>;
     subscribe(companyCode: string, input: SubscribeInput): Promise<{
         id: string;
         status: string;
+        unsubscribeToken: string;
     }>;
     listSubscribers(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     unsubscribe(user: AuthUser, subscriberId: string): Promise<{
@@ -97,7 +121,6 @@ export declare class EcommerceService {
     private resolveDefaultTaxRatePercent;
     private computeCartTotalsWithTax;
     private resolveOrCreateCustomer;
-    private nextSequence;
     private reserveSalesOrderStockTx;
     private insertAudit;
     private insertAuditTx;
