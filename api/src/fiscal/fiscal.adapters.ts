@@ -1,4 +1,5 @@
 import type { CountryCode } from './fiscal.types';
+import { BadRequestException } from '@nestjs/common';
 
 export type FiscalAdapterConfig = {
   providerCode: string;
@@ -23,6 +24,9 @@ abstract class BaseSandboxAdapter implements FiscalAdapter {
   abstract country: CountryCode;
 
   async submit(payload: Record<string, unknown>, config: FiscalAdapterConfig): Promise<FiscalSubmitResult> {
+    if (config.environment !== 'sandbox') {
+      throw new BadRequestException('Production fiscal certification is not implemented. Use sandbox only.');
+    }
     const control = String(payload['controlNumber'] ?? '');
     const track = `${this.country}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     const accepted = config.environment === 'sandbox' || control.length > 4;

@@ -1,10 +1,16 @@
 import { TestBed } from '@angular/core/testing';
+import { provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { provideRouter } from '@angular/router';
 import { App } from './app';
 
 describe('App', () => {
   beforeEach(async () => {
+    localStorage.removeItem('erp360.auth.token');
+    sessionStorage.removeItem('erp360.auth.token');
     await TestBed.configureTestingModule({
       imports: [App],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).compileComponents();
   });
 
@@ -14,11 +20,12 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render top navigation', () => {
+  it('should render primary navigation', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('.topbar')?.textContent).toContain('Inicio');
-    expect(compiled.querySelector('.topbar')?.textContent).toContain('Portal cliente');
+    expect(compiled.querySelector('.nav-links')?.textContent).toContain('Inicio');
+    expect(compiled.querySelector('.nav-links')?.textContent).toContain('Portal cliente');
+    expect(compiled.querySelector('.nav-links')?.textContent).toContain('Acceso');
   });
 });

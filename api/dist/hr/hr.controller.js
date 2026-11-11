@@ -28,6 +28,9 @@ let HrController = class HrController {
     listEmployees(request) {
         return this.hrService.listEmployees(request.user);
     }
+    listAttendance(request) {
+        return this.hrService.listAttendance(request.user);
+    }
     checkIn(request, body) {
         return this.hrService.checkIn(request.user, body);
     }
@@ -64,6 +67,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listEmployees", null);
+__decorate([
+    (0, common_1.Get)('attendance'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "listAttendance", null);
 __decorate([
     (0, common_1.Post)('attendance/check-in'),
     (0, roles_decorator_1.Roles)('admin'),

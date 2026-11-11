@@ -3,6 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
+import { DatabaseService } from '../src/common/database.service';
 
 describe('eCommerce storefront (e2e)', () => {
   let app: INestApplication<App>;
@@ -115,6 +116,12 @@ describe('eCommerce storefront (e2e)', () => {
       .expect(200);
     expect(storefront.body.products.length).toBeGreaterThan(0);
 
+    const sharedStorefront = await request(app.getHttpServer())
+      .get(`/ecommerce/storefront/by-slug/store-${suffix}`)
+      .expect(200);
+    expect(sharedStorefront.body.store.company_code).toBe(companyCode);
+    expect(sharedStorefront.body.products.some((item: { id: string }) => item.id === listingId)).toBe(true);
+
     const subscribed = await request(app.getHttpServer())
       .post(`/ecommerce/storefront/${companyCode}/subscribe`)
       .send({
@@ -154,6 +161,23 @@ describe('eCommerce storefront (e2e)', () => {
     expect(checkedOut.body.orderId).toBeTruthy();
     expect(checkedOut.body.orderNumber).toContain('WEBO-');
     expect(Number(checkedOut.body.grandTotal)).toBeGreaterThan(0);
+
+    const database = app.get(DatabaseService);
+    await database.query('UPDATE products SET is_active = FALSE WHERE id = $1', [productId]);
+    const afterDeactivation = await request(app.getHttpServer())
+      .get(`/ecommerce/storefront/by-slug/store-${suffix}`)
+      .expect(200);
+    expect(afterDeactivation.body.products.some((item: { id: string }) => item.id === listingId)).toBe(false);
+
+    const secondCart = await request(app.getHttpServer())
+      .post(`/ecommerce/storefront/${companyCode}/carts`)
+      .send({})
+      .expect(201);
+    await request(app.getHttpServer())
+      .post(`/ecommerce/storefront/${companyCode}/carts/${secondCart.body.cartId}/items`)
+      .set('x-cart-token', secondCart.body.cartToken)
+      .send({ listingId, quantity: 1 })
+      .expect(404);
 
     const subscribers = await request(app.getHttpServer())
       .get('/ecommerce/admin/subscribers')

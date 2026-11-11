@@ -12,6 +12,7 @@ import { PortalModule } from './portal/portal.module';
 import { HrModule } from './hr/hr.module';
 import { RpcLegacyModule } from './rpc-legacy/rpc-legacy.module';
 import { EcommerceModule } from './ecommerce/ecommerce.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { EcommerceModule } from './ecommerce/ecommerce.module';
     HrModule,
     RpcLegacyModule,
     EcommerceModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],

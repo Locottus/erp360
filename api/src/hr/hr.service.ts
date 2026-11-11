@@ -58,6 +58,21 @@ export class HrService {
     return result.rows;
   }
 
+  async listAttendance(user: AuthUser) {
+    const result = await this.db.query(
+      `SELECT a.id, a.employee_id, e.employee_code, e.full_name, e.job_title,
+              a.check_in_at, a.check_out_at, a.total_minutes, a.status
+       FROM hr_attendance a
+       JOIN hr_employees e ON e.id = a.employee_id AND e.company_id = a.company_id
+       WHERE a.company_id = $1
+       ORDER BY a.check_in_at DESC, a.id DESC
+       LIMIT 500`,
+      [user.companyId],
+    );
+    await this.insertAuditDirect(user, 'hr.attendance.list', user.companyId, { total: result.rows.length });
+    return result.rows;
+  }
+
   async checkIn(user: AuthUser, input: CheckInInput) {
     if (!input.employeeId?.trim()) {
       throw new BadRequestException('employeeId is required.');

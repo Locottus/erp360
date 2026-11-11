@@ -93,6 +93,48 @@ export class CommerceService {
     return result.rows;
   }
 
+  async listSalesOrders(user: AuthUser) {
+    const result = await this.db.query(
+      `SELECT so.id, so.order_number, so.status, so.subtotal, so.tax_total, so.grand_total,
+              so.created_at, c.name AS customer_name
+       FROM sales_orders so
+       JOIN customers c ON c.id = so.customer_id AND c.company_id = so.company_id
+       WHERE so.company_id = $1
+       ORDER BY so.created_at DESC, so.id DESC`,
+      [user.companyId],
+    );
+    return result.rows;
+  }
+
+  async listSalesInvoices(user: AuthUser) {
+    const result = await this.db.query(
+      `SELECT si.id, si.invoice_number, si.status, si.subtotal, si.tax_total, si.grand_total,
+              si.issued_at, so.id AS sales_order_id, so.order_number, c.name AS customer_name,
+              COALESCE(pay.total_paid, 0)::text AS total_paid,
+              GREATEST(si.grand_total - COALESCE(pay.total_paid, 0), 0)::text AS balance_due,
+              EXISTS (
+                SELECT 1 FROM accounting_journal_entries je
+                WHERE je.company_id = si.company_id
+                  AND je.source_type = 'sales_invoice'
+                  AND je.source_id = si.id
+                  AND je.status = 'posted'
+              ) AS is_posted
+       FROM sales_invoices si
+       JOIN sales_orders so ON so.id = si.order_id AND so.company_id = si.company_id
+       JOIN customers c ON c.id = so.customer_id AND c.company_id = so.company_id
+       LEFT JOIN (
+         SELECT company_id, invoice_id, SUM(amount) AS total_paid
+         FROM accounting_payments
+         WHERE company_id = $1
+         GROUP BY company_id, invoice_id
+       ) pay ON pay.company_id = si.company_id AND pay.invoice_id = si.id
+       WHERE si.company_id = $1
+       ORDER BY si.issued_at DESC, si.id DESC`,
+      [user.companyId],
+    );
+    return result.rows;
+  }
+
   async confirmQuotation(user: AuthUser, quotationId: string, orderNumber: string) {
     if (!orderNumber?.trim()) {
       throw new BadRequestException('orderNumber is required.');
@@ -111,7 +153,8 @@ export class CommerceService {
         `SELECT id, customer_id, status, subtotal, tax_total, grand_total
          FROM sales_quotations
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [quotationId, user.companyId],
       );
       if (!quote.rows[0]) {
@@ -207,7 +250,8 @@ export class CommerceService {
         `SELECT id, status, subtotal, tax_total, grand_total
          FROM sales_orders
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [salesOrderId, user.companyId],
       );
       if (!order.rows[0]) {
@@ -331,10 +375,29 @@ export class CommerceService {
       grand_total: string;
       supplier_id: string;
     }>(
-      `SELECT id, request_number, status, subtotal, tax_total, grand_total, supplier_id
-       FROM purchase_requests
-       WHERE company_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT pr.id, pr.request_number, pr.status, pr.subtotal, pr.tax_total, pr.grand_total,
+              pr.supplier_id, s.name AS supplier_name,
+              po.id AS purchase_order_id, po.order_number AS purchase_order_number,
+              po.status AS purchase_order_status,
+              (po.id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM inventory_movements im
+                WHERE im.company_id = pr.company_id
+                  AND im.reference_type = 'purchase_order'
+                  AND im.reference_id = po.id
+                  AND im.movement_type = 'purchase_receipt'
+              )) AS inventory_received,
+              (po.id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM accounting_journal_entries je
+                WHERE je.company_id = pr.company_id
+                  AND je.source_type = 'purchase_order'
+                  AND je.source_id = po.id
+                  AND je.status = 'posted'
+              )) AS is_posted
+       FROM purchase_requests pr
+       JOIN suppliers s ON s.id = pr.supplier_id AND s.company_id = pr.company_id
+       LEFT JOIN purchase_orders po ON po.request_id = pr.id AND po.company_id = pr.company_id
+       WHERE pr.company_id = $1
+       ORDER BY pr.created_at DESC, pr.id DESC`,
       [user.companyId],
     );
     await this.insertAuditDirect(user, 'commerce.purchase.request.list', user.companyId, {
@@ -361,7 +424,8 @@ export class CommerceService {
         `SELECT id, supplier_id, status, subtotal, tax_total, grand_total
          FROM purchase_requests
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [requestId, user.companyId],
       );
       if (!requestRec.rows[0]) {
@@ -448,7 +512,8 @@ export class CommerceService {
         `SELECT id, status
          FROM purchase_orders
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [purchaseOrderId, user.companyId],
       );
       if (!po.rows[0]) {

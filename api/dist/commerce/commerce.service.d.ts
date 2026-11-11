@@ -20,6 +20,8 @@ export declare class CommerceService {
         grand_total: string;
         customer_id: string;
     }[]>;
+    listSalesOrders(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listSalesInvoices(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     confirmQuotation(user: AuthUser, quotationId: string, orderNumber: string): Promise<{
         quotationId: string;
         orderId: string;

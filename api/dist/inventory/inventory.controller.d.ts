@@ -22,7 +22,7 @@ export declare class InventoryController {
         locationCode?: string;
     }): Promise<{
         salesOrderId: string;
-        locationCode: string;
+        locationCodes: string[];
         dispatchedLines: number;
     }>;
     createAdjustment(request: AuthenticatedRequest, body: StockAdjustmentInput): Promise<{
@@ -39,4 +39,11 @@ export declare class InventoryController {
         reserved: string;
         available: string;
     }[]>;
+    listMovements(request: AuthenticatedRequest, productId?: string, locationCode?: string, page?: string, pageSize?: string): Promise<{
+        items: import("pg").QueryResultRow[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }>;
+    listSalesOrdersForFulfillment(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
 }

@@ -6,6 +6,15 @@ import { EcommerceService } from './ecommerce.service';
 export class EcommerceStorefrontController {
   constructor(private readonly ecommerceService: EcommerceService) {}
 
+  @Get('by-slug/:storeSlug')
+  getStorefrontBySlug(
+    @Param('storeSlug') storeSlug: string,
+    @Query('q') query?: string,
+    @Query('category') categoryCode?: string,
+  ) {
+    return this.ecommerceService.getStorefrontBySlug(storeSlug, query, categoryCode);
+  }
+
   @Get(':companyCode')
   getStorefront(
     @Param('companyCode') companyCode: string,

@@ -10,6 +10,7 @@ export type UpsertStorefrontSettingsInput = {
     currencyCode?: string;
     defaultTaxRateCode?: string;
     supportEmail?: string;
+    isActive?: boolean;
     theme?: Record<string, unknown>;
 };
 export type CreateCategoryInput = {

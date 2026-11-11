@@ -1,0 +1,134 @@
+{
+  "base": "http://127.0.0.1:4201",
+  "capturedAt": "2026-11-11T00:35:58.023Z",
+  "flows": [
+    "Login with Enter, session-only token, real dashboard week series and data table",
+    "Store load, quantity 2, add/remove, checkout, inventory reserved increased by exactly 2",
+    "Explicit marketing consent, server-side subscriber registration",
+    "Portal real documents, password-masked input, no token persistence, clear, revoke and rejected reuse; sanitized help",
+    "24 route/viewport checks, mobile keyboard menu, dark persistence, logout"
+  ],
+  "responsive": [
+    {
+      "route": "/",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/login",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/workspace",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/store",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/portal",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/processes",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/login",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/workspace",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/store",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/portal",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/processes",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/login",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/workspace",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/store",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/portal",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/processes",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/login",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/workspace",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/store",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/portal",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/processes",
+      "width": 1440,
+      "scroll": 1440
+    }
+  ],
+  "pageErrors": 0
+}

@@ -21,7 +21,7 @@ let AuthService = class AuthService {
         this.db = db;
     }
     async login(input, correlationId) {
-        if (!input.email || !input.password) {
+        if (typeof input.email !== 'string' || typeof input.password !== 'string' || !input.email.trim() || !input.password) {
             throw new common_1.BadRequestException('Email and password are required.');
         }
         const userResult = await this.db.query(`SELECT id, company_id, email, password_hash, full_name, is_active
@@ -104,15 +104,29 @@ let AuthService = class AuthService {
         };
     }
     async bootstrapAdmin(input, correlationId) {
-        if (!input.email || !input.password || !input.companyCode || !input.companyName || !input.fullName) {
+        if (process.env.BOOTSTRAP_ENABLED !== 'true' && process.env.NODE_ENV !== 'test') {
+            throw new common_1.ForbiddenException('Company registration is disabled. Contact your administrator.');
+        }
+        if (!input || !input.email || !input.password || !input.companyCode ||
+            typeof input.companyName !== 'string' || !input.companyName.trim() ||
+            typeof input.fullName !== 'string' || !input.fullName.trim()) {
             throw new common_1.BadRequestException('Missing required fields for bootstrap admin.');
+        }
+        if (typeof input.password !== 'string' || input.password.length < 12 ||
+            typeof input.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ||
+            typeof input.companyCode !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(input.companyCode)) {
+            throw new common_1.BadRequestException('Use a valid email, company code and a password of at least 12 characters.');
         }
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
+            await client.query(`SELECT pg_advisory_xact_lock(hashtext('erp360.company.registration'))`);
             const companyResult = await client.query('SELECT id FROM companies WHERE code = $1 LIMIT 1', [input.companyCode]);
-            let companyId = companyResult.rows[0]?.id;
-            if (!companyId) {
+            if (companyResult.rows[0]) {
+                throw new common_1.ConflictException('Company already exists. Contact its administrator.');
+            }
+            let companyId;
+            {
                 const createdCompany = await client.query(`INSERT INTO companies (code, name)
            VALUES ($1, $2)
            RETURNING id`, [input.companyCode, input.companyName]);

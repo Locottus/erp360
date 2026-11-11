@@ -17,7 +17,8 @@ export class InventoryService {
         `SELECT id, status
          FROM purchase_orders
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [purchaseOrderId, user.companyId],
       );
       if (!order.rows[0]) {
@@ -94,7 +95,8 @@ export class InventoryService {
         `SELECT id, status
          FROM sales_orders
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [salesOrderId, user.companyId],
       );
       if (!order.rows[0]) {
@@ -149,9 +151,9 @@ export class InventoryService {
           [quantity, user.companyId, location, line.product_id],
         );
         await client.query(
-          `INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, quantity, status)
-           VALUES ($1,$2,$3,$4,'reserved')`,
-          [user.companyId, salesOrderId, line.product_id, quantity],
+          `INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, location_code, quantity, status)
+           VALUES ($1,$2,$3,$4,$5,'reserved')`,
+          [user.companyId, salesOrderId, line.product_id, location, quantity],
         );
         await this.insertMovement(
           client,
@@ -181,12 +183,28 @@ export class InventoryService {
   }
 
   async dispatchSalesOrder(user: AuthUser, salesOrderId: string, locationCode?: string) {
-    const location = this.normalizeLocation(locationCode);
+    const requestedLocation = locationCode?.trim() ? this.normalizeLocation(locationCode) : null;
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-      const reservations = await client.query<{ id: string; product_id: string; quantity: string; status: string }>(
-        `SELECT id, product_id, quantity, status
+      const order = await client.query<{ id: string; status: string }>(
+        `SELECT id, status
+         FROM sales_orders
+         WHERE id = $1 AND company_id = $2
+         LIMIT 1
+         FOR UPDATE`,
+        [salesOrderId, user.companyId],
+      );
+      if (!order.rows[0]) {
+        throw new NotFoundException('Sales order not found.');
+      }
+      if (!['confirmed', 'invoiced'].includes(order.rows[0].status)) {
+        throw new BadRequestException('Sales order must be confirmed or invoiced.');
+      }
+      const reservations = await client.query<{
+        id: string; product_id: string; quantity: string; status: string; location_code: string;
+      }>(
+        `SELECT id, product_id, quantity, status, location_code
          FROM inventory_reservations
          WHERE company_id = $1 AND sales_order_id = $2 AND status = 'reserved'`,
         [user.companyId, salesOrderId],
@@ -196,6 +214,10 @@ export class InventoryService {
       }
 
       for (const reservation of reservations.rows) {
+        const location = reservation.location_code;
+        if (requestedLocation && requestedLocation !== location) {
+          throw new BadRequestException('Dispatch location must match the order reservation location.');
+        }
         const stock = await client.query<{ on_hand: string; reserved: string }>(
           `SELECT on_hand, reserved
            FROM inventory_stock_balances
@@ -240,10 +262,14 @@ export class InventoryService {
 
       await this.insertAudit(client, user, 'inventory.sales.dispatch.apply', salesOrderId, {
         lines: reservations.rows.length,
-        location,
+        locations: [...new Set(reservations.rows.map((row) => row.location_code))],
       });
       await client.query('COMMIT');
-      return { salesOrderId, locationCode: location, dispatchedLines: reservations.rows.length };
+      return {
+        salesOrderId,
+        locationCodes: [...new Set(reservations.rows.map((row) => row.location_code))],
+        dispatchedLines: reservations.rows.length,
+      };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
@@ -259,7 +285,7 @@ export class InventoryService {
     if (!input.direction || !['in', 'out'].includes(input.direction)) {
       throw new BadRequestException('direction must be in or out.');
     }
-    if (!input.quantity || input.quantity <= 0) {
+    if (typeof input.quantity !== 'number' || !Number.isFinite(input.quantity) || input.quantity <= 0) {
       throw new BadRequestException('quantity must be greater than zero.');
     }
     const location = this.normalizeLocation(input.locationCode);
@@ -356,9 +382,91 @@ export class InventoryService {
     return result.rows;
   }
 
+  async listMovements(user: AuthUser, options: {
+    productId?: string; locationCode?: string; page?: string; pageSize?: string;
+  }) {
+    const page = this.parsePageValue(options.page, 1, 1_000_000, 'page');
+    const pageSize = this.parsePageValue(options.pageSize, 50, 100, 'pageSize');
+    const params: unknown[] = [user.companyId];
+    const filters = ['m.company_id = $1'];
+    if (options.productId?.trim()) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(options.productId.trim())) {
+        throw new BadRequestException('productId must be a valid UUID.');
+      }
+      params.push(options.productId.trim());
+      filters.push(`m.product_id = $${params.length}`);
+    }
+    if (options.locationCode?.trim()) {
+      params.push(this.normalizeLocation(options.locationCode));
+      filters.push(`m.location_code = $${params.length}`);
+    }
+    const where = filters.join(' AND ');
+    const count = await this.db.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM inventory_movements m WHERE ${where}`,
+      params,
+    );
+    const offset = (page - 1) * pageSize;
+    const rows = await this.db.query(
+      `SELECT m.id, m.product_id, p.sku, p.name AS product_name, m.location_code,
+              m.movement_type, m.quantity, m.reference_type, m.reference_id, m.notes,
+              m.created_at
+       FROM inventory_movements m
+       JOIN products p ON p.id = m.product_id AND p.company_id = m.company_id
+       WHERE ${where}
+       ORDER BY m.created_at DESC, m.id DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset],
+    );
+    await this.db.query(
+      `INSERT INTO audit_log (company_id, actor_user_id, event_name, entity_name, entity_id, payload)
+       VALUES ($1,$2,'inventory.movement.list','inventory',$4,$3)`,
+      [
+        user.companyId,
+        user.sub,
+        JSON.stringify({ total: count.rows[0].total, page, page_size: pageSize }),
+        user.companyId,
+      ],
+    );
+    return { items: rows.rows, total: Number(count.rows[0].total), page, pageSize };
+  }
+
+  async listSalesOrdersForFulfillment(user: AuthUser) {
+    const result = await this.db.query(
+      `SELECT so.id, so.order_number, so.status, so.created_at, c.name AS customer_name,
+              EXISTS (SELECT 1 FROM sales_invoices si WHERE si.order_id = so.id) AS is_invoiced,
+              CASE
+                WHEN bool_or(ir.status = 'reserved') THEN 'reserved'
+                WHEN bool_or(ir.status = 'fulfilled') THEN 'fulfilled'
+                ELSE 'none'
+              END AS reservation_status,
+              MAX(ir.location_code) FILTER (WHERE ir.status = 'reserved') AS reservation_location
+       FROM sales_orders so
+       JOIN customers c ON c.id = so.customer_id AND c.company_id = so.company_id
+       LEFT JOIN inventory_reservations ir ON ir.sales_order_id = so.id AND ir.company_id = so.company_id
+       WHERE so.company_id = $1 AND so.status IN ('confirmed', 'invoiced')
+       GROUP BY so.id, c.name
+       ORDER BY so.created_at DESC, so.id DESC`,
+      [user.companyId],
+    );
+    return result.rows;
+  }
+
+  private parsePageValue(raw: string | undefined, fallback: number, maximum: number, field: string) {
+    if (raw === undefined || raw === '') return fallback;
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
+      throw new BadRequestException(`${field} must be an integer between 1 and ${maximum}.`);
+    }
+    return parsed;
+  }
+
   private normalizeLocation(locationCode?: string) {
     const location = locationCode?.trim() || 'MAIN';
-    return location.toUpperCase();
+    const normalized = location.toUpperCase();
+    if (normalized.length > 32) {
+      throw new BadRequestException('locationCode must not exceed 32 characters.');
+    }
+    return normalized;
   }
 
   private async ensureStockBalanceRow(client: DbClient, companyId: string, productId: string, locationCode: string) {

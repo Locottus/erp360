@@ -21,6 +21,11 @@ export class HrController {
     return this.hrService.listEmployees(request.user);
   }
 
+  @Get('attendance')
+  listAttendance(@Req() request: AuthenticatedRequest) {
+    return this.hrService.listAttendance(request.user);
+  }
+
   @Post('attendance/check-in')
   @Roles('admin')
   checkIn(@Req() request: AuthenticatedRequest, @Body() body: CheckInInput) {

@@ -29,14 +29,29 @@ let EcommerceService = class EcommerceService {
         if (!input.storeName?.trim() || !input.storeSlug?.trim()) {
             throw new common_1.BadRequestException('storeName and storeSlug are required.');
         }
+        if (!/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(input.storeSlug.trim().toLowerCase())) {
+            throw new common_1.BadRequestException('storeSlug must contain lowercase letters, numbers and internal hyphens.');
+        }
         const currencyCode = (input.currencyCode ?? 'USD').trim().toUpperCase();
         if (currencyCode.length < 3 || currencyCode.length > 8) {
             throw new common_1.BadRequestException('currencyCode must be a valid code.');
         }
+        if (input.supportEmail?.trim() && !this.isValidEmail(input.supportEmail.trim())) {
+            throw new common_1.BadRequestException('supportEmail must be a valid email address.');
+        }
+        if (input.defaultTaxRateCode?.trim()) {
+            const taxRate = await this.db.query(`SELECT id FROM tax_rates
+         WHERE company_id = $1 AND code = $2 AND is_active = TRUE
+         LIMIT 1`, [user.companyId, input.defaultTaxRateCode.trim()]);
+            if (!taxRate.rows[0]) {
+                throw new common_1.BadRequestException('defaultTaxRateCode must belong to this company and be active.');
+            }
+        }
+        const theme = this.normalizeTheme(input.theme ?? {});
         try {
             const result = await this.db.query(`INSERT INTO ecommerce_storefront_settings
           (company_id, store_name, store_slug, currency_code, default_tax_rate_code, support_email, is_active, theme_json, created_by, updated_at)
-         VALUES ($1,$2,$3,$4,$5,$6,TRUE,$7,$8,NOW())
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
          ON CONFLICT (company_id)
          DO UPDATE SET
            store_name = EXCLUDED.store_name,
@@ -44,6 +59,7 @@ let EcommerceService = class EcommerceService {
            currency_code = EXCLUDED.currency_code,
            default_tax_rate_code = EXCLUDED.default_tax_rate_code,
            support_email = EXCLUDED.support_email,
+           is_active = EXCLUDED.is_active,
            theme_json = EXCLUDED.theme_json,
            updated_at = NOW()
          RETURNING id`, [
@@ -53,7 +69,8 @@ let EcommerceService = class EcommerceService {
                 currencyCode,
                 input.defaultTaxRateCode?.trim() || null,
                 input.supportEmail?.trim() || null,
-                JSON.stringify(input.theme ?? {}),
+                input.isActive ?? true,
+                JSON.stringify(theme),
                 user.sub,
             ]);
             await this.insertAudit(user, 'ecommerce.settings.upsert', result.rows[0].id, {
@@ -108,12 +125,15 @@ let EcommerceService = class EcommerceService {
         if (input.unitPrice < 0) {
             throw new common_1.BadRequestException('unitPrice cannot be negative.');
         }
-        const product = await this.db.query(`SELECT id
+        const product = await this.db.query(`SELECT id, is_active
        FROM products
        WHERE id = $1 AND company_id = $2
        LIMIT 1`, [input.productId, user.companyId]);
         if (!product.rows[0]) {
             throw new common_1.BadRequestException('Product does not belong to current company.');
+        }
+        if ((input.isPublished ?? true) && !product.rows[0].is_active) {
+            throw new common_1.BadRequestException('Inactive products cannot be published.');
         }
         let categoryId = null;
         if (input.categoryCode?.trim()) {
@@ -177,11 +197,15 @@ let EcommerceService = class EcommerceService {
               p.sku,
               l.slug,
               l.title,
+              l.short_description,
+              l.long_description,
               l.unit_price,
               l.compare_at_price,
+              l.featured_image_url,
               l.is_published,
               l.sort_order,
-              c.code AS category_code
+              c.code AS category_code,
+              c.name AS category_name
        FROM ecommerce_product_listings l
        JOIN products p ON p.id = l.product_id
        LEFT JOIN ecommerce_categories c ON c.id = l.category_id
@@ -189,17 +213,33 @@ let EcommerceService = class EcommerceService {
        ORDER BY l.sort_order ASC, l.title ASC`, [user.companyId]);
         return result.rows;
     }
+    async listAdminProducts(user) {
+        const result = await this.db.query(`SELECT p.id, p.sku, p.name, p.description, p.unit_price, p.is_active,
+              l.id AS listing_id, l.slug, l.title, l.short_description, l.long_description,
+              l.unit_price AS listing_price, l.compare_at_price, l.featured_image_url,
+              l.is_published, l.sort_order, c.code AS category_code, c.name AS category_name
+       FROM products p
+       LEFT JOIN ecommerce_product_listings l
+         ON l.product_id = p.id AND l.company_id = p.company_id
+       LEFT JOIN ecommerce_categories c
+         ON c.id = l.category_id AND c.company_id = p.company_id
+       WHERE p.company_id = $1
+       ORDER BY p.name ASC`, [user.companyId]);
+        return result.rows;
+    }
     async getStorefront(companyCode, query, categoryCode) {
         const company = await this.resolveCompanyByCode(companyCode);
-        const settings = await this.db.query(`SELECT store_name, store_slug, currency_code, support_email, theme_json
-       FROM ecommerce_storefront_settings
-       WHERE company_id = $1 AND is_active = TRUE
+        const settings = await this.db.query(`SELECT s.store_name, s.store_slug, s.currency_code, s.support_email,
+              s.theme_json, c.code AS company_code
+       FROM ecommerce_storefront_settings s
+       JOIN companies c ON c.id = s.company_id
+       WHERE s.company_id = $1 AND s.is_active = TRUE AND c.is_active = TRUE
        LIMIT 1`, [company.id]);
         if (!settings.rows[0]) {
             throw new common_1.NotFoundException('Storefront is not configured for this company.');
         }
         const params = [company.id];
-        let filters = 'WHERE l.company_id = $1 AND l.is_published = TRUE';
+        let filters = 'WHERE l.company_id = $1 AND l.is_published = TRUE AND p.is_active = TRUE';
         if (query?.trim()) {
             params.push(`%${query.trim()}%`);
             filters += ` AND (l.title ILIKE $${params.length} OR p.sku ILIKE $${params.length})`;
@@ -212,6 +252,7 @@ let EcommerceService = class EcommerceService {
               l.slug,
               l.title,
               l.short_description,
+              l.long_description,
               l.unit_price,
               l.compare_at_price,
               l.featured_image_url,
@@ -238,6 +279,17 @@ let EcommerceService = class EcommerceService {
             categories: categories.rows,
             products: listings.rows,
         };
+    }
+    async getStorefrontBySlug(storeSlug, query, categoryCode) {
+        const company = await this.db.query(`SELECT c.code
+       FROM ecommerce_storefront_settings s
+       JOIN companies c ON c.id = s.company_id
+       WHERE s.store_slug = $1 AND s.is_active = TRUE AND c.is_active = TRUE
+       LIMIT 1`, [storeSlug.trim().toLowerCase()]);
+        if (!company.rows[0]) {
+            throw new common_1.NotFoundException('Storefront is not configured for this URL.');
+        }
+        return this.getStorefront(company.rows[0].code, query, categoryCode);
     }
     async createCart(companyCode) {
         const company = await this.resolveCompanyByCode(companyCode);
@@ -295,11 +347,12 @@ let EcommerceService = class EcommerceService {
         if (cart.status !== 'open') {
             throw new common_1.BadRequestException('Cart is not open.');
         }
-        const listing = await this.db.query(`SELECT id, product_id, unit_price, is_published
-       FROM ecommerce_product_listings
-       WHERE id = $1 AND company_id = $2
+        const listing = await this.db.query(`SELECT l.id, l.product_id, l.unit_price, l.is_published, p.is_active AS product_is_active
+       FROM ecommerce_product_listings l
+       JOIN products p ON p.id = l.product_id AND p.company_id = l.company_id
+       WHERE l.id = $1 AND l.company_id = $2
        LIMIT 1`, [input.listingId, companyId]);
-        if (!listing.rows[0] || !listing.rows[0].is_published) {
+        if (!listing.rows[0] || !listing.rows[0].is_published || !listing.rows[0].product_is_active) {
             throw new common_1.NotFoundException('Listing not available.');
         }
         const quantity = Number(input.quantity);
@@ -492,6 +545,72 @@ let EcommerceService = class EcommerceService {
     isValidEmail(value) {
         return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
     }
+    normalizeTheme(input) {
+        const text = (value, fallback, maximum) => {
+            if (value === undefined)
+                return fallback;
+            if (typeof value !== 'string' || value.length > maximum) {
+                throw new common_1.BadRequestException('Store theme contains invalid text.');
+            }
+            return value.trim();
+        };
+        const color = (value, fallback) => {
+            if (value === undefined)
+                return fallback;
+            if (typeof value !== 'string' || !/^#[0-9a-f]{6}$/i.test(value)) {
+                throw new common_1.BadRequestException('Store theme colors must use #RRGGBB format.');
+            }
+            return value;
+        };
+        const template = input['template'] ?? 'minimal';
+        if (!['minimal', 'editorial', 'bold'].includes(String(template))) {
+            throw new common_1.BadRequestException('Store theme template is invalid.');
+        }
+        const allowedSections = ['hero', 'categories', 'products', 'newsletter'];
+        const rawSections = input['sections'];
+        const sections = rawSections === undefined ? allowedSections : rawSections;
+        if (!Array.isArray(sections) || sections.length > allowedSections.length ||
+            sections.some(section => typeof section !== 'string' || !allowedSections.includes(section)) ||
+            new Set(sections).size !== sections.length) {
+            throw new common_1.BadRequestException('Store theme sections are invalid.');
+        }
+        if (input['showNewsletter'] !== undefined && typeof input['showNewsletter'] !== 'boolean') {
+            throw new common_1.BadRequestException('Store theme newsletter visibility must be boolean.');
+        }
+        const rawImage = input['heroImageUrl'];
+        let heroImageUrl = '';
+        if (rawImage !== undefined) {
+            if (typeof rawImage !== 'string' || rawImage.length > 2048) {
+                throw new common_1.BadRequestException('Store hero image URL is invalid.');
+            }
+            if (rawImage.trim()) {
+                let parsed;
+                try {
+                    parsed = new URL(rawImage.trim());
+                }
+                catch {
+                    throw new common_1.BadRequestException('Store hero image URL must be an absolute HTTPS URL.');
+                }
+                if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+                    throw new common_1.BadRequestException('Store hero image URL must be a public HTTPS URL.');
+                }
+                heroImageUrl = parsed.toString();
+            }
+        }
+        return {
+            template,
+            brandColor: color(input['brandColor'], '#2563eb'),
+            accentColor: color(input['accentColor'], '#0f172a'),
+            heroTitle: text(input['heroTitle'], '', 120),
+            heroSubtitle: text(input['heroSubtitle'], '', 320),
+            heroCtaText: text(input['heroCtaText'], 'Explorar catálogo', 48),
+            heroImageUrl,
+            announcement: text(input['announcement'], '', 140),
+            footerText: text(input['footerText'], '', 240),
+            sections,
+            showNewsletter: input['showNewsletter'] === undefined ? true : input['showNewsletter'] === true,
+        };
+    }
     async getAvailableStock(companyId, productId) {
         const result = await this.db.query(`SELECT COALESCE(SUM(on_hand - reserved), 0)::text AS available
        FROM inventory_stock_balances
@@ -593,8 +712,8 @@ let EcommerceService = class EcommerceService {
             await client.query(`UPDATE inventory_stock_balances
          SET reserved = reserved + $1, updated_at = NOW()
          WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [quantity, companyId, locationCode, line.product_id]);
-            await client.query(`INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, quantity, status)
-         VALUES ($1,$2,$3,$4,'reserved')`, [companyId, salesOrderId, line.product_id, quantity]);
+            await client.query(`INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, location_code, quantity, status)
+         VALUES ($1,$2,$3,$4,$5,'reserved')`, [companyId, salesOrderId, line.product_id, locationCode, quantity]);
             await client.query(`INSERT INTO inventory_movements
           (company_id, location_code, product_id, movement_type, quantity, reference_type, reference_id, created_by)
          VALUES ($1,$2,$3,'sale_reservation',$4,'sales_order',$5,NULL)`, [companyId, locationCode, line.product_id, quantity, salesOrderId]);

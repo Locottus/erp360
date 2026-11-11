@@ -21,6 +21,7 @@ const portal_module_1 = require("./portal/portal.module");
 const hr_module_1 = require("./hr/hr.module");
 const rpc_legacy_module_1 = require("./rpc-legacy/rpc-legacy.module");
 const ecommerce_module_1 = require("./ecommerce/ecommerce.module");
+const dashboard_module_1 = require("./dashboard/dashboard.module");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -38,6 +39,7 @@ exports.AppModule = AppModule = __decorate([
             hr_module_1.HrModule,
             rpc_legacy_module_1.RpcLegacyModule,
             ecommerce_module_1.EcommerceModule,
+            dashboard_module_1.DashboardModule,
         ],
         controllers: [app_controller_1.AppController],
         providers: [app_service_1.AppService],

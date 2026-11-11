@@ -37,6 +37,12 @@ let InventoryController = class InventoryController {
     listStock(request, locationCode) {
         return this.inventoryService.listStockBalances(request.user, locationCode);
     }
+    listMovements(request, productId, locationCode, page, pageSize) {
+        return this.inventoryService.listMovements(request.user, { productId, locationCode, page, pageSize });
+    }
+    listSalesOrdersForFulfillment(request) {
+        return this.inventoryService.listSalesOrdersForFulfillment(request.user);
+    }
 };
 exports.InventoryController = InventoryController;
 __decorate([
@@ -86,6 +92,24 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], InventoryController.prototype, "listStock", null);
+__decorate([
+    (0, common_1.Get)('movements'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('productId')),
+    __param(2, (0, common_1.Query)('locationCode')),
+    __param(3, (0, common_1.Query)('page')),
+    __param(4, (0, common_1.Query)('pageSize')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, String, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "listMovements", null);
+__decorate([
+    (0, common_1.Get)('sales-orders'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "listSalesOrdersForFulfillment", null);
 exports.InventoryController = InventoryController = __decorate([
     (0, common_1.Controller)('inventory'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),

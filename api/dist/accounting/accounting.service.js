@@ -78,10 +78,10 @@ let AccountingService = class AccountingService {
         }
     }
     async registerInvoicePayment(user, invoiceId, input) {
-        if (!input.paymentReference?.trim()) {
+        if (typeof input.paymentReference !== 'string' || !input.paymentReference.trim()) {
             throw new common_1.BadRequestException('paymentReference is required.');
         }
-        if (!input.amount || input.amount <= 0) {
+        if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
             throw new common_1.BadRequestException('amount must be greater than zero.');
         }
         const client = await this.db.connect();
@@ -90,7 +90,8 @@ let AccountingService = class AccountingService {
             const invoice = await client.query(`SELECT id, status, grand_total
          FROM sales_invoices
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`, [invoiceId, user.companyId]);
+         LIMIT 1
+         FOR UPDATE`, [invoiceId, user.companyId]);
             if (!invoice.rows[0]) {
                 throw new common_1.NotFoundException('Invoice not found.');
             }

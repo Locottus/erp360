@@ -14,7 +14,7 @@ export declare class FiscalController {
         payload: {
             country: CountryCode;
             provider: string;
-            environment: "sandbox" | "production";
+            environment: "production" | "sandbox";
             documentType: string;
             invoiceNumber: string;
             controlNumber: string;

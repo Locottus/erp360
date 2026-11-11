@@ -28,6 +28,9 @@ function loadJwtKeysFromEnv(rawJson, fallbackSecret) {
             throw new common_1.BadRequestException('JWT_SECRETS_JSON is not valid JSON.');
         }
     }
+    if (process.env.NODE_ENV === 'production' && !fallbackSecret?.trim()) {
+        throw new common_1.BadRequestException('Explicit JWT keys are required in production.');
+    }
     const secret = (fallbackSecret ?? '').trim() || 'erp360-dev-secret-change-me';
     return [{ kid: DEFAULT_KID, secret }];
 }

@@ -16,6 +16,11 @@ export class EcommerceAdminController {
     return this.ecommerceService.getAdminSettings(request.user);
   }
 
+  @Get('products')
+  listProducts(@Req() request: AuthenticatedRequest) {
+    return this.ecommerceService.listAdminProducts(request.user);
+  }
+
   @Post('settings')
   upsertSettings(@Req() request: AuthenticatedRequest, @Body() body: UpsertStorefrontSettingsInput) {
     return this.ecommerceService.upsertAdminSettings(request.user, body);

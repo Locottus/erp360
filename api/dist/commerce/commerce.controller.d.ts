@@ -21,6 +21,8 @@ export declare class CommerceController {
         grand_total: string;
         customer_id: string;
     }[]>;
+    listSalesOrders(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    listSalesInvoices(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     confirmQuotation(request: AuthenticatedRequest, quotationId: string, body: {
         orderNumber: string;
     }): Promise<{

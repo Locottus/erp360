@@ -13,7 +13,7 @@ export declare class FiscalService {
         payload: {
             country: CountryCode;
             provider: string;
-            environment: "sandbox" | "production";
+            environment: "production" | "sandbox";
             documentType: string;
             invoiceNumber: string;
             controlNumber: string;

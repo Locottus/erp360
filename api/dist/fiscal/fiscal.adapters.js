@@ -2,8 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DominicanRepublicEcfAdapter = exports.ElSalvadorDteAdapter = exports.GuatemalaFelAdapter = void 0;
 exports.buildFiscalAdapter = buildFiscalAdapter;
+const common_1 = require("@nestjs/common");
 class BaseSandboxAdapter {
     async submit(payload, config) {
+        if (config.environment !== 'sandbox') {
+            throw new common_1.BadRequestException('Production fiscal certification is not implemented. Use sandbox only.');
+        }
         const control = String(payload['controlNumber'] ?? '');
         const track = `${this.country}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
         const accepted = config.environment === 'sandbox' || control.length > 4;

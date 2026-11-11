@@ -6,6 +6,15 @@ import {
 } from './jwt-keys.util';
 
 describe('jwt-keys.util', () => {
+  it('rejects the development fallback in production', () => {
+    const old = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = 'production';
+      expect(() => loadJwtKeysFromEnv(undefined, undefined)).toThrow(BadRequestException);
+    } finally {
+      if (old === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = old;
+    }
+  });
   it('loads fallback key when JSON config is absent', () => {
     const keys = loadJwtKeysFromEnv(undefined, 'fallback-secret');
     expect(keys).toEqual([{ kid: 'default', secret: 'fallback-secret' }]);

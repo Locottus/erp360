@@ -33,6 +33,9 @@ export function loadJwtKeysFromEnv(
     }
   }
 
+  if (process.env.NODE_ENV === 'production' && !fallbackSecret?.trim()) {
+    throw new BadRequestException('Explicit JWT keys are required in production.');
+  }
   const secret = (fallbackSecret ?? '').trim() || 'erp360-dev-secret-change-me';
   return [{ kid: DEFAULT_KID, secret }];
 }

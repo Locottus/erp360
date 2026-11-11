@@ -5,6 +5,7 @@ export declare class EcommerceAdminController {
     private readonly ecommerceService;
     constructor(ecommerceService: EcommerceService);
     getSettings(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow>;
+    listProducts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     upsertSettings(request: AuthenticatedRequest, body: UpsertStorefrontSettingsInput): Promise<{
         id: string;
     }>;

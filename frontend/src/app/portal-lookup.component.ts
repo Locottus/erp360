@@ -1,69 +1,79 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { Component, inject } from '@angular/core';
+import { Component, inject, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
+import { API_BASE_URL } from './core/api';
+import { EmptyStateComponent } from './shared/empty-state.component';
 
+type DocumentRow = { status: string; quotation_number?: string; order_number?: string; invoice_number?: string; grand_total: string };
 type PortalSummary = {
   customer: { code: string; name: string; email: string | null };
-  quotations: Array<Record<string, unknown>>;
-  orders: Array<Record<string, unknown>>;
-  invoices: Array<Record<string, unknown>>;
+  quotations: DocumentRow[]; orders: DocumentRow[]; invoices: DocumentRow[];
 };
 
 @Component({
-  selector: 'app-portal-lookup',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
+  selector: 'app-portal-lookup', standalone: true,
+  imports: [CommonModule, FormsModule, EmptyStateComponent],
   template: `
-    <section class="page">
-      <h2>Portal de cliente</h2>
-      <label for="token">Token de acceso</label>
-      <input id="token" [(ngModel)]="token" placeholder="ptk_xxx" />
-      <button type="button" (click)="loadSummary()" [disabled]="loading || !token.trim()">Consultar</button>
-
-      <p *ngIf="error" class="error">{{ error }}</p>
-      <p *ngIf="loading">Cargando...</p>
-
-      <article *ngIf="summary">
-        <h3>{{ summary.customer.name }} ({{ summary.customer.code }})</h3>
-        <p *ngIf="summary.customer.email">Correo: {{ summary.customer.email }}</p>
-        <p>Cotizaciones: {{ summary.quotations.length }}</p>
-        <p>Pedidos: {{ summary.orders.length }}</p>
-        <p>Facturas: {{ summary.invoices.length }}</p>
+    <section class="page-shell">
+      <header class="page-header"><p class="eyebrow">AUTOSERVICIO SEGURO</p><h1>Portal de cliente</h1>
+        <p>Consulta tus documentos con el acceso temporal facilitado por la empresa.</p></header>
+      <article class="surface-card">
+        <form class="form-grid" (ngSubmit)="loadSummary()">
+          <label for="portal-token">Token de acceso privado</label>
+          <input id="portal-token" name="token" [(ngModel)]="token" type="password" autocomplete="off" required aria-describedby="token-help" />
+          <p id="token-help" class="muted">No se guarda en el navegador. No lo compartas con terceros ni con asistentes IA.</p>
+          <div class="quick-actions">
+            <button type="submit" class="btn btn-primary" [disabled]="loading || !token.trim()">{{ loading ? 'Consultando…' : 'Consultar documentos' }}</button>
+            <button type="button" class="btn btn-secondary" (click)="clear()">Limpiar consulta</button>
+          </div>
+        </form>
       </article>
+      @if (error) { <p role="alert" class="status status-error">{{ error }}</p> }
+      @if (summary) {
+        <article class="surface-card">
+          <h2>{{ summary.customer.name }}</h2><p>{{ summary.customer.code }}</p>
+          <p class="muted">Se muestran hasta 20 documentos recientes por categoría. Los contadores corresponden a esta consulta, no al histórico completo.</p>
+          <div class="metric-grid"><div>Cotizaciones<strong>{{ summary.quotations.length }}</strong></div><div>Pedidos<strong>{{ summary.orders.length }}</strong></div><div>Facturas<strong>{{ summary.invoices.length }}</strong></div></div>
+        </article>
+        @for (group of documentGroups; track group.title) {
+          <article class="surface-card">
+            <h2>{{ group.title }}</h2>
+            @if (group.rows.length) {
+              <div class="table-scroll"><table class="table-list">
+                <caption>{{ group.title }} · importes en la moneda del documento</caption>
+                <thead><tr><th scope="col">Número</th><th scope="col">Estado</th><th scope="col">Total</th></tr></thead>
+                <tbody>@for (row of group.rows; track $index) { <tr><th scope="row">{{ row.quotation_number || row.order_number || row.invoice_number }}</th><td>{{ row.status }}</td><td>{{ row.grand_total | number:'1.2-4' }}</td></tr> }</tbody>
+              </table></div>
+            } @else { <p class="muted">Sin documentos en esta categoría.</p> }
+          </article>
+        }
+      } @else if (!loading && !error) {
+        <app-empty-state title="Sin consulta activa" description="Solicita un token vigente al administrador para ver tus documentos." icon="bi-person-vcard"></app-empty-state>
+      }
     </section>
   `,
-  styles: `
-    .page { max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
-    label { display: block; margin-bottom: 0.25rem; font-weight: 600; }
-    input { width: 100%; margin-bottom: 0.75rem; padding: 0.5rem; }
-    button { padding: 0.5rem 1rem; }
-    .error { color: #b00020; }
-  `,
 })
-export class PortalLookupComponent {
+export class PortalLookupComponent implements OnDestroy {
   private readonly http = inject(HttpClient);
-  token = '';
-  loading = false;
-  error = '';
-  summary: PortalSummary | null = null;
-
+  private request = 0;
+  token = ''; loading = false; error = ''; summary: PortalSummary | null = null;
+  constructor() { localStorage.removeItem('erp360.portal.token.history'); }
+  get documentGroups() { return this.summary ? [
+    { title: 'Cotizaciones', rows: this.summary.quotations }, { title: 'Pedidos', rows: this.summary.orders }, { title: 'Facturas', rows: this.summary.invoices },
+  ] : []; }
   async loadSummary() {
-    this.loading = true;
-    this.error = '';
-    this.summary = null;
+    if (this.loading || !this.token.trim()) return;
+    const id = ++this.request;
+    this.loading = true; this.error = ''; this.summary = null;
     try {
-      const response = await this.http
-        .get<PortalSummary>(`http://localhost:3000/portal/public/${encodeURIComponent(this.token.trim())}/summary`)
-        .toPromise();
-      this.summary = response ?? null;
-      if (!this.summary) {
-        this.error = 'No se recibió respuesta del portal.';
-      }
+      const response = await firstValueFrom(this.http.get<PortalSummary>(`${API_BASE_URL}/portal/public/${encodeURIComponent(this.token.trim())}/summary`));
+      if (id === this.request) this.summary = response;
     } catch {
-      this.error = 'No se pudo consultar el portal con ese token.';
-    } finally {
-      this.loading = false;
-    }
+      if (id === this.request) this.error = 'No se pudo consultar. El token puede estar vencido o revocado; solicita uno nuevo o revisa la conexión.';
+    } finally { if (id === this.request) this.loading = false; }
   }
+  clear() { this.request++; this.token = ''; this.summary = null; this.error = ''; this.loading = false; }
+  ngOnDestroy() { this.clear(); }
 }

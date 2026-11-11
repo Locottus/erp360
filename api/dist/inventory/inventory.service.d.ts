@@ -15,7 +15,7 @@ export declare class InventoryService {
     }>;
     dispatchSalesOrder(user: AuthUser, salesOrderId: string, locationCode?: string): Promise<{
         salesOrderId: string;
-        locationCode: string;
+        locationCodes: string[];
         dispatchedLines: number;
     }>;
     adjustStock(user: AuthUser, input: StockAdjustmentInput): Promise<{
@@ -32,6 +32,19 @@ export declare class InventoryService {
         reserved: string;
         available: string;
     }[]>;
+    listMovements(user: AuthUser, options: {
+        productId?: string;
+        locationCode?: string;
+        page?: string;
+        pageSize?: string;
+    }): Promise<{
+        items: import("pg").QueryResultRow[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }>;
+    listSalesOrdersForFulfillment(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    private parsePageValue;
     private normalizeLocation;
     private ensureStockBalanceRow;
     private insertMovement;

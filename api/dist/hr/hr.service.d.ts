@@ -8,6 +8,7 @@ export declare class HrService {
         employee_code: string;
     }>;
     listEmployees(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listAttendance(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     checkIn(user: AuthUser, input: CheckInInput): Promise<{
         id: string;
         employeeId: string;

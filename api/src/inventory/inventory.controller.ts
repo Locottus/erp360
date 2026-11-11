@@ -50,4 +50,20 @@ export class InventoryController {
   listStock(@Req() request: AuthenticatedRequest, @Query('locationCode') locationCode?: string) {
     return this.inventoryService.listStockBalances(request.user, locationCode);
   }
+
+  @Get('movements')
+  listMovements(
+    @Req() request: AuthenticatedRequest,
+    @Query('productId') productId?: string,
+    @Query('locationCode') locationCode?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    return this.inventoryService.listMovements(request.user, { productId, locationCode, page, pageSize });
+  }
+
+  @Get('sales-orders')
+  listSalesOrdersForFulfillment(@Req() request: AuthenticatedRequest) {
+    return this.inventoryService.listSalesOrdersForFulfillment(request.user);
+  }
 }

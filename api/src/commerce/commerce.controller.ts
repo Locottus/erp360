@@ -21,6 +21,16 @@ export class CommerceController {
     return this.commerceService.listQuotations(request.user);
   }
 
+  @Get('sales/orders')
+  listSalesOrders(@Req() request: AuthenticatedRequest) {
+    return this.commerceService.listSalesOrders(request.user);
+  }
+
+  @Get('sales/invoices')
+  listSalesInvoices(@Req() request: AuthenticatedRequest) {
+    return this.commerceService.listSalesInvoices(request.user);
+  }
+
   @Post('sales/quotations/:id/confirm')
   @Roles('admin')
   confirmQuotation(

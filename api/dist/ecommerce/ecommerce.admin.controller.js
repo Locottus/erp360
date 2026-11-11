@@ -25,6 +25,9 @@ let EcommerceAdminController = class EcommerceAdminController {
     getSettings(request) {
         return this.ecommerceService.getAdminSettings(request.user);
     }
+    listProducts(request) {
+        return this.ecommerceService.listAdminProducts(request.user);
+    }
     upsertSettings(request, body) {
         return this.ecommerceService.upsertAdminSettings(request.user, body);
     }
@@ -55,6 +58,13 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], EcommerceAdminController.prototype, "getSettings", null);
+__decorate([
+    (0, common_1.Get)('products'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], EcommerceAdminController.prototype, "listProducts", null);
 __decorate([
     (0, common_1.Post)('settings'),
     __param(0, (0, common_1.Req)()),

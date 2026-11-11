@@ -28,6 +28,12 @@ let CommerceController = class CommerceController {
     listQuotations(request) {
         return this.commerceService.listQuotations(request.user);
     }
+    listSalesOrders(request) {
+        return this.commerceService.listSalesOrders(request.user);
+    }
+    listSalesInvoices(request) {
+        return this.commerceService.listSalesInvoices(request.user);
+    }
     confirmQuotation(request, quotationId, body) {
         return this.commerceService.confirmQuotation(request.user, quotationId, body?.orderNumber);
     }
@@ -64,6 +70,20 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], CommerceController.prototype, "listQuotations", null);
+__decorate([
+    (0, common_1.Get)('sales/orders'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "listSalesOrders", null);
+__decorate([
+    (0, common_1.Get)('sales/invoices'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "listSalesInvoices", null);
 __decorate([
     (0, common_1.Post)('sales/quotations/:id/confirm'),
     (0, roles_decorator_1.Roles)('admin'),

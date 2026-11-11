@@ -44,7 +44,7 @@ export class CompaniesService {
 
   async getCompanyById(id: string, user: AuthenticatedUser) {
     const isAdmin = user.roles.includes('admin');
-    if (!isAdmin && user.companyId !== id) {
+    if (user.companyId !== id) {
       await this.logAudit(user.companyId, user.sub, 'company.read.denied_cross_company', id, {
         requested_company_id: id,
       });

@@ -97,10 +97,10 @@ export class AccountingService {
   }
 
   async registerInvoicePayment(user: AuthUser, invoiceId: string, input: RegisterInvoicePaymentInput) {
-    if (!input.paymentReference?.trim()) {
+    if (typeof input.paymentReference !== 'string' || !input.paymentReference.trim()) {
       throw new BadRequestException('paymentReference is required.');
     }
-    if (!input.amount || input.amount <= 0) {
+    if (typeof input.amount !== 'number' || !Number.isFinite(input.amount) || input.amount <= 0) {
       throw new BadRequestException('amount must be greater than zero.');
     }
     const client = await this.db.connect();
@@ -110,7 +110,8 @@ export class AccountingService {
         `SELECT id, status, grand_total
          FROM sales_invoices
          WHERE id = $1 AND company_id = $2
-         LIMIT 1`,
+         LIMIT 1
+         FOR UPDATE`,
         [invoiceId, user.companyId],
       );
       if (!invoice.rows[0]) {

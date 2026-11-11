@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -24,7 +25,7 @@ export class AuthService {
   constructor(private readonly db: DatabaseService) {}
 
   async login(input: LoginInput, correlationId?: string) {
-    if (!input.email || !input.password) {
+    if (typeof input.email !== 'string' || typeof input.password !== 'string' || !input.email.trim() || !input.password) {
       throw new BadRequestException('Email and password are required.');
     }
 
@@ -138,20 +139,34 @@ export class AuthService {
   }
 
   async bootstrapAdmin(input: BootstrapAdminInput, correlationId?: string) {
-    if (!input.email || !input.password || !input.companyCode || !input.companyName || !input.fullName) {
+    if (process.env.BOOTSTRAP_ENABLED !== 'true' && process.env.NODE_ENV !== 'test') {
+      throw new ForbiddenException('Company registration is disabled. Contact your administrator.');
+    }
+    if (!input || !input.email || !input.password || !input.companyCode ||
+        typeof input.companyName !== 'string' || !input.companyName.trim() ||
+        typeof input.fullName !== 'string' || !input.fullName.trim()) {
       throw new BadRequestException('Missing required fields for bootstrap admin.');
+    }
+    if (typeof input.password !== 'string' || input.password.length < 12 ||
+        typeof input.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ||
+        typeof input.companyCode !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(input.companyCode)) {
+      throw new BadRequestException('Use a valid email, company code and a password of at least 12 characters.');
     }
 
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('erp360.company.registration'))`);
 
       const companyResult = await client.query<{ id: string }>(
         'SELECT id FROM companies WHERE code = $1 LIMIT 1',
         [input.companyCode],
       );
-      let companyId = companyResult.rows[0]?.id;
-      if (!companyId) {
+      if (companyResult.rows[0]) {
+        throw new ConflictException('Company already exists. Contact its administrator.');
+      }
+      let companyId: string;
+      {
         const createdCompany = await client.query<{ id: string }>(
           `INSERT INTO companies (code, name)
            VALUES ($1, $2)

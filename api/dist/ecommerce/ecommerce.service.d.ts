@@ -16,7 +16,13 @@ export declare class EcommerceService {
         id: string;
     }>;
     listAdminListings(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listAdminProducts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     getStorefront(companyCode: string, query?: string, categoryCode?: string): Promise<{
+        store: import("pg").QueryResultRow;
+        categories: import("pg").QueryResultRow[];
+        products: import("pg").QueryResultRow[];
+    }>;
+    getStorefrontBySlug(storeSlug: string, query?: string, categoryCode?: string): Promise<{
         store: import("pg").QueryResultRow;
         categories: import("pg").QueryResultRow[];
         products: import("pg").QueryResultRow[];
@@ -84,6 +90,7 @@ export declare class EcommerceService {
     private assertCartAccess;
     private hashSecret;
     private isValidEmail;
+    private normalizeTheme;
     private getAvailableStock;
     private getAvailableStockTx;
     private recalculateCartTotals;

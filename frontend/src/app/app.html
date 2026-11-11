@@ -1,9 +1,89 @@
-<header class="topbar">
-  <a routerLink="/">Inicio</a>
-  <a routerLink="/store">Tienda</a>
-  <a routerLink="/portal">Portal cliente</a>
-</header>
+<a class="skip-link" href="#main-content">Saltar al contenido</a>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
+      <div>
+        <strong>ERP360</strong>
+        <span>Modernizado</span>
+      </div>
+    </div>
 
-<main>
-  <router-outlet></router-outlet>
-</main>
+    <button class="mobile-menu btn-icon" type="button" (click)="menuOpen.set(!menuOpen())" aria-controls="primary-nav" [attr.aria-expanded]="menuOpen()">Menú</button>
+    <nav id="primary-nav" class="nav-links" [class.mobile-open]="menuOpen()" aria-label="Navegación principal" (click)="menuOpen.set(false)">
+      <a routerLink="/" routerLinkActive="active" ariaCurrentWhenActive="page" [routerLinkActiveOptions]="{ exact: true }">
+        <i class="bi bi-house-door" aria-hidden="true"></i><span>Inicio</span>
+      </a>
+      <a routerLink="/workspace" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-speedometer2" aria-hidden="true"></i><span>Dashboard</span>
+      </a>
+      <a routerLink="/login" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-person-lock" aria-hidden="true"></i><span>Acceso</span>
+      </a>
+      <a routerLink="/store" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-bag" aria-hidden="true"></i><span>Tienda</span>
+      </a>
+      <a routerLink="/portal" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-person-vcard" aria-hidden="true"></i><span>Portal cliente</span>
+      </a>
+      <a routerLink="/inventory" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-box-seam" aria-hidden="true"></i><span>Inventario</span>
+      </a>
+      <a routerLink="/invoicing" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-receipt" aria-hidden="true"></i><span>Facturación</span>
+      </a>
+      <a routerLink="/operations" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-kanban" aria-hidden="true"></i><span>Operaciones</span>
+      </a>
+      <a routerLink="/ecommerce/admin" routerLinkActive="active" ariaCurrentWhenActive="page">
+        <i class="bi bi-palette" aria-hidden="true"></i><span>Diseñar tienda</span>
+      </a>
+      <a routerLink="/processes" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-signpost-split" aria-hidden="true"></i><span>Procesos</span></a>
+    </nav>
+  </aside>
+
+  <div class="content-area">
+    <header class="topbar">
+      <div class="session-block" *ngIf="session.user() as user; else loggedOut">
+        <span class="user-chip"><i class="bi bi-person-circle" aria-hidden="true"></i> {{ user.fullName }}</span>
+        <span class="company-chip" *ngIf="session.company() as company">
+          <i class="bi bi-building" aria-hidden="true"></i> {{ company.code }} · {{ company.name }}
+        </span>
+      </div>
+      <ng-template #loggedOut>
+        <span class="user-chip"><i class="bi bi-shield-lock" aria-hidden="true"></i> Sesión no iniciada</span>
+      </ng-template>
+
+      <div class="topbar-actions">
+        <button type="button" class="btn-icon" (click)="helpOpen.set(!helpOpen())" [attr.aria-expanded]="helpOpen()" aria-controls="context-help">
+          <i class="bi bi-question-circle" aria-hidden="true"></i> Ayuda
+        </button>
+        <button type="button" class="btn-icon" (click)="toggleTheme()">
+          <i [class]="theme.mode() === 'dark' ? 'bi bi-moon-stars' : 'bi bi-sun'" aria-hidden="true"></i>
+          {{ theme.mode() === 'dark' ? 'Oscuro' : 'Claro' }}
+        </button>
+
+        <button type="button" class="btn-logout" *ngIf="session.isAuthenticated()" (click)="logout()">
+          <i class="bi bi-box-arrow-right" aria-hidden="true"></i> Cerrar sesión
+        </button>
+      </div>
+    </header>
+
+    <main #mainContent id="main-content" tabindex="-1" class="content">
+      @if (session.error()) { <p role="alert" class="status status-error">{{ session.error() }}</p> }
+      <router-outlet (activate)="diagnostic.set(''); mainContent.focus()"></router-outlet>
+      @if (helpOpen()) {
+        <aside id="context-help" class="surface-card help-panel" aria-label="Ayuda contextual">
+          <div class="header-with-action">
+            <h2>Ayuda · {{ currentHelp.title }}</h2>
+            <button type="button" class="btn btn-secondary" (click)="helpOpen.set(false)">Cerrar ayuda</button>
+          </div>
+          <ol>@for (step of currentHelp.steps; track step) { <li>{{ step }}</li> }</ol>
+          <p>Asistencia local. El chat IA aún no está conectado. No compartas contraseñas ni tokens.</p>
+          <button type="button" class="btn btn-secondary" (click)="showDiagnostic()">Preparar diagnóstico seguro</button>
+          @if (diagnostic()) { <pre tabindex="0" aria-label="Diagnóstico sin datos personales">{{ diagnostic() }}</pre> }
+        </aside>
+      }
+    </main>
+  </div>
+</div>

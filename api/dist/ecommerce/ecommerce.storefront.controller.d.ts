@@ -3,6 +3,11 @@ import { EcommerceService } from './ecommerce.service';
 export declare class EcommerceStorefrontController {
     private readonly ecommerceService;
     constructor(ecommerceService: EcommerceService);
+    getStorefrontBySlug(storeSlug: string, query?: string, categoryCode?: string): Promise<{
+        store: import("pg").QueryResultRow;
+        categories: import("pg").QueryResultRow[];
+        products: import("pg").QueryResultRow[];
+    }>;
     getStorefront(companyCode: string, query?: string, categoryCode?: string): Promise<{
         store: import("pg").QueryResultRow;
         categories: import("pg").QueryResultRow[];
