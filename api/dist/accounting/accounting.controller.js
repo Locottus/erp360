@@ -28,6 +28,15 @@ let AccountingController = class AccountingController {
     generalLedger(request, accountCode, fromDate, toDate, page, pageSize) {
         return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
     }
+    financialStatements(request, asOfDate) {
+        return this.accountingService.getFinancialStatements(request.user, asOfDate);
+    }
+    bankAccounts(request) {
+        return this.accountingService.listBankAccounts(request.user);
+    }
+    upsertBankAccount(request, input) {
+        return this.accountingService.upsertBankAccount(request.user, input);
+    }
     returnToSupplier(request, id, input) {
         return this.accountingService.returnToSupplier(request.user, id, input);
     }
@@ -96,6 +105,32 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "generalLedger", null);
+__decorate([
+    (0, common_1.Get)('reports/financial-statements'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('asOfDate')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "financialStatements", null);
+__decorate([
+    (0, common_1.Get)('bank-accounts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "bankAccounts", null);
+__decorate([
+    (0, common_1.Post)('bank-accounts'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "upsertBankAccount", null);
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/returns'),
     (0, roles_decorator_1.Roles)('admin'),

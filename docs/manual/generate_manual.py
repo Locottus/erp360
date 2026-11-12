@@ -31,7 +31,7 @@ for name in ["Title", "Heading 1", "Heading 2", "Heading 3"]:
     doc.styles[name].paragraph_format.keep_with_next = True
 doc.styles["Heading 1"].paragraph_format.page_break_before = True
 header = section.header.paragraphs[0]
-header.text = "ERP360  |  Operación y configuración  |  Edición 3.12"
+header.text = "ERP360  |  Operación y configuración  |  Edición 3.16"
 header.style = doc.styles["Caption"]
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -140,7 +140,7 @@ def flow(title, purpose, prerequisites, operations, result, controls):
 doc.add_heading("ERP360", 0)
 p("MANUAL DE OPERACIÓN Y CONFIGURACIÓN", "Subtitle")
 p("Guía de usuario, administración funcional e integración")
-p(f"Edición 3.12 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
+p(f"Edición 3.16 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
 p("Audiencia: usuarios, responsables de empresa, integradores y soporte.")
 note("Este manual describe la implementación existente, no una promesa de paridad con otro ERP. "
      "Distingue pantallas web de operaciones disponibles solo por API. Fiscal es simulación sandbox; "
@@ -167,7 +167,7 @@ table(["Área", "Canal existente", "Límites relevantes"], [
     ("eCommerce", "Estudio, tienda pública y Control operativo", "Checkout idempotente, reserva MAIN, dirección, seguimiento manual y baja privada. Sin cobro, flete ni transportista externo."),
     ("Portal", "Consulta web + API administrativa", "Token temporal, hasta 20 cotizaciones/pedidos/facturas recientes por categoría."),
     ("XML-RPC", "API", "Solo los métodos compatibles documentados; no todos los de un ERP legado."),
-    ("Ayuda y futuro chat", "Ayuda mock local", "Respuestas predefinidas y contexto mínimo opt-in. Sin proveedor IA, lectura de documentos ni escrituras."),
+    ("Ayuda y asistente", "Agente de solo lectura en todas las áreas", "Resúmenes autorizados, evidencia y guía; investigación por solicitud de compra, pedido o saldo. OpenAI/DeepSeek/Claude con consentimiento adicional; sin escrituras."),
     ("Cartera SaaS", "Consola de plataforma y Mi suscripción", "Contratos por módulos, facturas internas, ingresos recibidos y seguimiento. Sin cobro bancario ni bloqueo automático."),
 ])
 p("Identificadores: los IDs internos son UUID devueltos por la API; códigos y números visibles son "
@@ -269,7 +269,8 @@ steps(["Como administrador abre Mi empresa y verifica el código inmutable de la
        "Introduce motivo de 10 a 1000 caracteres y pulsa Guardar perfil de empresa.",
        "El nombre actualizado aparece en la barra superior sin cambiar de tenant. Se conserva auditoría antes/después, actor y motivo.",
        "Ante conflicto pulsa Recargar perfil y revisa la versión actual antes de editar nuevamente."])
-note("Solo se actualizan nombre e identificación tributaria: no código, país, moneda, actividad, usuarios ni contrato SaaS. "
+note("El perfil permite actualizar nombre, identificación tributaria y la política de aprobación independiente de compras: "
+     "no código, país, moneda, actividad, usuarios ni contrato SaaS. "
      "Las facturas con instantánea conservan el nombre de emisión. Los PDF legados sin instantánea muestran datos "
      "descriptivos actuales con un aviso; no se inventan ni reescriben instantáneas históricas.")
 p("API: PATCH /companies/current requiere name, taxId (texto o null explícito), expectedRevision y reason. "
@@ -277,14 +278,55 @@ p("API: PATCH /companies/current requiere name, taxId (texto o null explícito),
   "además de fullName, roles e isActive. Los clientes anteriores deben actualizar sus cuerpos; no se admite "
   "omitir revisión para saltar el control de concurrencia.")
 image("26-company-profile.png", "Perfil empresarial revisionado y alcance explícito de los cambios")
+h("3.6 Exigir aprobación independiente en compras", 2)
+steps(["Antes de activar la opción, dispone de otra cuenta administradora activa de la misma empresa.",
+       "En Mi empresa marca Exigir otro administrador para aprobar compras.",
+       "Introduce el motivo del cambio y guarda el perfil; la política queda auditada con revisión.",
+       "En Operaciones → Compras, el creador verá que debe aprobar otro administrador. "
+       "La API también impide aprobar su propia solicitud; no basta con cambiar de pantalla.",
+       "La otra cuenta administradora revisa las líneas y aprueba la solicitud. "
+       "La política también cubre solicitudes creadas desde reposición.",
+       "Para desactivarla, desmarca la opción y guarda con un nuevo motivo. "
+       "No se modifican las órdenes ya aprobadas."])
+note("La política inicia desactivada. Las solicitudes antiguas sin creador identificado quedan bloqueadas "
+     "para aprobación mientras esté activa, sin inventar autor. Rechazarlas sigue permitido. "
+     "Administradores pueden desactivar la política con auditoría; no representa segregación completa "
+     "ni añade umbrales monetarios o delegaciones.")
+p("API: requireIndependentPurchaseApprover es un booleano opcional de PATCH /companies/current. "
+  "Omitirlo conserva el valor existente; null o una cadena no son válidos. "
+  "La lista y detalle de compras muestran approval_block_reason; la aprobación comprueba la política "
+  "vigente en transacción y conserva autor y actor en auditoría.")
 
 h("4. Navegación, accesibilidad y apariencia")
-steps(["En escritorio utiliza Inicio, Dashboard, Acceso, Tienda, Portal cliente y Procesos desde la barra lateral.",
-       "En móvil pulsa Menú para expandir/contraer enlaces. También puede abrirse con Enter o Espacio.",
-       "Usa Claro/Oscuro para cambiar apariencia; la preferencia visual se conserva localmente.",
+steps(["En pantallas de 1280 píxeles CSS o más, utiliza la barra lateral permanente. "
+       "Desplázate dentro del menú si no ves los módulos inferiores; no es necesario desplazar toda la página.",
+       "En ventanas de hasta 1279 píxeles CSS (tablet, móvil o escritorio estrecho), pulsa Menú "
+       "(icono de tres líneas) en la barra superior. "
+       "También puedes abrirlo con Enter o Espacio.",
+       "El panel se superpone al contenido sin apretar las opciones en una fila. "
+       "El fondo queda temporalmente sin interacción; desplázate dentro del panel para ver todos los enlaces.",
+       "Selecciona una pantalla para cerrar el panel y navegar. Para cerrarlo sin navegar, "
+       "pulsa Cerrar menú, Escape o el fondo oscurecido.",
+       "Usa el botón de sol/luna para cambiar apariencia. En móvil, Ayuda, tema y Cerrar sesión "
+       "se muestran como iconos con nombres accesibles; la preferencia visual se conserva localmente.",
        "Usa Tab para recorrer acciones y el enlace Saltar al contenido para omitir navegación.",
+       "Mientras el menú está abierto, Tab y Mayús+Tab recorren solo sus enlaces y el botón de cierre. "
+       "Escape devuelve el foco al botón de apertura.",
        "La navegación coloca el foco en el contenido y actualiza el título de la pestaña.",
        "Abre Ayuda para los pasos correspondientes a la pantalla actual."])
+table(["Grupo del menú", "Pantallas"], [
+    ("Tu espacio", "Inicio, Dashboard y Acceso."),
+    ("Operación", "Operaciones, Inventario y Facturación; Recepciones, Control operativo, Contabilidad y Personas cuando corresponden por rol."),
+    ("Canales digitales", "Tienda, Portal cliente y Diseñar tienda."),
+    ("Administración", "Mi empresa, Usuarios y Catálogos para admin; Mi suscripción para cuentas autenticadas, Administración SaaS para operadores y Procesos."),
+])
+note("Se mantienen las rutas y condiciones de visibilidad existentes. Reorganizar el menú no concede "
+     "permisos nuevos ni modifica reglas de negocio. La visibilidad de un enlace no sustituye "
+     "la autorización del servidor. El ancho considerado es el de la ventana en píxeles CSS: "
+     "el zoom también puede hacer que aparezca el menú compacto.")
+image("31-navigation-desktop.png", "Navegación agrupada de escritorio y mayor espacio entre tarjetas")
+image("32-navigation-tablet.png", "Panel de navegación en tablet, sobrepuesto al contenido")
+image("33-navigation-mobile.png", "Menú móvil con opciones legibles y desplazamiento propio", True)
 p("Las tablas y el gráfico pueden desplazarse horizontalmente dentro de su contenedor; el sitio "
   "no debe requerir scroll horizontal global en los anchos probados. Si prefieres menos animación, "
   "activa reducir movimiento en el sistema. Los avisos de error y éxito se anuncian semánticamente.")
@@ -293,7 +335,7 @@ p("El documento HTML declara español y las fechas/números de pantalla usan for
   "mantienen números técnicos, no cadenas con formato de presentación.")
 note("Se hicieron comprobaciones de accesibilidad y tamaños, pero no una certificación completa WCAG. "
      "Ante una barrera registra pantalla, tarea, ancho/zoom y referencia, sin datos personales.")
-image("10-mobile.png", "Dashboard móvil, navegación compacta y scroll local del gráfico", True)
+image("10-mobile.png", "Dashboard móvil con barra de acciones compacta y menú cerrado", True)
 image("11-dark.png", "Modo oscuro con datos reales de demostración")
 
 h("5. Dashboard e interpretación de indicadores")
@@ -657,12 +699,14 @@ flow("13.2 Contabilizar y cobrar", "Registrar partida por origen y cobro de una 
      "Factura emitida, plan base inicializado y período habilitado.",
      [
          ("1", "POST /accounting/sales-invoices/:id/post", "Asiento: débito CxC, crédito ingreso e IVA si aplica; journalEntryId."),
-         ("2", "POST /accounting/sales-invoices/:id/payments: {paymentReference, amount}", "Pago positivo no superior al saldo; conciliación básica y remainingBalance."),
+         ("2", "POST /accounting/sales-invoices/:id/payments: {paymentReference, amount, currencyCode?, exchangeRate?}", "Pago positivo no superior al saldo del documento; registra monto documental y monto base cuando aplica multimoneda."),
          ("3", "GET /accounting/reports/trial-balance?fromDate=AAAA-MM-DD&toDate=AAAA-MM-DD", "Revisar cuentas, débitos/créditos y totals.isBalanced."),
          ("4", "POST /accounting/purchase-orders/:id/post para devengo de compras", "Asiento de la compra sin duplicar origen."),
      ], "Factura parcial o totalmente cobrada y evidencias contables balanceadas.",
     "El posteo debe preceder al pago. Una referencia de pago es única por empresa. Los importes "
-    "de cobro aceptan hasta cuatro decimales; solo el saldo cero marca factura paid. Revisa los "
+    "de cobro aceptan hasta cuatro decimales; solo el saldo cero marca factura paid. Si la factura "
+    "está en moneda distinta a la base, el pago puede registrarse en moneda del documento o en moneda base, "
+    "con tasa base→documento (configurada o enviada en exchangeRate). Revisa los "
     "documentos históricos que muestren estado pagado y saldo pendiente: esta actualización no "
     "modifica registros anteriores. No confundir con conciliación bancaria automática ni "
     "importación de extractos. La política de redondeo por moneda sigue pendiente.")
@@ -701,9 +745,10 @@ steps(["Cuentas por pagar muestra compras, proveedor, total, pagado y saldo. Rec
        "Una transferencia conserva el total físico y no mueve unidades reservadas. Repetir referencia con los mismos datos no duplica; otros datos se rechazan.",
        "Para conteo selecciona saldo, introduce físico contado y referencia. No puede ser menor a reservado.",
        "Si cambió el físico esperado, actualiza y vuelve a contar. No reintentes con una referencia distinta para ocultar el conflicto."])
-note("No hay extractos bancarios, conciliación bancaria completa, valoración/COGS ni lotes/series "
+note("No hay extractos bancarios, conciliación bancaria completa ni lotes/series "
      "de trazabilidad de producto. Los lotes documentales de recepción no sustituyen series/lotes de fabricación. "
-     "El balance no demuestra rentabilidad real ni cumplimiento financiero.")
+     "La valoración y COGS disponibles en GET /inventory/reports/valuation-cogs son provisionales (promedio ponderado por recepción/devolución), "
+     "útiles para control operativo pero no equivalen a una política final certificada.")
 image("14-controls.png", "Controles de inventario, tesorería, créditos y entregas")
 h("13.5 Recuperar un crédito del proveedor", 2)
 p("Disponible para el administrador en Control operativo. Una devolución de mercancía reduce la "
@@ -856,7 +901,7 @@ p("Otros métodos producen error explícito. No asumir creación, actualización
   "Una respuesta XML-RPC puede contener un fault aunque el transporte HTTP funcione: analizar "
   "la estructura, no solo el código HTTP.")
 
-h("18. Ayuda contextual, soporte y futuro chat")
+h("18. Ayuda contextual, chat asistente y soporte")
 steps(["Abre Ayuda desde la barra superior.",
        "Lee los pasos de la pantalla actual.",
        "Si necesitas soporte pulsa Preparar diagnóstico seguro.",
@@ -868,15 +913,140 @@ code('{"schemaVersion":1,"screen":"/portal","title":"Portal cliente",'
 p("El diagnóstico contiene ruta allowlisted sin query, título genérico y status/referencia validada "
   "del último error cuando existe. Una referencia no permite leer registros de otros usuarios. "
   "No exporta DOM, formularios, companyId ni información del cliente.")
-note("La consulta de Ayuda responde un MOCK local explícito: escribe una duda de hasta 500 caracteres "
-     "y pulsa Consultar mock. Usa reglas predefinidas y la guía de pantalla, no un modelo generativo. "
-     "No envía la consulta a servicios externos, no lee documentos ni ejecuta correcciones. "
-     "No introducir secretos. Se limpia la consulta después de responder y al cerrar sesión.")
-p("Diseño futuro recomendado: gateway backend autenticado, conocimiento del manual versionado, "
-  "herramientas read-only con autorización server-side, citas, minimización y consentimiento. "
+h("18.1 Conversación y navegación", 2)
+steps(["Pulsa Asistente en la esquina inferior derecha o Abrir chat asistente dentro de Ayuda.",
+       "Escribe hasta 500 caracteres en Mensaje al asistente y pulsa Enviar. Enter agrega una línea.",
+       "Lee la respuesta identificada como MOCK local. Para una duda normal se muestran enlaces sugeridos; "
+       "pulsa Abrir para navegar sin cerrar la conversación.",
+       "Si deseas navegar directamente, escribe una orden explícita: abre Inventario, abre Compras, "
+       "abre Facturación o llévame a Mi empresa. Las direcciones externas y pantallas desconocidas no se abren.",
+       "La navegación usa las pantallas disponibles para tu sesión; no cambia roles ni sustituye permisos del servidor.",
+       "Pulsa Minimizar asistente o Escape dentro de la ventana para ocultarla sin perder el hilo. "
+       "Limpiar chat borra el historial y el contexto mostrado."])
+note("El chat conserva hasta 40 mensajes solo en memoria, no en el almacenamiento del navegador. "
+     "Recargar, cerrar sesión o cambiar de usuario/empresa elimina la conversación. "
+     "Los mensajes reconocidos como posible contenido sensible se omiten del historial, pero esto "
+     "no es un filtro infalible: nunca escribas contraseñas, tokens ni datos personales.")
+image("34-assistant-desktop.png", "Chat abierto con guía de inventario y navegación sugerida")
+image("35-assistant-mobile.png", "Asistente móvil, conversación e ingreso de mensajes", True)
+h("18.2 Diagnóstico guiado, no automático", 2)
+steps(["Abre la pantalla involucrada y observa el error mostrado por el ERP.",
+       "Pulsa Diagnosticar último error para recibir pasos según el último estado HTTP observado.",
+       "Abre Contexto seguro si necesitas ver ruta sin parámetros, título y status/referencia.",
+       "Compara los pasos con tus permisos, campos, fechas, cantidades y estado del documento. "
+       "Si persiste, entrega el contexto revisado a soporte por el canal autorizado."])
+p("La pantalla actual y el último error son contexto independiente: el error puede proceder de otra "
+  "pantalla visitada. No se transmite el cuerpo HTTP, ni se lee DOM, formularios o documentos. "
+  "En guía local las respuestas son predefinidas; en modo externo la respuesta es del proveedor seleccionado. "
+  "Este botón de orientación HTTP no consulta existencias ni documentos. Analizar pantalla/registro "
+  "sí consulta un alcance autorizado y explícito, explicado en 18.6; no demuestra por sí solo la causa real del error. "
+  "403 orienta sobre permisos/reglas; 400/422 sobre validación; 409 sobre conflictos; 0/5xx sobre "
+  "conexión o servicio. Son pistas, no una causa probada. Sin error registrado no se afirma que todo sea correcto.")
+note("El asistente no corrige datos, aprueba compras, ajusta inventario, ejecuta cobros ni repite "
+     "escrituras. Navegar puede cargar los datos normales de una pantalla, pero esos datos no se entregan al chat.")
+p("El gateway, adaptadores, guía operativa versionada y herramientas acotadas de solo lectura ya están "
+  "disponibles. No existe todavía búsqueda del manual completo, acceso libre a APIs ni lectura de logs. "
   "Las escrituras exigirán confirmación explícita, idempotencia y auditoría; el modelo nunca decide permisos. "
   "Consultar docs/REVISION_UI_SEGURIDAD_IA.md para el contrato propuesto y pruebas de prompt injection.")
-image("09-help.png", "Ayuda local y diagnóstico sin credenciales")
+image("09-help.png", "Ayuda contextual y acceso al chat, sin credenciales")
+
+h("18.3 Elegir OpenAI, DeepSeek o Claude", 2)
+steps(["El responsable del servidor configura ASSISTANT_CREDENTIAL_KEY: 32 bytes aleatorios en base64, "
+       "fuera de la base de datos y del repositorio; reinicia la API. No compartir este secreto.",
+       "Un operador SaaS owner abre Administración SaaS → Servicio de IA y proveedores y selecciona la empresa.",
+       "Despliega Proveedor Adapter, elige proveedor y modelo disponible, introduce su API key y motivo.",
+       "Marca Habilitar este proveedor y guarda. Solo uno queda activo por empresa; los otros conservan "
+       "su propia clave cifrada. Dejar la clave vacía conserva la del proveedor seleccionado.",
+       "Despliega Servicio por usuario; owner o billing asigna un tipo habilitado y registra motivo.",
+       "El usuario abre Asistente, despliega IA y privacidad, pulsa Actualizar uso IA y marca Usar [proveedor] para consentir "
+       "el envío de la consulta actual y su contexto seguro. Después escribe y envía la pregunta."])
+table(["Perfil", "Permiso de servicio IA"], [
+    ("SaaS owner", "Configura proveedores y tipos por API; asigna servicios, confirma compras y concilia reservas inciertas."),
+    ("SaaS billing", "Consulta, asigna servicios y registra ampliaciones pagadas; no accede a claves ni cambia proveedor."),
+    ("SaaS viewer", "Solo consulta el resumen; no cambia configuración, asignaciones ni créditos."),
+    ("Administrador de empresa", "No obtiene privilegios SaaS por su rol operativo; necesita servicio asignado para consultar IA."),
+])
+image("36-ai-provider-settings.png", "Configuración de proveedor, modelo y credencial cifrada; empresa sintética")
+note("Guardar no llama al modelo ni verifica la clave o el saldo externo. La API key nunca vuelve "
+     "en consultas de configuración. Conservar protegido el secreto del servidor: reemplazarlo "
+     "sin reconfigurar claves impide descifrarlas. Revisar contrato, retención y privacidad del proveedor.")
+h("18.4 Tokens mensuales y compra de más servicio", 2)
+p("La empresa comparte la suma de bolsas mensuales de usuarios activos con servicios habilitados, "
+  "más las ampliaciones del mes UTC actual. standard aporta 100000 tokens por usuario y limita "
+  "salida a 1024; premium aporta 500000 y limita salida a 2048. Son capacidades iniciales, no tarifas. "
+  "Cambiar o desactivar asignaciones afecta la bolsa inmediatamente, sin prorrateo ni devolución "
+  "del consumo anterior. Un usuario puede consumir la bolsa compartida dentro de su límite de salida.")
+p("El contador suma entrada, caché y salida reportadas por el proveedor. Antes de enviar se reserva "
+  "una estimación conservadora de entrada y la salida máxima disponible; al confirmar se sustituye "
+  "por consumo real. Reservados también reducen disponibles, por lo que puede bloquearse ligeramente "
+  "antes de gastar el último token. El bloqueo 429 no llama al modelo. Cambiar proveedor no reinicia "
+  "los contadores y los tokens no representan el mismo precio entre proveedores.")
+steps(["Consulta consumidos, reservados y disponibles en el chat o el resumen de administración.",
+       "Si falta saldo, owner o billing abre Ampliación por compra confirmada.",
+       "Registra tokens, referencia única, importe positivo USD, motivo y confirmación de que "
+       "el servicio ya fue pagado. No acreditar promesas ni intentos de pago.",
+       "Actualiza el uso para continuar. La ampliación vence al finalizar el mes UTC; no se acumula "
+       "ni se reutiliza su referencia en otro mes."])
+note("Confirmar la compra es responsabilidad del operador: no cobra una tarjeta, consulta bancos, "
+     "genera factura SaaS ni crea un asiento. La facturación externa y su costo siguen separados "
+     "del registro de capacidad del asistente.")
+h("18.5 Errores, consentimiento y reservas inciertas", 2)
+bullets(["La guía local y órdenes explícitas como abre Inventario siguen siendo gratuitas aun sin cuota. "
+         "Desmarcar Usar [proveedor] vuelve a guía local.",
+         "Cambiar el proveedor activo revoca el consentimiento anterior; vuelve a consentir. "
+         "El servidor rechaza una solicitud dirigida a un proveedor distinto del activo.",
+         "Errores de IA son visibles: no se sustituye por un MOCK de éxito, otro proveedor ni un reintento automático.",
+         "Una interrupción, timeout, 5xx o consumo no verificable mantiene la reserva. Después de dos minutos "
+         "puede mostrarse como incierta; la antigüedad no libera tokens.",
+         "El owner verifica consumo en el proveedor y concilia una vez por API, con tokens de entrada/salida "
+         "y motivo. Nunca declarar cero por suposición. Se ajusta el mes de la reserva original.",
+         "Si hubo consumo válido pero respuesta vacía, filtrada o truncada, se contabiliza igualmente; "
+         "el mensaje de error o aviso no significa consulta gratuita."])
+image("37-ai-chat-usage.png", "Modo Claude, consentimiento y consumo compartido tras tres respuestas sintéticas")
+note("Solo se envían la pregunta actual y pantalla/status/referencia allowlisted; no conversación previa, "
+     "DOM, documentos completos, formularios, identidades ni herramientas de ejecución. Con el consentimiento "
+     "adicional de 18.6 se adjuntan hechos mínimos del diagnóstico. El proveedor puede "
+     "equivocarse y su texto no ejecuta navegación ni operaciones. No introducir secretos, datos "
+     "personales o información confidencial; el filtro preventivo no es infalible.")
+
+h("18.6 Agente de diagnóstico en todo el ERP", 2)
+steps(["Con sesión empresarial, abre la pantalla involucrada y pulsa Asistente → Analizar pantalla. "
+       "Requiere permisos del área, no proveedor ni servicio IA. Sin sesión continúa disponible la guía local.",
+       "Lee el resumen autorizado, los hechos citados [E1], [E2] y los pasos propuestos. Los recuentos "
+       "son contexto de área, no prueba de una causa individual.",
+       "Para investigar un documento, usa Analizar solicitud en Compras, Analizar pedido en Ventas "
+       "o Inventario, o Analizar saldo junto al producto/ubicación. Se abre el agente con esa selección.",
+       "Despliega Evidencia y límites para revisar la referencia local, fuentes y fecha de la instantánea. "
+       "Las lecturas no corrigen datos ni ejecutan reserva, despacho, aprobación o ajustes.",
+       "Si quieres razonamiento externo, despliega IA y privacidad, consiente Usar [proveedor] y marca "
+       "Compartir con la IA los hechos mínimos de este diagnóstico. Después escribe la pregunta.",
+       "El servidor vuelve a consultar los hechos con tus permisos; el modelo recibe estados, banderas "
+       "y recuentos, no nombres, IDs, documentos o importes. La consulta consume cuota normal incluyendo ese contexto."])
+table(["Área", "Apoyo disponible", "Alcance y permisos"], [
+    ("Dashboard / Operaciones", "Recuentos históricos y guía de flujos", "Ventas/compras ocultas para roles sin acceso se expresan como null, nunca cero."),
+    ("Catálogos", "Productos activos, impuestos y recuentos autorizados", "No muestra nombres ni importa, edita o reactiva registros."),
+    ("Inventario", "Saldos inválidos; por saldo compara reserva acumulada", "Stock de tu empresa; no modifica existencias."),
+    ("Ventas / Facturación", "Cotizaciones, pedidos, facturas; por pedido demanda agrupada, reserva y ubicación", "Lectura admin/sales; ejecución operativa sigue siendo admin."),
+    ("Compras", "Solicitudes/órdenes; por solicitud estado, líneas y aprobación independiente", "Lectura admin/purchases; no aprueba ni cambia creador."),
+    ("Recepciones", "Recuentos por estado y guía de entregas/devoluciones", "admin; no comprueba físicamente mercancía."),
+    ("Control operativo", "Recuentos de operaciones/pagos y guía de corrección", "admin; no verifica bancos ni produce créditos/reembolsos."),
+    ("Contabilidad", "Asientos publicados, períodos cerrados y cuentas activas", "admin; no valida un asiento individual ni certifica balances."),
+    ("Personas / RRHH", "Expedientes activos, jornadas abiertas y solicitudes pendientes", "admin; solo agregados, sin información personal/médica."),
+    ("Mi empresa / Usuarios", "Política de aprobación; recuentos de usuarios y administradores", "Usuarios exige admin; nunca expone ni modifica claves/roles."),
+    ("eCommerce", "Configuración activa, publicaciones y checkouts fallidos", "admin; no ejecuta checkout ni cobros."),
+    ("Fiscal / Portal administrativo", "Configuración, documentos a revisar y accesos vencidos", "admin; fiscal sigue siendo sandbox; no muestra tokens."),
+    ("Suscripción / SaaS", "Suscripción de la empresa de sesión y guía de contrato/cobranza", "SaaS exige membresía activa; no consulta cartera global ni empresa de otro formulario."),
+    ("Inicio, acceso, procesos, tienda y portal públicos", "Guía operativa", "No consulta documentos del cliente público ni sustituye su token."),
+])
+image("38-agent-diagnostics.png", "Pedido sintético sin stock ni reserva: comprobaciones internas, citas y propuestas sin cambios")
+note("El agente no observa visualmente el navegador ni lee DOM, formularios sin guardar, logs o código. "
+     "Las herramientas son flujos fijos del servidor, no SQL/URLs ni llamadas elegidas libremente por la IA. "
+     "Los mensajes del modelo no ejecutan herramientas o navegación. Solo las comprobaciones listadas "
+     "constituyen evidencia; la ausencia de hallazgos no garantiza integridad total ni éxito de una operación.")
+p("Cada consulta usa una instantánea de solo lectura y deja auditoría de herramienta/referencia, sin "
+  "guardar preguntas, respuestas o contenido sensible. Actualiza antes de actuar porque el estado puede cambiar. "
+  "Navegar, limpiar o cambiar de sesión descarta resultados pendientes y revoca el contexto compartido; "
+  "no cancela una llamada externa ya iniciada ni devuelve su consumo.")
 
 h("19. Errores, recuperación y controles diarios")
 table(["Síntoma / status", "Interpretación", "Acción segura"], [
@@ -885,7 +1055,7 @@ table(["Síntoma / status", "Interpretación", "Acción segura"], [
     ("403", "Acción no autorizada o alta deshabilitada", "Solicitar permiso; no cambiar IDs, roles o empresa en la petición."),
     ("404", "Recurso no disponible en ese contexto", "Verificar UUID y empresa con el operador autorizado."),
     ("409", "Código/referencia ya existente", "Buscar el original y conciliar antes de crear otro."),
-    ("429", "Límite de solicitudes", "Esperar la ventana indicada; no reintentar en bucle."),
+    ("429", "Límite de solicitudes o saldo IA insuficiente", "Para IA revisar cuota y reservas o adquirir servicio confirmado; esperar no aumenta la bolsa mensual. No reintentar en bucle."),
     ("500 / proxy / red", "Problema servidor/conectividad", "Anotar hora, pantalla y referencia; revisar health y logs redactados."),
     ("Sin tienda", "Código/configuración/publicación o fallo red", "Comprobar el código con la empresa y las publicaciones."),
     ("Stock insuficiente", "Disponible menor a lo solicitado", "Revisar ubicación y reservas; reducir cantidad o recibir existencias."),
@@ -1074,39 +1244,43 @@ p("Prefijos: desde navegador de desarrollo usar /api antes de estas rutas; en AP
   "de portal o carrito. Ver procedimiento específico antes de llamar.")
 endpoint_count = 0
 for source in sorted((ROOT / "api" / "src").rglob("*.controller.ts")):
-    text = source.read_text(encoding="utf-8-sig")
-    controller = re.search(r"@Controller\((?:'([^']*)')?\)", text)
-    if not controller:
-        continue
-    prefix = controller.group(1) or ""
-    matches = list(re.finditer(r"@(Get|Post|Delete|Patch|Put)\((?:'([^']*)')?\)", text))
-    if not matches:
-        continue
-    h(prefix or "Servicio raíz", 2)
-    class_text = text[:matches[0].start()]
-    # Class decorators occur before `export class`, method decorators after it.
-    class_decorators = class_text.split("export class")[0]
-    guarded = "@UseGuards(AuthGuard)" in class_decorators
-    class_roles_match = re.search(r"@Roles\(([^)]*)\)", class_decorators)
-    class_roles = re.findall(r"'([^']+)'", class_roles_match.group(1)) if class_roles_match else []
-    rows = []
-    for index, match in enumerate(matches):
-        block = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
-        method_roles_match = re.search(r"@Roles\(([^)]*)\)", block)
-        declared_roles = re.findall(r"'([^']+)'", method_roles_match.group(1)) if method_roles_match else class_roles
-        roles = " / ".join(declared_roles) if declared_roles else (
-          "JWT" if guarded or "@UseGuards(AuthGuard)" in block else "Público*"
-        )
-        route = "/" + "/".join(part.strip("/") for part in [prefix, match.group(2) or ""] if part)
-        if prefix == "saas":
-            roles = "JWT de empresa" if route in ("/saas/operator", "/saas/subscription") else (
-                "Operador plataforma (consulta incluida)" if match.group(1) == "Get"
-                else "Operador plataforma (propietario/cobranza)"
+    full_text = source.read_text(encoding="utf-8-sig")
+    controllers = list(re.finditer(r"@Controller\((?:'([^']*)')?\)", full_text))
+    for controller_index, controller in enumerate(controllers):
+        end = controllers[controller_index + 1].start() if controller_index + 1 < len(controllers) else len(full_text)
+        text = full_text[controller.start():end]
+        prefix = controller.group(1) or ""
+        matches = list(re.finditer(r"@(Get|Post|Delete|Patch|Put)\((?:'([^']*)')?\)", text))
+        if not matches:
+            continue
+        h(prefix or "Servicio raíz", 2)
+        class_decorators = text[:matches[0].start()].split("export class")[0]
+        guarded = bool(re.search(r"@UseGuards\([^)]*\bAuthGuard\b", class_decorators))
+        class_roles_match = re.search(r"@Roles\(([^)]*)\)", class_decorators)
+        class_roles = re.findall(r"'([^']+)'", class_roles_match.group(1)) if class_roles_match else []
+        rows = []
+        for index, match in enumerate(matches):
+            block = text[match.end():matches[index + 1].start() if index + 1 < len(matches) else len(text)]
+            method_roles_match = re.search(r"@Roles\(([^)]*)\)", block)
+            declared_roles = re.findall(r"'([^']+)'", method_roles_match.group(1)) if method_roles_match else class_roles
+            roles = " / ".join(declared_roles) if declared_roles else (
+                "JWT" if guarded or re.search(r"@UseGuards\([^)]*\bAuthGuard\b", block) else "Público*"
             )
-        rows.append((match.group(1).upper(), route, roles))
-        endpoint_count += 1
-    table(["Método", "Ruta", "Acceso declarado"], rows)
-    p("Fuente: " + str(source.relative_to(ROOT)).replace("\\", "/"), "Caption")
+            route = "/" + "/".join(part.strip("/") for part in [prefix, match.group(2) or ""] if part)
+            if prefix == "saas":
+                roles = "JWT de empresa" if route in ("/saas/operator", "/saas/subscription") else (
+                    "Operador plataforma (consulta incluida)" if match.group(1) == "Get"
+                    else "Operador plataforma (propietario/cobranza)"
+                )
+            elif prefix == "assistant/admin":
+                owner_only = route.endswith(("/provider", "/reconcile")) or (
+                    route == "/assistant/admin/service-types" and match.group(1) != "Get")
+                roles = "SaaS owner" if owner_only else (
+                    "Operador SaaS" if match.group(1) == "Get" else "SaaS owner/billing")
+            rows.append((match.group(1).upper(), route, roles))
+            endpoint_count += 1
+        table(["Método", "Ruta", "Acceso declarado"], rows)
+        p("Fuente: " + str(source.relative_to(ROOT)).replace("\\", "/"), "Caption")
 note("Público* no significa sin controles: bootstrap requiere habilitación temporal; portal exige token "
      "vigente; carritos exigen x-cart-token en sus acciones. Health/tienda no conceden sesión administrativa. "
      "AuthGuard también aplica las restricciones de roles correspondientes. Las rutas SaaS globales "
@@ -1172,9 +1346,17 @@ bullets(["docs/DESPLIEGUE_LOCAL.md: arranque, entorno y operación segura.",
          "Angular Security: https://angular.dev/best-practices/security",
          "Carbon Data Table: https://www.carbondesignsystem.com/building-blocks/core/components/data-table/guidelines",
          "OWASP LLM Prompt Injection Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html"])
-p("Capturas: navegador Chrome con API y DB locales, sin respuestas mock. Se renovaron las imágenes "
+p("Capturas: navegador Chrome con API y DB locales; solo el asistente usa respuestas mock explícitas. Se renovaron las imágenes "
   "antiguas; no se incluyen tokens visibles, contraseñas ni datos reales. Los conteos de demostración "
   "pueden variar tras repetir pruebas y no constituyen una plantilla de saldos iniciales.")
+p("Edición 3.16: se actualizaron chat local de escritorio/móvil, configuración/consumo IA y agente "
+  "con backend aislado y respuestas sintéticas: tres proveedores, cuatro consultas y 480 tokens. "
+  "La figura del contador fue tomada tras las primeras tres; el diagnóstico del pedido fue real "
+  "sobre datos ficticios sin stock ni reserva y no consumió IA por sí mismo. "
+  "No se utilizaron claves reales ni se verificó inferencia externa o cobro. "
+  "La edición 3.14 actualizó navegación de escritorio/tablet/móvil, dashboard móvil, tema oscuro y ayuda "
+  "con una cuenta ficticia exclusiva para documentación. Las demás capturas ilustran procesos "
+  "de ediciones anteriores y pueden conservar el espaciado antiguo; sus reglas operativas no cambiaron.")
 p("Validación documental: estructura DOCX, imágenes, encabezados, catálogo y ausencia de patrones "
   "de secretos. La paginación final depende del procesador Word instalado; las capturas largas "
   "se segmentan para no exceder el área imprimible.")

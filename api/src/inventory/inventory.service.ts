@@ -4,6 +4,7 @@ import type { AuthUser, StockAdjustmentInput } from './inventory.types';
 import { normalizeQuantityDocument, type QuantityDocument } from '../common/quantity-document';
 import { requiredDecimal } from '../common/decimal-input';
 import { changeReason, expectedRevision } from '../common/management-input';
+import { requiredDate } from '../common/iso-date';
 
 type DbClient = Awaited<ReturnType<DatabaseService['connect']>>;
 
@@ -803,6 +804,136 @@ export class InventoryService {
       ],
     );
     return { items: rows.rows, total: Number(count.rows[0].total), page, pageSize };
+  }
+
+  async valuationAndCogs(user: AuthUser, options: { fromDate?: string; toDate?: string; locationCode?: string }) {
+    const fromDate = options.fromDate === undefined || options.fromDate === '' ? null : requiredDate(options.fromDate, 'fromDate');
+    const toDate = options.toDate === undefined || options.toDate === '' ? null : requiredDate(options.toDate, 'toDate');
+    if (fromDate && toDate && fromDate > toDate) {
+      throw new BadRequestException('fromDate must not be later than toDate.');
+    }
+    const location = options.locationCode?.trim() ? this.normalizeLocation(options.locationCode) : null;
+    const rows = await this.db.query<{
+      product_id: string;
+      sku: string;
+      product_name: string;
+      location_code: string;
+      period_received_quantity: string;
+      period_received_cost: string;
+      period_returned_quantity: string;
+      period_returned_cost: string;
+      period_dispatched_quantity: string;
+      cumulative_net_quantity: string;
+      cumulative_net_cost: string;
+      weighted_average_cost: string | null;
+      estimated_period_cogs: string | null;
+      current_on_hand: string;
+      current_reserved: string;
+      current_available: string;
+      provisional_stock_value: string | null;
+      has_cost_gap: boolean;
+    }>(
+      `WITH receipts AS (
+         SELECT l.product_id,rl.location_code,
+           COALESCE(SUM(rl.quantity) FILTER(
+             WHERE ($2::date IS NULL OR pr.received_at::date >= $2::date)
+               AND ($3::date IS NULL OR pr.received_at::date <= $3::date)
+           ),0) AS period_qty,
+           COALESCE(SUM(rl.quantity*rl.unit_cost) FILTER(
+             WHERE ($2::date IS NULL OR pr.received_at::date >= $2::date)
+               AND ($3::date IS NULL OR pr.received_at::date <= $3::date)
+           ),0) AS period_cost,
+           COALESCE(SUM(rl.quantity) FILTER(WHERE $3::date IS NULL OR pr.received_at::date <= $3::date),0) AS cumulative_qty,
+           COALESCE(SUM(rl.quantity*rl.unit_cost) FILTER(WHERE $3::date IS NULL OR pr.received_at::date <= $3::date),0) AS cumulative_cost
+         FROM purchase_receipt_lines rl
+         JOIN purchase_receipts pr ON pr.id=rl.receipt_id
+         JOIN purchase_order_lines l ON l.id=rl.order_line_id
+         WHERE pr.company_id=$1 AND ($4::text IS NULL OR rl.location_code=$4::text)
+         GROUP BY l.product_id,rl.location_code
+       ), returns AS (
+         SELECT l.product_id,rl.location_code,
+           COALESCE(SUM(ret.quantity) FILTER(
+             WHERE ($2::date IS NULL OR r.created_at::date >= $2::date)
+               AND ($3::date IS NULL OR r.created_at::date <= $3::date)
+           ),0) AS period_qty,
+           COALESCE(SUM(ret.subtotal) FILTER(
+             WHERE ($2::date IS NULL OR r.created_at::date >= $2::date)
+               AND ($3::date IS NULL OR r.created_at::date <= $3::date)
+           ),0) AS period_cost,
+           COALESCE(SUM(ret.quantity) FILTER(WHERE $3::date IS NULL OR r.created_at::date <= $3::date),0) AS cumulative_qty,
+           COALESCE(SUM(ret.subtotal) FILTER(WHERE $3::date IS NULL OR r.created_at::date <= $3::date),0) AS cumulative_cost
+         FROM purchase_supplier_return_lines ret
+         JOIN purchase_supplier_returns r ON r.id=ret.return_id
+         JOIN purchase_receipt_lines rl ON rl.id=ret.receipt_line_id
+         JOIN purchase_order_lines l ON l.id=rl.order_line_id
+         WHERE r.company_id=$1 AND ($4::text IS NULL OR rl.location_code=$4::text)
+         GROUP BY l.product_id,rl.location_code
+       ), dispatches AS (
+         SELECT m.product_id,m.location_code,
+           COALESCE(SUM(m.quantity) FILTER(
+             WHERE ($2::date IS NULL OR m.created_at::date >= $2::date)
+               AND ($3::date IS NULL OR m.created_at::date <= $3::date)
+           ),0) AS period_qty
+         FROM inventory_movements m
+         WHERE m.company_id=$1 AND m.movement_type='sale_dispatch' AND ($4::text IS NULL OR m.location_code=$4::text)
+         GROUP BY m.product_id,m.location_code
+       ), stock AS (
+         SELECT s.product_id,s.location_code,s.on_hand,s.reserved,(s.on_hand-s.reserved) AS available
+         FROM inventory_stock_balances s
+         WHERE s.company_id=$1 AND ($4::text IS NULL OR s.location_code=$4::text)
+       ), keys AS (
+         SELECT product_id,location_code FROM receipts
+         UNION SELECT product_id,location_code FROM returns
+         UNION SELECT product_id,location_code FROM dispatches
+         UNION SELECT product_id,location_code FROM stock
+       )
+       SELECT k.product_id,p.sku,p.name AS product_name,k.location_code,
+         COALESCE(rc.period_qty,0)::text AS period_received_quantity,
+         COALESCE(rc.period_cost,0)::text AS period_received_cost,
+         COALESCE(rt.period_qty,0)::text AS period_returned_quantity,
+         COALESCE(rt.period_cost,0)::text AS period_returned_cost,
+         COALESCE(d.period_qty,0)::text AS period_dispatched_quantity,
+         (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))::text AS cumulative_net_quantity,
+         (COALESCE(rc.cumulative_cost,0)-COALESCE(rt.cumulative_cost,0))::text AS cumulative_net_cost,
+         CASE WHEN (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))>0
+           THEN ROUND((COALESCE(rc.cumulative_cost,0)-COALESCE(rt.cumulative_cost,0))
+                    /(COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0)),4)::text
+           ELSE NULL END AS weighted_average_cost,
+         CASE WHEN (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))>0
+           THEN ROUND(COALESCE(d.period_qty,0)*
+             ((COALESCE(rc.cumulative_cost,0)-COALESCE(rt.cumulative_cost,0))
+             /(COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))),4)::text
+           ELSE NULL END AS estimated_period_cogs,
+         COALESCE(s.on_hand,0)::text AS current_on_hand,
+         COALESCE(s.reserved,0)::text AS current_reserved,
+         COALESCE(s.available,0)::text AS current_available,
+         CASE WHEN (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))>0
+           THEN ROUND(COALESCE(s.on_hand,0)*
+             ((COALESCE(rc.cumulative_cost,0)-COALESCE(rt.cumulative_cost,0))
+             /(COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))),4)::text
+           ELSE NULL END AS provisional_stock_value,
+         (COALESCE(d.period_qty,0)>0 AND (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))<=0)
+          OR (COALESCE(s.on_hand,0)>0 AND (COALESCE(rc.cumulative_qty,0)-COALESCE(rt.cumulative_qty,0))<=0) AS has_cost_gap
+       FROM keys k
+       JOIN products p ON p.id=k.product_id AND p.company_id=$1
+       LEFT JOIN receipts rc ON rc.product_id=k.product_id AND rc.location_code=k.location_code
+       LEFT JOIN returns rt ON rt.product_id=k.product_id AND rt.location_code=k.location_code
+       LEFT JOIN dispatches d ON d.product_id=k.product_id AND d.location_code=k.location_code
+       LEFT JOIN stock s ON s.product_id=k.product_id AND s.location_code=k.location_code
+       ORDER BY p.name,k.location_code`,
+      [user.companyId, fromDate, toDate, location],
+    );
+    await this.db.query(
+      `INSERT INTO audit_log (company_id, actor_user_id, event_name, entity_name, entity_id, payload)
+       VALUES ($1,$2,'inventory.report.valuation_cogs','inventory',$4,$3)`,
+      [user.companyId, user.sub, JSON.stringify({ from_date: fromDate, to_date: toDate, location_code: location, rows: rows.rows.length }), user.companyId],
+    );
+    return {
+      fromDate,
+      toDate,
+      locationCode: location,
+      rows: rows.rows,
+    };
   }
 
   async listSalesOrdersForFulfillment(user: AuthUser) {

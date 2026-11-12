@@ -1,5 +1,6 @@
 import { DatabaseService } from '../common/database.service';
 import type { AuthUser, CreatePurchaseRequestInput, CreateQuotationInput } from './commerce.types';
+export declare function purchaseApprovalBlockReason(required: boolean, createdBy: string | null, approverId: string): "unknown_creator" | "self_approval" | null;
 export declare class CommerceService {
     private readonly db;
     constructor(db: DatabaseService);
@@ -58,6 +59,7 @@ export declare class CommerceService {
         grandTotal: number;
     }>;
     listPurchaseRequests(user: AuthUser): Promise<{
+        approval_block_reason: string | null;
         id: string;
         request_number: string;
         status: string;
@@ -65,8 +67,34 @@ export declare class CommerceService {
         tax_total: string;
         grand_total: string;
         supplier_id: string;
+        created_by: string | null;
+        require_independent_purchase_approver: boolean;
     }[]>;
-    purchaseRequestDetails(user: AuthUser, id: string): Promise<import("pg").QueryResultRow>;
+    purchaseRequestDetails(user: AuthUser, id: string): Promise<{
+        approval_block_reason: string | null;
+        id: string;
+        request_number: string;
+        status: string;
+        currency_code: string | null;
+        supplier_name: string;
+        subtotal: string;
+        tax_total: string;
+        grand_total: string;
+        created_by: string | null;
+        require_independent_purchase_approver: boolean;
+        replenishment_location: string | null;
+        replenishment_rule_revision: number | null;
+        replenishment_reason: string | null;
+        lines: Array<{
+            id: string;
+            product_id: string;
+            sku: string | null;
+            product_name: string | null;
+            quantity: string;
+            unit_cost: string;
+            line_total: string;
+        }>;
+    }>;
     rejectPurchaseRequest(user: AuthUser, id: string, input: {
         reason: string;
     }): Promise<{

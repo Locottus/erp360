@@ -1,66 +1,50 @@
 <a class="skip-link" href="#main-content">Saltar al contenido</a>
-<div class="app-shell">
-  <aside class="sidebar">
+<div class="app-shell" [class.navigation-open]="compactViewport() && menuOpen()">
+  @if (compactViewport() && menuOpen()) {
+    <div class="navigation-backdrop" aria-hidden="true" (click)="closeMenu()"></div>
+  }
+  <aside #navigationPanel class="sidebar" [class.drawer-open]="menuOpen()"
+    [attr.inert]="compactViewport() && !menuOpen() ? '' : null"
+    [attr.role]="compactViewport() && menuOpen() ? 'dialog' : null"
+    [attr.aria-modal]="compactViewport() && menuOpen() ? 'true' : null"
+    aria-label="Menú de ERP360">
+    <div class="sidebar-header">
     <div class="brand">
       <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
       <div>
         <strong>ERP360</strong>
-        <span>Modernizado</span>
+        <span>Tu centro de operaciones</span>
       </div>
     </div>
-
-    <button class="mobile-menu btn-icon" type="button" (click)="menuOpen.set(!menuOpen())" aria-controls="primary-nav" [attr.aria-expanded]="menuOpen()">Menú</button>
-    <nav id="primary-nav" class="nav-links" [class.mobile-open]="menuOpen()" aria-label="Navegación principal" (click)="menuOpen.set(false)">
-      <a routerLink="/" routerLinkActive="active" ariaCurrentWhenActive="page" [routerLinkActiveOptions]="{ exact: true }">
-        <i class="bi bi-house-door" aria-hidden="true"></i><span>Inicio</span>
-      </a>
-      <a routerLink="/workspace" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-speedometer2" aria-hidden="true"></i><span>Dashboard</span>
-      </a>
-      <a routerLink="/login" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-person-lock" aria-hidden="true"></i><span>Acceso</span>
-      </a>
-      <a routerLink="/store" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-bag" aria-hidden="true"></i><span>Tienda</span>
-      </a>
-      <a routerLink="/portal" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-person-vcard" aria-hidden="true"></i><span>Portal cliente</span>
-      </a>
-      <a routerLink="/inventory" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-box-seam" aria-hidden="true"></i><span>Inventario</span>
-      </a>
-      <a routerLink="/invoicing" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-receipt" aria-hidden="true"></i><span>Facturación</span>
-      </a>
-      @if (session.isAuthenticated()) {
-        <a routerLink="/subscription" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-card-checklist" aria-hidden="true"></i><span>Mi suscripción</span></a>
+    <button class="drawer-close" type="button" (click)="closeMenu()" aria-label="Cerrar menú">
+      <i class="bi bi-x-lg" aria-hidden="true"></i>
+    </button>
+    </div>
+    <nav id="primary-nav" class="nav-links" aria-label="Navegación principal">
+      @for (group of visibleNavigationGroups(); track group.label) {
+        <section class="nav-group" [attr.aria-label]="group.label">
+          <h2 class="nav-group-label">{{ group.label }}</h2>
+          @for (link of group.links; track link.route) {
+            <a [routerLink]="link.route" routerLinkActive="active" ariaCurrentWhenActive="page"
+              [routerLinkActiveOptions]="{ exact: link.route === '/' }" (click)="closeMenu(false)">
+              <i [class]="'bi bi-' + link.icon" aria-hidden="true"></i><span>{{ link.label }}</span>
+            </a>
+          }
+        </section>
       }
-      @if (saas.role()) {
-        <a routerLink="/platform/billing" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-buildings" aria-hidden="true"></i><span>Administración SaaS</span></a>
-      }
-      <a routerLink="/operations" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-kanban" aria-hidden="true"></i><span>Operaciones</span>
-      </a>
-      <a routerLink="/users" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-people" aria-hidden="true"></i><span>Usuarios</span></a>
-      <a routerLink="/company" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-building" aria-hidden="true"></i><span>Mi empresa</span></a>
-      <a routerLink="/accounting" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-journal-text" aria-hidden="true"></i><span>Contabilidad</span></a>
-      <a routerLink="/catalogs" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-collection" aria-hidden="true"></i><span>Catálogos</span></a>
-      <a routerLink="/controls" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-arrow-left-right" aria-hidden="true"></i><span>Control operativo</span></a>
-      <a routerLink="/receiving" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-box-arrow-in-down" aria-hidden="true"></i><span>Recepciones</span></a>
-      <a routerLink="/people" routerLinkActive="active" ariaCurrentWhenActive="page" *ngIf="session.user()?.roles?.includes('admin')"><i class="bi bi-person-badge" aria-hidden="true"></i><span>Personas</span></a>
-      <a routerLink="/ecommerce/admin" routerLinkActive="active" ariaCurrentWhenActive="page">
-        <i class="bi bi-palette" aria-hidden="true"></i><span>Diseñar tienda</span>
-      </a>
-      <a routerLink="/processes" routerLinkActive="active" ariaCurrentWhenActive="page"><i class="bi bi-signpost-split" aria-hidden="true"></i><span>Procesos</span></a>
     </nav>
   </aside>
 
-  <div class="content-area">
+  <div class="content-area" [attr.inert]="compactViewport() && menuOpen() ? '' : null">
     <header class="topbar">
+      <button #menuTrigger class="menu-trigger btn-icon" type="button" (click)="openMenu()"
+        aria-label="Abrir menú" aria-controls="primary-nav" [attr.aria-expanded]="menuOpen()">
+        <i class="bi bi-list" aria-hidden="true"></i><span>Menú</span>
+      </button>
       <div class="session-block" *ngIf="session.user() as user; else loggedOut">
-        <span class="user-chip"><i class="bi bi-person-circle" aria-hidden="true"></i> {{ user.fullName }}</span>
-        <span class="company-chip" *ngIf="session.company() as company">
-          <i class="bi bi-building" aria-hidden="true"></i> {{ company.code }} · {{ company.name }}
+        <span class="user-chip" [title]="user.fullName"><i class="bi bi-person-circle" aria-hidden="true"></i> <span>{{ user.fullName }}</span></span>
+        <span class="company-chip" *ngIf="session.company() as company" [title]="company.code + ' · ' + company.name">
+          <i class="bi bi-building" aria-hidden="true"></i> <span>{{ company.code }} · {{ company.name }}</span>
         </span>
       </div>
       <ng-template #loggedOut>
@@ -68,16 +52,18 @@
       </ng-template>
 
       <div class="topbar-actions">
-        <button type="button" class="btn-icon" (click)="helpOpen.set(!helpOpen())" [attr.aria-expanded]="helpOpen()" aria-controls="context-help">
-          <i class="bi bi-question-circle" aria-hidden="true"></i> Ayuda
+        <button type="button" class="btn-icon" (click)="helpOpen.set(!helpOpen())" [attr.aria-expanded]="helpOpen()" aria-controls="context-help" aria-label="Ayuda" title="Ayuda">
+          <i class="bi bi-question-circle" aria-hidden="true"></i><span class="action-label">Ayuda</span>
         </button>
-        <button type="button" class="btn-icon" (click)="toggleTheme()">
+        <button type="button" class="btn-icon" (click)="toggleTheme()"
+          [attr.aria-label]="theme.mode() === 'dark' ? 'Activar tema claro' : 'Activar tema oscuro'"
+          [title]="theme.mode() === 'dark' ? 'Activar tema claro' : 'Activar tema oscuro'">
           <i [class]="theme.mode() === 'dark' ? 'bi bi-moon-stars' : 'bi bi-sun'" aria-hidden="true"></i>
-          {{ theme.mode() === 'dark' ? 'Oscuro' : 'Claro' }}
+          <span class="action-label">{{ theme.mode() === 'dark' ? 'Oscuro' : 'Claro' }}</span>
         </button>
 
-        <button type="button" class="btn-logout" *ngIf="session.isAuthenticated()" (click)="logout()">
-          <i class="bi bi-box-arrow-right" aria-hidden="true"></i> Cerrar sesión
+        <button type="button" class="btn-logout" *ngIf="session.isAuthenticated()" (click)="logout()" aria-label="Cerrar sesión" title="Cerrar sesión">
+          <i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="action-label">Cerrar sesión</span>
         </button>
       </div>
     </header>
@@ -93,15 +79,16 @@
           </div>
           <ol>@for (step of currentHelp.steps; track step) { <li>{{ step }}</li> }</ol>
           <p>Asistente de demostración: respuestas locales predefinidas, sin IA externa ni acceso a tus documentos. No compartas contraseñas ni tokens.</p>
-          <form class="form-grid" (ngSubmit)="askMock()">
-            <label>Consulta de uso<input name="mockQuestion" [(ngModel)]="mockQuestion" maxlength="500" required placeholder="Ej.: no puedo reservar stock" /></label>
-            <button type="submit" class="btn btn-primary" [disabled]="!mockQuestion.trim()">Consultar mock</button>
-          </form>
-          @if (mockReply()) { <p role="status" class="status status-info">{{ mockReply() }}</p> }
+          <button type="button" class="btn btn-primary" (click)="assistantOpenRequest.set(assistantOpenRequest() + 1)">Abrir chat asistente</button>
           <button type="button" class="btn btn-secondary" (click)="showDiagnostic()">Preparar diagnóstico seguro</button>
           @if (diagnostic()) { <pre tabindex="0" aria-label="Diagnóstico sin datos personales">{{ diagnostic() }}</pre> }
         </aside>
       }
     </main>
+    @defer (on idle; when assistantOpenRequest() > 0) {
+      <app-assistant-chat [destinations]="assistantDestinations()" [openRequest]="assistantOpenRequest()" />
+    } @error {
+      <p role="alert" class="status status-error">No se pudo cargar el asistente. Comprueba tu conexión y recarga la página.</p>
+    }
   </div>
 </div>

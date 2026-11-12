@@ -64,6 +64,9 @@ let InventoryController = class InventoryController {
     listMovements(request, productId, locationCode, page, pageSize) {
         return this.inventoryService.listMovements(request.user, { productId, locationCode, page, pageSize });
     }
+    valuationAndCogs(request, fromDate, toDate, locationCode) {
+        return this.inventoryService.valuationAndCogs(request.user, { fromDate, toDate, locationCode });
+    }
     listSalesOrdersForFulfillment(request) {
         return this.inventoryService.listSalesOrdersForFulfillment(request.user);
     }
@@ -202,6 +205,17 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, String, String, String]),
     __metadata("design:returntype", void 0)
 ], InventoryController.prototype, "listMovements", null);
+__decorate([
+    (0, common_1.Get)('reports/valuation-cogs'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('fromDate')),
+    __param(2, (0, common_1.Query)('toDate')),
+    __param(3, (0, common_1.Query)('locationCode')),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, String, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "valuationAndCogs", null);
 __decorate([
     (0, common_1.Get)('sales-orders'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),

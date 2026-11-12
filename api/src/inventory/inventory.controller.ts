@@ -114,6 +114,17 @@ export class InventoryController {
     return this.inventoryService.listMovements(request.user, { productId, locationCode, page, pageSize });
   }
 
+  @Get('reports/valuation-cogs')
+  @Roles('admin')
+  valuationAndCogs(
+    @Req() request: AuthenticatedRequest,
+    @Query('fromDate') fromDate?: string,
+    @Query('toDate') toDate?: string,
+    @Query('locationCode') locationCode?: string,
+  ) {
+    return this.inventoryService.valuationAndCogs(request.user, { fromDate, toDate, locationCode });
+  }
+
   @Get('sales-orders')
   @Roles('admin', 'sales')
   listSalesOrdersForFulfillment(@Req() request: AuthenticatedRequest) {

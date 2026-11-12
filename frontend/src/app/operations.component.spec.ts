@@ -2,7 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { provideRouter } from '@angular/router';
+import { Router, provideRouter } from '@angular/router';
+import { RouterTestingHarness } from '@angular/router/testing';
 import { API_BASE_URL } from './core/api';
 import { AuthUser, SessionService } from './core/session.service';
 import { OperationsComponent } from './operations.component';
@@ -14,7 +15,7 @@ describe('Quotation validity UI', () => {
   const quote = { id: 'quote', quotation_number: 'Q', status: 'draft', subtotal: '20', grand_total: '20', customer_id: 'customer', valid_until: '2026-01-01', is_expired: true, revision: 3 };
   const purchase = { id: 'purchase', request_number: 'PR', status: 'draft', grand_total: '6', supplier_id: 's',
     supplier_name: 'Supplier', purchase_order_id: null, purchase_order_number: null, purchase_order_status: null,
-    inventory_received: false, is_posted: false, rejection_reason: null };
+    inventory_received: false, is_posted: false, rejection_reason: null, approval_block_reason: null };
   beforeEach(() => {
     user = signal<AuthUser | null>(admin);
     TestBed.configureTestingModule({
@@ -27,6 +28,19 @@ describe('Quotation validity UI', () => {
   function flushLists() {
     for (const req of http.match(r => r.method === 'GET')) req.flush([]);
   }
+  it('updates the requested tab when assistant navigation reuses the operations screen', async () => {
+    user.update(value => value ? { ...value, roles: [] } : null);
+    TestBed.inject(Router).resetConfig([{ path: 'operations', component: OperationsComponent }]);
+    const harness = await RouterTestingHarness.create();
+    const component = await harness.navigateByUrl('/operations?tab=purchases', OperationsComponent);
+    expect(component.activeTab).toBe('purchases');
+    const reused = await harness.navigateByUrl('/operations?tab=sales', OperationsComponent);
+    expect(reused).toBe(component);
+    expect(component.activeTab).toBe('sales');
+    await harness.navigateByUrl('/operations?tab=unknown', OperationsComponent);
+    expect(component.activeTab).toBe('sales');
+    http.expectNone(request => request.method !== 'GET');
+  });
   async function setup() {
     const fixture = TestBed.createComponent(OperationsComponent);
     fixture.detectChanges(); flushLists(); await fixture.whenStable();
@@ -131,5 +145,33 @@ describe('Quotation validity UI', () => {
     const req = http.expectOne(`${API_BASE_URL}/commerce/purchases/requests/purchase`);
     user.set(null); fixture.detectChanges(); req.flush({ id: 'purchase' }); await pending;
     expect(component.purchaseDetails).toBeNull();
+  });
+  it('explains independent approval blocks and does not submit a self or legacy approval', async () => {
+    const fixture = await setup(); const component = fixture.componentInstance;
+    component.activeTab = 'purchases';
+    component.orderNumbers[purchase.id] = 'PO';
+    for (const approval_block_reason of ['self_approval', 'unknown_creator'] as const) {
+      const blocked = { ...purchase, approval_block_reason };
+      component.purchaseRequests = [blocked]; fixture.detectChanges();
+      const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
+      expect(text).toContain(approval_block_reason === 'self_approval' ? 'otro administrador' : 'sin creador identificado');
+      expect(text).toContain('Rechazar solicitud');
+      const buttons = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'));
+      expect(buttons.some(button => button.textContent?.trim() === 'Aprobar')).toBeFalse();
+      await component.approvePurchase(blocked);
+      http.expectNone(`${API_BASE_URL}/commerce/purchases/requests/purchase/approve`);
+      expect(component.message).toBe('');
+    }
+  });
+  it('explains a policy activated after loading instead of claiming a successful approval', async () => {
+    const component = (await setup()).componentInstance;
+    component.orderNumbers[purchase.id] = 'PO';
+    const pending = component.approvePurchase(purchase);
+    http.expectOne(`${API_BASE_URL}/commerce/purchases/requests/purchase/approve`)
+      .flush({}, { status: 403, statusText: 'Forbidden' });
+    await pending;
+    expect(component.error).toContain('persona distinta del creador');
+    expect(component.message).toBe('');
+    expect(component.busy).toBeFalse();
   });
 });

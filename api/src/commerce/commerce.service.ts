@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../common/database.service';
 import { nextDocumentNumber } from '../common/document-sequence';
 import { requiredDate } from '../common/iso-date';
@@ -11,6 +11,12 @@ import type {
   PurchaseLineInput,
   SalesLineInput,
 } from './commerce.types';
+
+export function purchaseApprovalBlockReason(required: boolean, createdBy: string | null, approverId: string) {
+  if (!required) return null;
+  if (!createdBy) return 'unknown_creator';
+  return createdBy === approverId ? 'self_approval' : null;
+}
 
 @Injectable()
 export class CommerceService {
@@ -552,9 +558,12 @@ export class CommerceService {
       tax_total: string;
       grand_total: string;
       supplier_id: string;
+      created_by: string | null;
+      require_independent_purchase_approver: boolean;
     }>(
       `SELECT pr.id, pr.request_number, pr.status, pr.subtotal, pr.tax_total, pr.grand_total,
-              pr.supplier_id, s.name AS supplier_name,
+              pr.supplier_id, s.name AS supplier_name, pr.created_by,
+              c.require_independent_purchase_approver,
               (SELECT a.payload->>'reason' FROM audit_log a
                WHERE a.company_id=pr.company_id AND a.entity_id=pr.id::text
                  AND a.event_name='commerce.purchase.request.reject'
@@ -577,6 +586,7 @@ export class CommerceService {
                   AND je.status = 'posted'
               )) AS is_posted
        FROM purchase_requests pr
+       JOIN companies c ON c.id = pr.company_id
        JOIN suppliers s ON s.id = pr.supplier_id AND s.company_id = pr.company_id
        LEFT JOIN purchase_orders po ON po.request_id = pr.id AND po.company_id = pr.company_id
        WHERE pr.company_id = $1
@@ -586,12 +596,36 @@ export class CommerceService {
     await this.insertAuditDirect(user, 'commerce.purchase.request.list', user.companyId, {
       total: result.rows.length,
     });
-    return result.rows;
+    return result.rows.map(row => ({
+      ...row,
+      approval_block_reason: purchaseApprovalBlockReason(
+        row.require_independent_purchase_approver, row.created_by, user.sub,
+      ),
+    }));
   }
 
   async purchaseRequestDetails(user: AuthUser, id: string) {
-    const result = await this.db.query(
-      `SELECT pr.id,pr.request_number,pr.status,pr.currency_code,
+    const result = await this.db.query<{
+      id: string;
+      request_number: string;
+      status: string;
+      currency_code: string | null;
+      supplier_name: string;
+      subtotal: string;
+      tax_total: string;
+      grand_total: string;
+      created_by: string | null;
+      require_independent_purchase_approver: boolean;
+      replenishment_location: string | null;
+      replenishment_rule_revision: number | null;
+      replenishment_reason: string | null;
+      lines: Array<{
+        id: string; product_id: string; sku: string | null; product_name: string | null;
+        quantity: string; unit_cost: string; line_total: string;
+      }>;
+    }>(
+      `SELECT pr.id,pr.request_number,pr.status,pr.currency_code,pr.created_by,
+        c.require_independent_purchase_approver,
         pr.subtotal::text,pr.tax_total::text,pr.grand_total::text,
         s.name AS supplier_name,
         rp.location_code AS replenishment_location,rp.rule_revision AS replenishment_rule_revision,
@@ -601,14 +635,17 @@ export class CommerceService {
           'quantity',l.quantity::text,'unit_cost',l.unit_cost::text,'line_total',l.line_total::text
         ) ORDER BY l.id) FILTER (WHERE l.id IS NOT NULL),'[]'::json) AS lines
        FROM purchase_requests pr
+       JOIN companies c ON c.id=pr.company_id
        JOIN suppliers s ON s.id=pr.supplier_id AND s.company_id=pr.company_id
        LEFT JOIN replenishment_purchase_proposals rp ON rp.request_id=pr.id AND rp.company_id=pr.company_id
        LEFT JOIN purchase_request_lines l ON l.request_id=pr.id
        LEFT JOIN products p ON p.id=l.product_id AND p.company_id=pr.company_id
        WHERE pr.id=$1 AND pr.company_id=$2
-       GROUP BY pr.id,s.name,rp.location_code,rp.rule_revision,rp.reason`, [id, user.companyId]);
+       GROUP BY pr.id,c.require_independent_purchase_approver,s.name,rp.location_code,rp.rule_revision,rp.reason`, [id, user.companyId]);
     if (!result.rows[0]) throw new NotFoundException('Purchase request not found.');
-    return result.rows[0];
+    return { ...result.rows[0], approval_block_reason: purchaseApprovalBlockReason(
+      result.rows[0].require_independent_purchase_approver, result.rows[0].created_by, user.sub,
+    ) };
   }
 
   async rejectPurchaseRequest(user: AuthUser, id: string, input: { reason: string }) {
@@ -640,6 +677,12 @@ export class CommerceService {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
+      // Keep the policy stable until approval commits; profile edits take an exclusive company lock.
+      const policy = await client.query<{ require_independent_purchase_approver: boolean }>(
+        'SELECT require_independent_purchase_approver FROM companies WHERE id=$1 FOR SHARE',
+        [user.companyId],
+      );
+      if (!policy.rows[0]) throw new NotFoundException('Company not found.');
       const requestRec = await client.query<{
         id: string;
         supplier_id: string;
@@ -647,8 +690,9 @@ export class CommerceService {
         subtotal: string;
         tax_total: string;
         grand_total: string;
+        created_by: string | null;
       }>(
-        `SELECT id, supplier_id, status, subtotal, tax_total, grand_total
+        `SELECT id, supplier_id, status, subtotal, tax_total, grand_total, created_by
          FROM purchase_requests
          WHERE id = $1 AND company_id = $2
          LIMIT 1
@@ -663,6 +707,15 @@ export class CommerceService {
       }
       if (requestRec.rows[0].status === 'rejected') {
         throw new BadRequestException('Rejected purchase request cannot be approved.');
+      }
+      const approvalBlock = purchaseApprovalBlockReason(
+        policy.rows[0].require_independent_purchase_approver, requestRec.rows[0].created_by, user.sub,
+      );
+      if (approvalBlock === 'unknown_creator') {
+        throw new ConflictException('Independent approval requires a known request creator. Review this legacy request.');
+      }
+      if (approvalBlock === 'self_approval') {
+        throw new ForbiddenException('Another administrator must approve this request. Its creator cannot approve it.');
       }
 
       const po = await client.query<{ id: string; order_number: string }>(
@@ -708,6 +761,8 @@ export class CommerceService {
       await this.insertAudit(client, user, 'commerce.purchase.request.approve', requestRec.rows[0].id, {
         purchase_order_id: po.rows[0].id,
         purchase_order_number: po.rows[0].order_number,
+        request_created_by: requestRec.rows[0].created_by,
+        independent_approval_required: policy.rows[0].require_independent_purchase_approver,
       });
 
       await client.query('COMMIT');

@@ -72,6 +72,7 @@ export declare class CommerceController {
         grandTotal: number;
     }>;
     listPurchaseRequests(request: AuthenticatedRequest): Promise<{
+        approval_block_reason: string | null;
         id: string;
         request_number: string;
         status: string;
@@ -79,8 +80,34 @@ export declare class CommerceController {
         tax_total: string;
         grand_total: string;
         supplier_id: string;
+        created_by: string | null;
+        require_independent_purchase_approver: boolean;
     }[]>;
-    purchaseRequestDetails(request: AuthenticatedRequest, id: string): Promise<import("pg").QueryResultRow>;
+    purchaseRequestDetails(request: AuthenticatedRequest, id: string): Promise<{
+        approval_block_reason: string | null;
+        id: string;
+        request_number: string;
+        status: string;
+        currency_code: string | null;
+        supplier_name: string;
+        subtotal: string;
+        tax_total: string;
+        grand_total: string;
+        created_by: string | null;
+        require_independent_purchase_approver: boolean;
+        replenishment_location: string | null;
+        replenishment_rule_revision: number | null;
+        replenishment_reason: string | null;
+        lines: {
+            id: string;
+            product_id: string;
+            sku: string | null;
+            product_name: string | null;
+            quantity: string;
+            unit_cost: string;
+            line_total: string;
+        }[];
+    }>;
     rejectPurchaseRequest(request: AuthenticatedRequest, id: string, input: {
         reason: string;
     }): Promise<{

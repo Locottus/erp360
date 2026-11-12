@@ -77,5 +77,30 @@ export declare class InventoryController {
         page: number;
         pageSize: number;
     }>;
+    valuationAndCogs(request: AuthenticatedRequest, fromDate?: string, toDate?: string, locationCode?: string): Promise<{
+        fromDate: string | null;
+        toDate: string | null;
+        locationCode: string | null;
+        rows: {
+            product_id: string;
+            sku: string;
+            product_name: string;
+            location_code: string;
+            period_received_quantity: string;
+            period_received_cost: string;
+            period_returned_quantity: string;
+            period_returned_cost: string;
+            period_dispatched_quantity: string;
+            cumulative_net_quantity: string;
+            cumulative_net_cost: string;
+            weighted_average_cost: string | null;
+            estimated_period_cogs: string | null;
+            current_on_hand: string;
+            current_reserved: string;
+            current_available: string;
+            provisional_stock_value: string | null;
+            has_cost_gap: boolean;
+        }[];
+    }>;
     listSalesOrdersForFulfillment(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
 }

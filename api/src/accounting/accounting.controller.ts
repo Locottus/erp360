@@ -24,6 +24,24 @@ export class AccountingController {
     return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
   }
 
+  @Get('reports/financial-statements')
+  @Roles('admin')
+  financialStatements(@Req() request: AuthenticatedRequest, @Query('asOfDate') asOfDate?: string) {
+    return this.accountingService.getFinancialStatements(request.user, asOfDate);
+  }
+
+  @Get('bank-accounts')
+  @Roles('admin')
+  bankAccounts(@Req() request: AuthenticatedRequest) {
+    return this.accountingService.listBankAccounts(request.user);
+  }
+
+  @Post('bank-accounts')
+  @Roles('admin')
+  upsertBankAccount(@Req() request: AuthenticatedRequest, @Body() input: { code: string; bankName: string; iban?: string; currencyCode?: string; isActive?: boolean }) {
+    return this.accountingService.upsertBankAccount(request.user, input);
+  }
+
   @Post('purchase-orders/:id/returns')
   @Roles('admin')
   returnToSupplier(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,

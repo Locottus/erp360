@@ -14,6 +14,7 @@ import { RpcLegacyModule } from './rpc-legacy/rpc-legacy.module';
 import { EcommerceModule } from './ecommerce/ecommerce.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { SaasModule } from './saas/saas.module';
+import { AssistantModule } from './assistant/assistant.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SaasModule } from './saas/saas.module';
     EcommerceModule,
     DashboardModule,
     SaasModule,
+    AssistantModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -100,7 +100,7 @@ ficticios, de una empresa aislada de documentación.
   `ERP_DEMO_EMAIL`, `ERP_DEMO_PASSWORD`; nunca usarlo contra producción.
   Guarda evidencia mínima en `manual/evidence.json`, sin tokens ni contraseñas.
 
-## Diseño para el futuro chat IA
+## Asistente IA y herramientas futuras
 
 ### Lo implementado ahora
 
@@ -108,20 +108,35 @@ Ayuda contextual local por rutas allowlisted. El usuario pulsa explícitamente
 “Preparar diagnóstico seguro”; se muestra un JSON versionado con pantalla pública,
 título genérico, status HTTP y referencia de correlación validada. No incluye
 DOM, texto de formularios, URL con query, tokens, nombres, email ni `companyId`.
-No se instaló un SDK de IA ni se envía información del ERP a un tercero.
+La guía local no contacta terceros. El chat admite OpenAI, DeepSeek y Claude
+mediante adaptadores HTTP backend autenticados, con consentimiento explícito,
+servicio por usuario, claves cifradas y cuotas compartidas mensuales por empresa.
+La consulta externa envía pregunta actual y contexto allowlisted; no historial,
+documentos completos, identidades, JWT ni herramientas de ejecución. El texto del modelo no puede
+ejecutar navegación o escrituras. Cambiar proveedor revoca consentimiento y no
+reinicia uso. Las compras requieren confirmación del operador de servicio pagado.
+Fallos inciertos retienen reservas hasta conciliación verificada por owner.
+Se probaron protocolos con respuestas sintéticas, no inferencia ni cobro reales.
+El agente ahora tiene resúmenes de pantalla para todas las áreas y comprobaciones
+por solicitud de compra, pedido y saldo. Son consultas parametrizadas READ ONLY
+con timeout, permisos operativos y auditoría sin contenido. Compartir con IA
+estados/recuentos verificados exige consentimiento adicional; no se transmiten
+IDs/nombres/importes del diagnóstico. El modelo no elige SQL, URLs o herramientas.
 
-### Arquitectura recomendada (todavía pendiente de implementar)
+### Evolución recomendada (conocimiento completo y más herramientas pendientes)
 
 1. **UI accesible:** panel opcional con historial por sesión, cancelación,
    controles de envío y estado anunciado mediante live regions. Mostrar el
    contexto que se enviará y permitir quitarlo antes de consentir.
-2. **Gateway backend `/assistant`:** autenticar cada solicitud con sesión
+2. **Gateway backend `/assistant` (implementado):** autenticar cada solicitud con sesión
    validada; derivar empresa y permisos del servidor, jamás del mensaje/LLM.
    No entregar JWT ni credenciales al proveedor. Aplicar cuotas por usuario/tenant.
 3. **Conocimiento:** indexar manual versionado, catálogo de procesos y FAQs,
    con idioma, versión, ruta, permisos y fuente. Respuestas con citas y aviso
    cuando una función es API-only o no está implementada.
-4. **Herramientas iniciales read-only:** `getScreenHelp`, `explainError(code)`,
+4. **Herramientas read-only adicionales:** ya existe guía curada y diagnóstico
+   acotado por pantalla/compra/pedido/stock. Quedan por incorporar
+   `getScreenHelp`, `explainError(code)`,
    `getMyPermissions`, `getOrderStatus(id)` y `getStock(productId)` con schemas
    estrictos. Cada servicio vuelve a filtrar `company_id` y campos autorizados.
    Nunca SQL, shell, navegación arbitraria, lectura genérica del DOM o URL libre.
@@ -160,7 +175,7 @@ No se instaló un SDK de IA ni se envía información del ERP a un tercero.
 | P1 | Dependencias de desarrollo | Migrar Nest CLI 11→12 / Angular CLI 20→22 en rama separada, validar compatibilidad, toolchains y CI; no exponer dev servers hasta entonces |
 | P2 | Catálogos grandes | Paginación/búsqueda server-side e índices medidos; la tienda actual filtra y pagina en memoria |
 | P2 | Suscripciones y cumplimiento | Aviso de privacidad, double opt-in, baja pública segura y prueba de consentimientos según jurisdicción |
-| P2 | Asistencia IA | Implementar gateway y matriz de herramientas anterior, evaluación de privacidad y pruebas adversariales antes de conectar proveedor |
+| P2 | Asistencia IA | Gateway y herramientas acotadas disponibles; ampliar investigación individual, conocimiento completo con citas, evaluación de privacidad y pruebas adversariales antes de datos reales |
 
 ## Entregables relacionados
 

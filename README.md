@@ -85,16 +85,56 @@ Mejoras UX adicionales:
 - dashboard ejecutivo visual con barras comparativas;
 - componentes visuales reutilizables (cards, métricas, tablas y estados).
 
+La navegación está agrupada por áreas y conserva las rutas/permisos existentes.
+Desde 1280 px CSS usa una barra lateral con desplazamiento propio; en ventanas
+más pequeñas usa un panel superpuesto con cierre por Escape, foco de teclado
+contenido y fondo sin interacción. El zoom puede activar el diseño compacto.
+Tarjetas, formularios y tablas comparten mayor espaciado y jerarquía visual.
+Ver instrucciones y capturas en el
+[manual de usuario](docs/manual/MANUAL_ERP360_OPERACION_Y_CONFIGURACION.docx).
+
 La API contiene los módulos operativos; no todos disponen aún de formularios
 administrativos en Angular. El checkout crea pedido y reserva inventario, sin
 pasarela de pago. La fiscalidad es simulación sandbox, no emisión legal.
-La sesión JWT está en `sessionStorage` (no elimina el riesgo XSS); el chat IA
-todavía no está conectado a un proveedor. Ayuda incluye respuestas mock locales
-y permite preparar un contexto mínimo sin PII.
+La sesión JWT está en `sessionStorage` (no elimina el riesgo XSS). El botón
+flotante Asistente ofrece una guía local gratuita y, con consentimiento explícito,
+consultas mediante adaptadores OpenAI, DeepSeek o Claude. El proveedor y modelo
+activos se eligen por empresa en **Administración SaaS → Servicio de IA y proveedores**.
+Solo `owner` puede configurar claves/modelos; `owner` y `billing` asignan el
+servicio por usuario y registran ampliaciones realmente pagadas.
+La consulta externa envía solo la pregunta actual y contexto allowlisted
+(pantalla sin query y último estado HTTP/referencia), no documentos completos ni historial.
+**Analizar pantalla** ofrece apoyo en todas las áreas del ERP: resúmenes
+autorizados y reglas operativas con evidencia. **Analizar** junto a solicitudes
+de compra, pedidos y saldos investiga además aprobación independiente,
+reservas, ubicación y disponibilidad. Las consultas son estáticas, acotadas,
+en transacción PostgreSQL `READ ONLY`, con aislamiento por empresa y roles de
+las APIs operativas. No hay SQL libre ni herramientas elegidas por el modelo.
+El diagnóstico interno funciona sin proveedor o servicio IA y no consume tokens.
+En **IA y privacidad**, compartir sus hechos mínimos exige consentimiento
+adicional; el backend vuelve a consultarlos y añade ese contexto al cómputo
+normal de la pregunta. No envía nombres, IDs, documentos, importes ni valores
+de formularios. Los informes distinguen evidencia, recomendaciones y límites.
+Sugiere enlaces autorizados y navega ante órdenes explícitas como «abre Inventario»
+o «abre Compras»; las consultas normales no navegan automáticamente.
+Minimizar conserva la conversación; Limpiar chat, cerrar sesión o cambiar de
+usuario/empresa elimina el historial. No modifica datos ni cambia roles, y no
+demuestra causas fuera de las comprobaciones realizadas. No introducir secretos
+ni datos personales.
+Ayuda conserva los pasos de cada pantalla y permite abrir el chat.
+La cuota mensual UTC de empresa suma las bolsas de usuarios con servicios activos
+y las compras del mes. Se reservan tokens antes de contactar al proveedor,
+serializando por empresa; se contabilizan entrada, caché y salida reportadas.
+Saldo insuficiente devuelve 429 sin invocar IA. Cambiar proveedor no reinicia
+consumo; las reservas inciertas quedan retenidas para conciliación `owner`.
+No hay fallback a otro proveedor ni reintentos automáticos de consultas fallidas.
+Las claves se guardan cifradas en `assistant_provider_configs`; el secreto
+`ASSISTANT_CREDENTIAL_KEY` permanece fuera de PostgreSQL. No se asignan servicios
+ni claves automáticamente. Ver [configuración de IA](docs/DESPLIEGUE_LOCAL.md#proveedores-de-ia-y-límites-mensuales).
 
 ### Ampliación operativa
 
-Migraciones nuevas `0013` a `0026`: identidad, controles de inventario/tesorería,
+Migraciones nuevas `0013` a `0029`: identidad, controles de inventario/tesorería,
 moneda explícita en documentos nuevos, PDF y folios comerciales automáticos,
 créditos totales con devolución física opcional, reembolsos confirmados,
 revisiones de RRHH, entrega manual, clave privada de baja y snapshot de factura.
@@ -112,6 +152,10 @@ conservan su comportamiento. Ver [adaptación de procesos Odoo](docs/ADAPTACION_
 proveedor, cantidad y costo elegidos, sin impuesto y con aprobación separada.
 La deduplicación cubre solo propuestas abiertas de la misma regla; revisar
 compras manuales y otras ubicaciones antes de proponer.
+`0027` permite exigir otro administrador para aprobar compras, desde Mi empresa
+con revisión y motivo auditados. Inicia desactivado. Con la política activa,
+no se permite autoaprobar ni aprobar históricos sin creador conocido.
+También cubre propuestas de reposición; no cambia órdenes aprobadas.
 `0025` añade revisiones administrativas de usuarios/empresa y reglas de
 reposición por producto/ubicación. Usuarios exige motivo y revisión original al
 editar; Mi empresa permite actualizar nombre e identificación sin cambiar tenant.

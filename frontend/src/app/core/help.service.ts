@@ -44,6 +44,56 @@ export class HelpService {
     return prefix + page.steps.join(' ');
   }
 
+  chatReply(question: string, route: string): { text: string; routes: string[]; requestedRoute?: string; localOnly?: boolean } {
+    const text = question.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const aliases: Record<string, string> = {
+      inventario: '/inventory', stock: '/inventory', facturacion: '/invoicing',
+      compras: '/operations?tab=purchases', ventas: '/operations?tab=sales',
+      operaciones: '/operations', usuarios: '/users', 'mi empresa': '/company',
+      contabilidad: '/accounting', 'libro mayor': '/accounting', catalogos: '/catalogs',
+      recepciones: '/receiving', personas: '/people', 'control operativo': '/controls',
+      tienda: '/store', 'portal cliente': '/portal', acceso: '/login', inicio: '/',
+      dashboard: '/workspace', procesos: '/processes', 'mi suscripcion': '/subscription',
+      'administracion saas': '/platform/billing', 'disenar tienda': '/ecommerce/admin',
+    };
+    const command = /^(?:abre|abrir|ve a|ir a|llevame a|navega a)\s+(.+?)[.!]?$/.exec(text);
+    if (command) {
+      const requestedRoute = Object.hasOwn(aliases, command[1]) ? aliases[command[1]] : undefined;
+      return { text: requestedRoute
+        ? 'MOCK local: abriré la pantalla solicitada si tu sesión permite acceder. No ejecutaré operaciones.'
+        : 'MOCK local: no reconozco esa pantalla. Usa su nombre del menú, por ejemplo «abre Inventario». No abro direcciones externas.',
+        routes: [], requestedRoute, localOnly: true };
+    }
+    const incident = this.incident();
+    if (/diagnostic|ultimo error|error observado/.test(text)) {
+      let guidance = 'No hay errores HTTP registrados en esta sesión. Esto no demuestra que los datos o la lógica sean correctos.';
+      if (incident) {
+        if (incident.status === 401) guidance = 'Posible problema de sesión: inicia sesión otra vez. No compartas contraseña ni bearer.';
+        else if (incident.status === 403) guidance = 'La operación fue denegada. Revisa el rol y las restricciones del flujo, como la aprobación independiente. No intentes saltar permisos.';
+        else if (incident.status === 400 || incident.status === 422) guidance = 'La solicitud no pasó una validación. Revisa campos obligatorios, fechas, cantidades y estado del documento. No cambies datos para ocultar el error.';
+        else if (incident.status === 409) guidance = 'Hay un conflicto. Revisa la versión actual, la referencia y las reglas del documento antes de reintentar. No repitas automáticamente una escritura.';
+        else if (incident.status === 404) guidance = 'El recurso no se encontró en el contexto autorizado. Comprueba la referencia y la empresa de tu sesión; no pruebes identificadores de otras empresas.';
+        else if (incident.status === 0 || incident.status >= 500) guidance = 'Posible problema de conexión o servicio. Comprueba disponibilidad con soporte y conserva la referencia de diagnóstico, sin repetir movimientos.';
+        else guidance = 'Revisa el estado HTTP y la referencia con soporte antes de volver a ejecutar la operación.';
+      }
+      return { text: `MOCK local · guía de diagnóstico: ${guidance} No he leído documentos ni comprobado saldos o reglas en el servidor.`,
+        routes: incident?.status === 401 ? ['/login'] : [route.split('?')[0], '/processes'],
+        requestedRoute: undefined };
+    }
+    const routes = /stock|reserv|inventario/.test(text) ? ['/inventory']
+      : /compra|aproba/.test(text) ? ['/operations?tab=purchases', '/receiving']
+      : /factur|pago|credito|reembolso/.test(text) ? ['/invoicing', '/controls', '/accounting']
+      : /permiso|usuario|403/.test(text) ? ['/users', '/processes']
+      : /contrase|token|clave|sesion|401/.test(text) ? ['/login']
+      : /saas|cartera/.test(text) ? ['/platform/billing', '/subscription']
+      : /suscrip/.test(text) ? ['/subscription']
+      : [route.split('?')[0], '/processes'];
+    const reply = /compra|aproba/.test(text)
+      ? 'MOCK local: revisa las líneas y el estado de la solicitud antes de decidir. Si la empresa exige aprobación independiente, debe aprobar otro administrador. Los históricos sin creador conocido requieren revisión. No recibas ni contabilices sin comprobar las cantidades reales.'
+      : this.mockReply(question, route);
+    return { text: reply + ' Esta es una orientación, no una comprobación de tus datos.', routes, requestedRoute: undefined };
+  }
+
   context(route: string) {
     const page = helpPages.find((item) => item.route === route.split('?')[0]) ?? helpPages[0];
     return { schemaVersion: 1, screen: page.route, title: page.title, incident: this.incident() };

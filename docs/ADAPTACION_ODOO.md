@@ -12,7 +12,42 @@ La distribución declara LGPLv3 en su archivo `LICENSE`; no se copiaron
 implementaciones, recursos, interfaz ni marcas a ERP360.
 
 Las adaptaciones cubren vigencia/revisión de cotizaciones y visibilidad de
-compras pendientes para reposición. No significa que todo Odoo se haya portado.
+compras pendientes para reposición, además de aprobación independiente
+configurable. No significa que todo Odoo se haya portado.
+
+## Compras: aprobación independiente configurable
+
+Observación estática: `odoo/addons/purchase/models/res_company.py:33` define
+aprobación en uno o dos pasos por empresa, inicialmente en un paso.
+`odoo/addons/purchase/models/purchase_order.py:1332` determina autorización
+mediante esa política, importe y grupo de responsables de compras.
+No se ejecutó Odoo ni se copió su implementación.
+
+ERP360 adopta una regla propia, no equivalente al doble nivel de Odoo:
+`0027_purchase_approval_policy.sql` añade
+`companies.require_independent_purchase_approver`, inicialmente false.
+Mi empresa permite cambiarla con motivo y revisión esperada. Con la política
+activa, otro administrador de la misma empresa debe aprobar la solicitud:
+el creador no tiene excepción por ser admin. También cubre propuestas de
+reposición, que conservan `created_by`.
+
+La aprobación toma un bloqueo compartido de empresa antes del bloqueo de
+solicitud; editar la política toma bloqueo exclusivo. Una aprobación no puede
+evaluar una política antigua mientras un cambio autorizado queda confirmado.
+La misma función calcula el motivo de bloqueo para lista, detalle y aprobación.
+La auditoría de aprobación guarda creador, actor y política aplicada.
+
+Los documentos históricos sin creador conocido se bloquean con 409 cuando la
+política está activa, sin inventar autor. El creador identificado se bloquea
+con 403. Rechazar solicitudes sigue permitido; las órdenes aprobadas no cambian.
+Omitir la nueva propiedad al editar el perfil conserva la política actual;
+desactivarla exige un false explícito y queda auditado.
+
+Antes de activarla, disponer de otra cuenta administradora activa y revisar
+solicitudes antiguas. No implementa umbral monetario, delegaciones ni rol
+especializado de aprobador. Administradores siguen pudiendo cambiar la política
+con auditoría: no equivale a una política inmutable ni a segregación completa
+de funciones para producción.
 
 ## Compras pendientes y reposición: segunda adaptación
 

@@ -8,6 +8,8 @@ export type AuthUser = {
 export type RegisterInvoicePaymentInput = {
   paymentReference: string;
   amount: number;
+  currencyCode?: string;
+  exchangeRate?: number;
 };
 
 export type ClosePeriodInput = {

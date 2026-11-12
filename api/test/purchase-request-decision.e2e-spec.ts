@@ -126,4 +126,122 @@ describe('Purchase request decisions', () => {
     await post(`/commerce/purchases/requests/${next.body.id}/approve`, { orderNumber: 'PROP-ORDER' }).expect(201);
     expect((await db.query('SELECT id FROM purchase_orders WHERE request_id=$1', [next.body.id])).rows).toHaveLength(1);
   });
+  it('opts into independent approval with revision/audit and enforces it for requests and replenishment', async () => {
+    const profile = (await request(app.getHttpServer()).get('/companies/current').auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(profile.require_independent_purchase_approver).toBe(false);
+    const id = await makeRequest('INDEPENDENT');
+    const email = `decision-approver-${suffix}@example.test`;
+    const invite = await post('/auth/users', { email, fullName: 'Independent approver', roles: ['admin'] }).expect(201);
+    await request(app.getHttpServer()).post('/auth/reset-password').send({ token: invite.body.activationToken, password }).expect(201);
+    const login = await request(app.getHttpServer()).post('/auth/login').send({ email, password }).expect(201);
+    const approverToken = login.body.access_token;
+    const data = { name: profile.name, taxId: profile.tax_id, expectedRevision: profile.profile_revision,
+      requireIndependentPurchaseApprover: true, reason: 'Enable independent purchase approval' };
+    const patchPolicy = (input: object, bearer = token) => request(app.getHttpServer()).patch('/companies/current')
+      .auth(bearer, { type: 'bearer' }).send(input);
+    await patchPolicy(data, purchasesToken).expect(403);
+    await patchPolicy({ ...data, requireIndependentPurchaseApprover: 'true' }).expect(400);
+    const updates = await Promise.all([patchPolicy(data), patchPolicy(data)]);
+    expect(updates.map(reply => reply.status).sort()).toEqual([200, 409]);
+    const approval = `/commerce/purchases/requests/${id}/approve`;
+    await post(approval, { orderNumber: 'BLOCKED' }).expect(403);
+    await post(approval, { orderNumber: 'BLOCKED' }, purchasesToken).expect(403);
+    await post(approval, { orderNumber: 'BLOCKED' }, otherToken).expect(404);
+    expect((await db.query('SELECT id FROM purchase_orders WHERE request_id=$1', [id])).rows).toHaveLength(0);
+    const details = await request(app.getHttpServer()).get(`/commerce/purchases/requests/${id}`)
+      .auth(token, { type: 'bearer' }).expect(200);
+    expect(details.body.approval_block_reason).toBe('self_approval');
+    const list = await request(app.getHttpServer()).get('/commerce/purchases/requests').auth(token, { type: 'bearer' }).expect(200);
+    expect(list.body.find((row: { id: string }) => row.id === id).approval_block_reason).toBe('self_approval');
+    const independentList = await request(app.getHttpServer()).get('/commerce/purchases/requests').auth(approverToken, { type: 'bearer' }).expect(200);
+    expect(independentList.body.find((row: { id: string }) => row.id === id).approval_block_reason).toBeNull();
+
+    const proposal = await post(`/inventory/replenishment/${productId}/proposals`, {
+      locationCode: 'MAIN', expectedRevision: 1, supplierId, requestNumber: 'INDEPENDENT-PROP',
+      quantity: '2.0001', unitCost: '3.0001', reason: 'Reviewed independent proposal', reviewedCommitments: true,
+    }).expect(201);
+    await post(`/commerce/purchases/requests/${proposal.body.id}/approve`, { orderNumber: 'PROP-BLOCKED' }).expect(403);
+    await post(`/commerce/purchases/requests/${proposal.body.id}/reject`, { reason }).expect(201);
+
+    const replies = await Promise.all([
+      post(approval, { orderNumber: 'INDEPENDENT-ORDER' }, approverToken),
+      post(approval, { orderNumber: 'INDEPENDENT-ORDER-2' }, approverToken),
+    ]);
+    expect(replies.map(reply => reply.status).sort()).toEqual([201, 400]);
+    const order = await db.query('SELECT grand_total,created_by FROM purchase_orders WHERE request_id=$1', [id]);
+    expect(order.rows).toEqual([{ grand_total: '6.0000', created_by: login.body.user.id }]);
+    const audit = await db.query(`SELECT actor_user_id,payload FROM audit_log
+      WHERE entity_id=$1 AND event_name='commerce.purchase.request.approve'`, [id]);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0]).toMatchObject({ actor_user_id: login.body.user.id, payload: {
+      independent_approval_required: true, request_created_by: details.body.created_by,
+    } });
+    const policyAudit = await db.query(`SELECT payload FROM audit_log
+      WHERE company_id=$1 AND event_name='company.profile.update'`, [profile.id]);
+    expect(policyAudit.rows).toHaveLength(1);
+    expect(policyAudit.rows[0].payload).toMatchObject({
+      before: { require_independent_purchase_approver: false },
+      after: { require_independent_purchase_approver: true }, reason: data.reason,
+    });
+  });
+
+  it('preserves an enabled policy for old profile clients, blocks unknown creators and explicitly disables it', async () => {
+    const getProfile = async () => (await request(app.getHttpServer()).get('/companies/current')
+      .auth(token, { type: 'bearer' }).expect(200)).body;
+    const profile = await getProfile();
+    const patchProfile = (input: object) => request(app.getHttpServer()).patch('/companies/current').auth(token, { type: 'bearer' }).send(input);
+    const updated = await patchProfile({ name: 'Renamed decision fixture', taxId: profile.tax_id,
+      expectedRevision: profile.profile_revision, reason: 'Change name without changing purchase policy' }).expect(200);
+    expect(updated.body.require_independent_purchase_approver).toBe(true);
+    const legacy = await makeRequest('LEGACY-CREATOR');
+    await db.query('UPDATE purchase_requests SET created_by=NULL WHERE id=$1', [legacy]);
+    const approval = `/commerce/purchases/requests/${legacy}/approve`;
+    await post(approval, { orderNumber: 'LEGACY-BLOCKED' }).expect(409);
+    const details = await request(app.getHttpServer()).get(`/commerce/purchases/requests/${legacy}`)
+      .auth(token, { type: 'bearer' }).expect(200);
+    expect(details.body.approval_block_reason).toBe('unknown_creator');
+    const disabled = await patchProfile({ name: updated.body.name, taxId: updated.body.tax_id,
+      expectedRevision: updated.body.profile_revision, reason: 'Disable policy after legacy review',
+      requireIndependentPurchaseApprover: false }).expect(200);
+    expect(disabled.body.require_independent_purchase_approver).toBe(false);
+    await post(approval, { orderNumber: 'LEGACY-REVIEWED' }).expect(201);
+    const self = await makeRequest('SELF-AFTER-DISABLE');
+    await post(`/commerce/purchases/requests/${self}/approve`, { orderNumber: 'SELF-ORDER' }).expect(201);
+    expect((await getProfile()).require_independent_purchase_approver).toBe(false);
+  });
+
+  it('waits for a concurrent policy change and applies its committed value before approval', async () => {
+    const id = await makeRequest('POLICY-LOCK');
+    const profile = (await request(app.getHttpServer()).get('/companies/current').auth(token, { type: 'bearer' }).expect(200)).body;
+    const client = await db.connect();
+    const backend = await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid');
+    let approval: Promise<request.Response> | undefined;
+    let committed = false;
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE companies SET require_independent_purchase_approver=TRUE WHERE id=$1', [profile.id]);
+      approval = post(`/commerce/purchases/requests/${id}/approve`, { orderNumber: 'POLICY-LOCKED-ORDER' }).then(response => response);
+      const deadline = Date.now() + 3000;
+      let waiting = false;
+      while (Date.now() < deadline && !waiting) {
+        const locks = await db.query<{ waiting: boolean }>(
+          `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+           WHERE $1=ANY(pg_blocking_pids(pid)) AND wait_event_type='Lock'
+             AND query LIKE '%FOR SHARE%') AS waiting`, [backend.rows[0].pid]);
+        waiting = locks.rows[0].waiting;
+        if (!waiting) await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      expect(waiting).toBe(true);
+      await client.query('COMMIT');
+      committed = true;
+      expect((await approval).status).toBe(403);
+      expect((await db.query('SELECT id FROM purchase_orders WHERE request_id=$1', [id])).rows).toHaveLength(0);
+    } finally {
+      try {
+        if (!committed) await client.query('ROLLBACK');
+        if (approval) await approval;
+        await client.query('UPDATE companies SET require_independent_purchase_approver=FALSE WHERE id=$1', [profile.id]);
+      } finally { client.release(); }
+    }
+  });
 });

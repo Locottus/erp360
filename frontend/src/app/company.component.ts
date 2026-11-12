@@ -6,7 +6,10 @@ import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { CurrentCompany, SessionService } from './core/session.service';
 
-type CompanyProfile = CurrentCompany & { profile_revision: number };
+type CompanyProfile = CurrentCompany & {
+  profile_revision: number;
+  require_independent_purchase_approver: boolean;
+};
 
 @Component({
   selector: 'app-company', standalone: true, imports: [CommonModule, FormsModule],
@@ -26,6 +29,11 @@ type CompanyProfile = CurrentCompany & { profile_revision: number };
             <form class="form-grid" #companyForm="ngForm" (ngSubmit)="save()">
               <label>Nombre de la empresa<input name="companyName" [(ngModel)]="form.name" maxlength="160" required [disabled]="busy" /></label>
               <label>Identificación tributaria (vacío = sin registrar)<input name="taxId" [(ngModel)]="form.taxId" maxlength="64" [disabled]="busy" /></label>
+              <label><input type="checkbox" name="independentPurchaseApprover" [(ngModel)]="form.requireIndependentPurchaseApprover" [disabled]="busy" />
+                Exigir otro administrador para aprobar compras</label>
+              <p class="muted">Al activar la política, el creador no puede aprobar sus solicitudes, incluidas las propuestas de reposición.
+                Necesitarás otra cuenta administradora activa. Las solicitudes antiguas sin creador quedan bloqueadas para aprobación;
+                rechazarlas sigue permitido. No cambia órdenes ya aprobadas.</p>
               <label>Motivo del cambio de empresa<input name="companyReason" [(ngModel)]="form.reason" minlength="10" maxlength="1000" required [disabled]="busy" /></label>
               <button type="submit" class="btn btn-primary" [disabled]="busy || companyForm.invalid">Guardar perfil de empresa</button>
             </form>
@@ -41,14 +49,14 @@ export class CompanyComponent {
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
   profile: CompanyProfile | null = null;
-  form = { name: '', taxId: '', reason: '' };
+  form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false };
   error = ''; message = ''; busy = false;
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   constructor() {
     effect(() => {
       const user = this.session.user();
       untracked(() => {
-        this.profile = null; this.form = { name: '', taxId: '', reason: '' };
+        this.profile = null; this.form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false };
         this.error = ''; this.message = ''; this.busy = false;
         if (user?.roles.includes('admin')) void this.load();
       });
@@ -61,7 +69,8 @@ export class CompanyComponent {
     try {
       const result = await firstValueFrom(this.http.get<CompanyProfile>(`${API_BASE_URL}/companies/current`));
       if (identity !== this.session.user()) return;
-      this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '' };
+      this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '',
+        requireIndependentPurchaseApprover: result.require_independent_purchase_approver };
     } catch { if (identity === this.session.user()) this.error = 'No se pudo cargar el perfil de empresa.'; }
     finally { if (identity === this.session.user()) this.busy = false; }
   }
@@ -73,9 +82,11 @@ export class CompanyComponent {
       const result = await firstValueFrom(this.http.patch<CompanyProfile>(`${API_BASE_URL}/companies/current`, {
         name: this.form.name, taxId: this.form.taxId.trim() || null,
         expectedRevision: this.profile.profile_revision, reason: this.form.reason,
+        requireIndependentPurchaseApprover: this.form.requireIndependentPurchaseApprover,
       }));
       if (identity !== this.session.user()) return;
-      this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '' };
+      this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '',
+        requireIndependentPurchaseApprover: result.require_independent_purchase_approver };
       this.session.company.set(result);
       this.message = 'Perfil actualizado con auditoría. No se reescribieron documentos.';
     } catch (error) {

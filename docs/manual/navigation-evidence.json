@@ -1,0 +1,482 @@
+{
+  "capturedAt": "2026-11-11T18:12:35.242Z",
+  "responsive": [
+    {
+      "route": "/workspace",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/workspace",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/workspace",
+      "width": 600,
+      "scroll": 600
+    },
+    {
+      "route": "/workspace",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/workspace",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/workspace",
+      "width": 1279,
+      "scroll": 1279
+    },
+    {
+      "route": "/workspace",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/workspace",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/workspace",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/company",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/company",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/company",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/company",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/company",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/company",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/company",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/inventory",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/inventory",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/inventory",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/inventory",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/inventory",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/inventory",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/inventory",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/operations",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/operations",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/operations",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/operations",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/operations",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/operations",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/operations",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/accounting",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/accounting",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/accounting",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/accounting",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/accounting",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/accounting",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/accounting",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/catalogs",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/catalogs",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/catalogs",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/catalogs",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/catalogs",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/catalogs",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/catalogs",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/controls",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/controls",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/controls",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/controls",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/controls",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/controls",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/controls",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/people",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/people",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/people",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/people",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/people",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/people",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/people",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/receiving",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/receiving",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/receiving",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/receiving",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/receiving",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/receiving",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/receiving",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/login",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/login",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/login",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/login",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/login",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/login",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/login",
+      "width": 1920,
+      "scroll": 1920
+    },
+    {
+      "route": "/",
+      "width": 320,
+      "scroll": 320
+    },
+    {
+      "route": "/",
+      "width": 390,
+      "scroll": 390
+    },
+    {
+      "route": "/",
+      "width": 768,
+      "scroll": 768
+    },
+    {
+      "route": "/",
+      "width": 1024,
+      "scroll": 1024
+    },
+    {
+      "route": "/",
+      "width": 1280,
+      "scroll": 1280
+    },
+    {
+      "route": "/",
+      "width": 1440,
+      "scroll": 1440
+    },
+    {
+      "route": "/",
+      "width": 1920,
+      "scroll": 1920
+    }
+  ],
+  "keyboard": [
+    {
+      "width": 320,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    },
+    {
+      "width": 390,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    },
+    {
+      "width": 600,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    },
+    {
+      "width": 768,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    },
+    {
+      "width": 1024,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    },
+    {
+      "width": 1279,
+      "focusCycle": true,
+      "escapeRestoresFocus": true
+    }
+  ],
+  "assistant": [
+    {
+      "suggestedNavigation": true,
+      "explicitNavigation": true,
+      "deniedNavigation": true,
+      "secretsOmitted": true
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 768,
+      "height": 1024,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 844,
+      "height": 390,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "injectedHttp409": true,
+      "incidentContextVerified": true
+    },
+    {
+      "escapeRestoresFocus": true,
+      "clearsConversation": true,
+      "clearsOnLogout": true,
+      "businessWrites": 0,
+      "opensFromHelp": true
+    }
+  ],
+  "pageErrors": 0
+}

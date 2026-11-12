@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, effect, inject, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AccountDetail, Followup, ModulePrice, Portfolio, SaasService, SaasUser, Subscription, saasError } from './core/saas.service';
+import { AssistantAdminComponent } from './assistant-admin.component';
 
 export const SAAS_MODULES = ['base', 'sales', 'purchases', 'inventory', 'accounting', 'store', 'people'];
 export const today = () => new Date().toISOString().slice(0, 10);
@@ -13,7 +14,7 @@ const units = (value: string) => {
 type CollectionQueue = { as_of: string; items: { invoice_id: string; account_id: string; account_name: string; company_name: string; reference: string; currency: string; balance: string; due_on: string; days_overdue: number; stage: string; already_prepared: boolean; paused: boolean }[] };
 
 @Component({
-  selector: 'app-saas-billing', standalone: true, imports: [CommonModule, FormsModule],
+  selector: 'app-saas-billing', standalone: true, imports: [CommonModule, FormsModule, AssistantAdminComponent],
   templateUrl: './saas-billing.component.html', styleUrl: './saas-billing.component.scss',
 })
 export class SaasBillingComponent {

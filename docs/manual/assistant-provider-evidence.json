@@ -1,0 +1,134 @@
+{
+  "capturedAt": "2026-11-11T20:11:59.768Z",
+  "syntheticProvider": true,
+  "providers": [
+    {
+      "provider": "openai",
+      "usedTokens": 120,
+      "savesWithoutInference": true
+    },
+    {
+      "provider": "deepseek",
+      "usedTokens": 240,
+      "savesWithoutInference": true
+    },
+    {
+      "provider": "claude",
+      "usedTokens": 360,
+      "savesWithoutInference": true
+    }
+  ],
+  "diagnosticScreens": [
+    {
+      "screen": "/workspace",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/operations?tab=purchases",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/operations?tab=fiscal",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/accounting",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/people",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/ecommerce/admin",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/subscription",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/platform/billing",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/company",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/users",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/catalogs",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/receiving",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/controls",
+      "internalReadOnly": true,
+      "noInference": true
+    },
+    {
+      "screen": "/inventory",
+      "internalReadOnly": true,
+      "noInference": true
+    }
+  ],
+  "viewportCases": [
+    {
+      "width": 320,
+      "height": 568,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 768,
+      "height": 1024,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 1440,
+      "height": 900,
+      "fitsViewport": true,
+      "composerReachable": true
+    },
+    {
+      "width": 844,
+      "height": 390,
+      "fitsViewport": true,
+      "composerReachable": true
+    }
+  ],
+  "pageErrors": 0,
+  "recordInvestigation": {
+    "tool": "sales-order",
+    "detected": [
+      "insufficient_stock",
+      "reservation_missing"
+    ],
+    "sharingRequired": true
+  }
+}

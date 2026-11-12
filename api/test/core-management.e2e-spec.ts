@@ -228,4 +228,131 @@ describe('Users, company, replenishment and exact general ledger', () => {
     const empty = (await ledger({ accountCode: '2200' }).expect(200)).body;
     expect(empty).toMatchObject({ total: 0, items: [], summary: { opening: '0', debit: '0', credit: '0', closing: '0' } });
   });
+
+  it('stores a base currency and exchange rates for multimoneda support', async () => {
+    const current = (await get('/companies/current').expect(200)).body;
+    const revised = await patch('/companies/current', {
+      name: current.name,
+      taxId: current.tax_id,
+      expectedRevision: current.profile_revision,
+      reason,
+      currencyCode: 'EUR',
+    }).expect(200);
+    expect(revised.body.currency_code).toBe('EUR');
+    const rates = await get('/companies/currency-rates').expect(200);
+    expect(rates.body).toEqual([]);
+    const inserted = await post('/companies/currency-rates', { currencyCode: 'USD', rate: '1.08', source: 'manual' }).expect(201);
+    expect(inserted.body).toMatchObject({ fromCurrency: 'EUR', toCurrency: 'USD', rate: '1.08000000' });
+    await patch('/companies/current', {
+      name: current.name,
+      taxId: current.tax_id,
+      expectedRevision: current.profile_revision + 1,
+      reason,
+      currencyCode: 'USD',
+    }).expect(200);
+  });
+
+  it('supports customer payments in company base currency when invoice currency differs', async () => {
+    const customer = await post('/masters/customers', { code: `FX-${suffix}`, name: 'FX customer' }).expect(201);
+    const product = await post('/masters/products', { sku: `FX-${suffix}`, name: 'FX product', unitPrice: 120 }).expect(201);
+    const quotation = await post('/commerce/sales/quotations', {
+      quotationNumber: `FX-Q-${suffix}`,
+      customerId: customer.body.id,
+      lines: [{ productId: product.body.id, quantity: 1 }],
+    }).expect(201);
+    const order = await post(`/commerce/sales/quotations/${quotation.body.id}/confirm`, { orderNumber: `FX-SO-${suffix}` }).expect(201);
+    const invoice = await post(`/commerce/sales/orders/${order.body.orderId}/invoice`, { invoiceNumber: `FX-INV-${suffix}` }).expect(201);
+    await post(`/accounting/sales-invoices/${invoice.body.invoiceId}/post`, {}).expect(201);
+
+    let profile = (await get('/companies/current').expect(200)).body;
+    await patch('/companies/current', {
+      name: profile.name,
+      taxId: profile.tax_id,
+      expectedRevision: profile.profile_revision,
+      reason,
+      currencyCode: 'EUR',
+    }).expect(200);
+    await post('/companies/currency-rates', { currencyCode: 'USD', rate: '1.20', source: 'manual' }).expect(201);
+    const payment = await post(`/accounting/sales-invoices/${invoice.body.invoiceId}/payments`, {
+      paymentReference: `FX-PAY-${suffix}`,
+      amount: 100,
+      currencyCode: 'EUR',
+    }).expect(201);
+    expect(payment.body).toMatchObject({
+      amount: 120,
+      amountBase: 100,
+      paymentCurrencyCode: 'EUR',
+      documentCurrencyCode: 'USD',
+      baseCurrencyCode: 'EUR',
+      exchangeRate: 1.2,
+      remainingBalance: 0,
+    });
+    const stored = await db.query<{ amount: string; amount_base: string; payment_currency_code: string; exchange_rate: string }>(
+      `SELECT amount::text, amount_base::text, payment_currency_code, exchange_rate::text
+       FROM accounting_payments WHERE company_id=$1 AND payment_reference=$2 LIMIT 1`,
+      [companyId, `FX-PAY-${suffix}`],
+    );
+    expect(stored.rows[0]).toMatchObject({
+      amount: '120.0000',
+      amount_base: '100.0000',
+      payment_currency_code: 'EUR',
+      exchange_rate: '1.20000000',
+    });
+    const invoiceRow = (await get('/commerce/sales/invoices').expect(200)).body
+      .find((row: { id: string }) => row.id === invoice.body.invoiceId);
+    expect(invoiceRow).toMatchObject({ status: 'paid', balance_due: '0.0000' });
+
+    profile = (await get('/companies/current').expect(200)).body;
+    await patch('/companies/current', {
+      name: profile.name,
+      taxId: profile.tax_id,
+      expectedRevision: profile.profile_revision,
+      reason,
+      currencyCode: 'USD',
+    }).expect(200);
+  });
+
+  it('tracks bank accounts and financial statements from posted accounting entries', async () => {
+    const bank = await post('/accounting/bank-accounts', {
+      code: 'CHK',
+      bankName: 'Demo Bank',
+      iban: 'US1234567890',
+      currencyCode: 'USD',
+      isActive: true,
+    }).expect(201);
+    expect(bank.body).toMatchObject({ code: 'CHK', bankName: 'Demo Bank', currencyCode: 'USD', isActive: true });
+    expect((await get('/accounting/bank-accounts').expect(200)).body).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'CHK', bank_name: 'Demo Bank', currency_code: 'USD' })]),
+    );
+
+    const assetAccount = await db.query<{ id: string }>(
+      `SELECT id FROM accounting_accounts WHERE company_id=$1 AND code='1100' LIMIT 1`, [companyId],
+    );
+    const equityAccount = await db.query<{ id: string }>(
+      `INSERT INTO accounting_accounts(company_id,code,name,account_type,is_system,is_active)
+       VALUES($1,'3000','Capital social','equity',FALSE,TRUE)
+       ON CONFLICT(company_id,code) DO UPDATE SET name=EXCLUDED.name RETURNING id`, [companyId],
+    );
+    const revenueAccount = await db.query<{ id: string }>(
+      `SELECT id FROM accounting_accounts WHERE company_id=$1 AND code='4100' LIMIT 1`, [companyId],
+    );
+
+    const entry = await db.query<{ id: string }>(
+      `INSERT INTO accounting_journal_entries(company_id,entry_number,entry_date,source_type,description,status,created_by)
+       VALUES($1,'FS-1','2025-02-15','bank_statement','Statement fixture','posted',$2) RETURNING id`, [companyId, adminId],
+    );
+    const entryId = entry.rows[0].id;
+    await db.query(
+      `INSERT INTO accounting_journal_lines(journal_entry_id,account_id,line_description,debit,credit)
+       VALUES ($1,$2,'Cash increase','250.0000','0.0000'),
+              ($1,$3,'Capital entry','0.0000','250.0000'),
+              ($1,$4,'Revenue recognition','0.0000','100.0000'),
+              ($1,$5,'Expense clearing','100.0000','0.0000')`,
+      [entryId, assetAccount.rows[0].id, equityAccount.rows[0].id, revenueAccount.rows[0].id, revenueAccount.rows[0].id],
+    );
+
+    const statements = (await get('/accounting/reports/financial-statements').query({ asOfDate: '2025-02-15' }).expect(200)).body;
+    expect(statements.balanceSheet).toMatchObject({ assets: 250, liabilities: 0, equity: 250, balancesMatch: true });
+    expect(statements.incomeStatement).toMatchObject({ revenue: 0, expenses: 0, netIncome: 0 });
+  });
 });

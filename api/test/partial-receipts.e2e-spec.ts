@@ -160,6 +160,17 @@ describe('Partial purchase receipts and supplier returns', () => {
     expect((await get(commitmentPath(productId)).expect(200)).body).toMatchObject([
       { order_id: orderId, documented_received_quantity: '2.0000', pending_quantity: '3.0000' },
     ]);
+    const valuation = (await get('/inventory/reports/valuation-cogs').query({ locationCode: 'DOCK' }).expect(200)).body;
+    const row = valuation.rows.find((item: { product_id: string }) => item.product_id === productId);
+    expect(row).toMatchObject({
+      location_code: 'DOCK',
+      period_received_quantity: '2.0000',
+      period_received_cost: '6.66660000',
+      period_dispatched_quantity: '0',
+      weighted_average_cost: '3.3333',
+      provisional_stock_value: '6.6666',
+      has_cost_gap: false,
+    });
     expect(current.receipts[0].unit_cost).toBe('3.3333');
     receiptLine = current.receipts[0].id;
     await post(endpoint, { ...input, lines: [{ lineId, quantity: 3 }] }).expect(409);

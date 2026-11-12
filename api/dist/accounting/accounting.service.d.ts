@@ -5,6 +5,36 @@ export declare class AccountingService {
     private readonly db;
     constructor(db: DatabaseService);
     listAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listBankAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    upsertBankAccount(user: AuthUser, input: {
+        code?: string;
+        bankName?: string;
+        iban?: string;
+        currencyCode?: string;
+        isActive?: boolean;
+    }): Promise<{
+        id: string;
+        code: string;
+        bankName: string;
+        iban: string | null;
+        currencyCode: string;
+        isActive: boolean;
+    }>;
+    getFinancialStatements(user: AuthUser, asOfDate?: string): Promise<{
+        balanceSheet: {
+            asOfDate: string | null;
+            assets: number;
+            liabilities: number;
+            equity: number;
+            totalLiabilitiesAndEquity: number;
+            balancesMatch: boolean;
+        };
+        incomeStatement: {
+            revenue: number;
+            expenses: number;
+            netIncome: number;
+        };
+    }>;
     generalLedger(user: AuthUser, options: {
         accountCode?: string;
         fromDate?: string;
@@ -75,6 +105,11 @@ export declare class AccountingService {
         paymentId: string;
         paymentReference: string;
         amount: number;
+        amountBase: number;
+        paymentCurrencyCode: string;
+        documentCurrencyCode: string;
+        baseCurrencyCode: string;
+        exchangeRate: number;
         remainingBalance: number;
     }>;
     postPurchaseOrderAccrual(user: AuthUser, purchaseOrderId: string): Promise<{
@@ -107,6 +142,12 @@ export declare class AccountingService {
     paySupplier(user: AuthUser, id: string, input: RegisterInvoicePaymentInput): Promise<{
         paymentId: string;
         remainingBalance: number;
+        amount: number;
+        amountBase: number;
+        paymentCurrencyCode: string;
+        documentCurrencyCode: string;
+        baseCurrencyCode: string;
+        exchangeRate: number;
     }>;
     listPeriods(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     reopenPeriod(user: AuthUser, input: ClosePeriodInput & {
@@ -139,6 +180,9 @@ export declare class AccountingService {
     private generateEntryNumber;
     private insertLine;
     private getSystemAccounts;
+    private resolvePaymentAmounts;
+    private resolveBaseToDocumentRate;
+    private round4;
     private assertNoExistingSourceEntry;
     private assertSourceEntryExists;
     private insertAudit;

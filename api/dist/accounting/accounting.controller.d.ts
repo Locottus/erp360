@@ -35,6 +35,36 @@ export declare class AccountingController {
         }[];
         total: number;
     }>;
+    financialStatements(request: AuthenticatedRequest, asOfDate?: string): Promise<{
+        balanceSheet: {
+            asOfDate: string | null;
+            assets: number;
+            liabilities: number;
+            equity: number;
+            totalLiabilitiesAndEquity: number;
+            balancesMatch: boolean;
+        };
+        incomeStatement: {
+            revenue: number;
+            expenses: number;
+            netIncome: number;
+        };
+    }>;
+    bankAccounts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    upsertBankAccount(request: AuthenticatedRequest, input: {
+        code: string;
+        bankName: string;
+        iban?: string;
+        currencyCode?: string;
+        isActive?: boolean;
+    }): Promise<{
+        id: string;
+        code: string;
+        bankName: string;
+        iban: string | null;
+        currencyCode: string;
+        isActive: boolean;
+    }>;
     returnToSupplier(request: AuthenticatedRequest, id: string, input: Parameters<AccountingService['returnToSupplier']>[2]): Promise<{
         returnId: string;
         replayed: boolean;
@@ -72,6 +102,12 @@ export declare class AccountingController {
     paySupplier(request: AuthenticatedRequest, id: string, input: RegisterInvoicePaymentInput): Promise<{
         paymentId: string;
         remainingBalance: number;
+        amount: number;
+        amountBase: number;
+        paymentCurrencyCode: string;
+        documentCurrencyCode: string;
+        baseCurrencyCode: string;
+        exchangeRate: number;
     }>;
     periods(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     reopen(request: AuthenticatedRequest, input: ClosePeriodInput & {
@@ -94,6 +130,11 @@ export declare class AccountingController {
         paymentId: string;
         paymentReference: string;
         amount: number;
+        amountBase: number;
+        paymentCurrencyCode: string;
+        documentCurrencyCode: string;
+        baseCurrencyCode: string;
+        exchangeRate: number;
         remainingBalance: number;
     }>;
     postPurchaseOrder(request: AuthenticatedRequest, purchaseOrderId: string): Promise<{

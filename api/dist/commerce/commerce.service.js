@@ -13,12 +13,20 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CommerceService = void 0;
+exports.purchaseApprovalBlockReason = purchaseApprovalBlockReason;
 const common_1 = require("@nestjs/common");
 const database_service_1 = require("../common/database.service");
 const document_sequence_1 = require("../common/document-sequence");
 const iso_date_1 = require("../common/iso-date");
 const management_input_1 = require("../common/management-input");
 const pdfkit_1 = __importDefault(require("pdfkit"));
+function purchaseApprovalBlockReason(required, createdBy, approverId) {
+    if (!required)
+        return null;
+    if (!createdBy)
+        return 'unknown_creator';
+    return createdBy === approverId ? 'self_approval' : null;
+}
 let CommerceService = class CommerceService {
     db;
     constructor(db) {
@@ -448,7 +456,8 @@ let CommerceService = class CommerceService {
     }
     async listPurchaseRequests(user) {
         const result = await this.db.query(`SELECT pr.id, pr.request_number, pr.status, pr.subtotal, pr.tax_total, pr.grand_total,
-              pr.supplier_id, s.name AS supplier_name,
+              pr.supplier_id, s.name AS supplier_name, pr.created_by,
+              c.require_independent_purchase_approver,
               (SELECT a.payload->>'reason' FROM audit_log a
                WHERE a.company_id=pr.company_id AND a.entity_id=pr.id::text
                  AND a.event_name='commerce.purchase.request.reject'
@@ -471,6 +480,7 @@ let CommerceService = class CommerceService {
                   AND je.status = 'posted'
               )) AS is_posted
        FROM purchase_requests pr
+       JOIN companies c ON c.id = pr.company_id
        JOIN suppliers s ON s.id = pr.supplier_id AND s.company_id = pr.company_id
        LEFT JOIN purchase_orders po ON po.request_id = pr.id AND po.company_id = pr.company_id
        WHERE pr.company_id = $1
@@ -478,10 +488,14 @@ let CommerceService = class CommerceService {
         await this.insertAuditDirect(user, 'commerce.purchase.request.list', user.companyId, {
             total: result.rows.length,
         });
-        return result.rows;
+        return result.rows.map(row => ({
+            ...row,
+            approval_block_reason: purchaseApprovalBlockReason(row.require_independent_purchase_approver, row.created_by, user.sub),
+        }));
     }
     async purchaseRequestDetails(user, id) {
-        const result = await this.db.query(`SELECT pr.id,pr.request_number,pr.status,pr.currency_code,
+        const result = await this.db.query(`SELECT pr.id,pr.request_number,pr.status,pr.currency_code,pr.created_by,
+        c.require_independent_purchase_approver,
         pr.subtotal::text,pr.tax_total::text,pr.grand_total::text,
         s.name AS supplier_name,
         rp.location_code AS replenishment_location,rp.rule_revision AS replenishment_rule_revision,
@@ -491,15 +505,16 @@ let CommerceService = class CommerceService {
           'quantity',l.quantity::text,'unit_cost',l.unit_cost::text,'line_total',l.line_total::text
         ) ORDER BY l.id) FILTER (WHERE l.id IS NOT NULL),'[]'::json) AS lines
        FROM purchase_requests pr
+       JOIN companies c ON c.id=pr.company_id
        JOIN suppliers s ON s.id=pr.supplier_id AND s.company_id=pr.company_id
        LEFT JOIN replenishment_purchase_proposals rp ON rp.request_id=pr.id AND rp.company_id=pr.company_id
        LEFT JOIN purchase_request_lines l ON l.request_id=pr.id
        LEFT JOIN products p ON p.id=l.product_id AND p.company_id=pr.company_id
        WHERE pr.id=$1 AND pr.company_id=$2
-       GROUP BY pr.id,s.name,rp.location_code,rp.rule_revision,rp.reason`, [id, user.companyId]);
+       GROUP BY pr.id,c.require_independent_purchase_approver,s.name,rp.location_code,rp.rule_revision,rp.reason`, [id, user.companyId]);
         if (!result.rows[0])
             throw new common_1.NotFoundException('Purchase request not found.');
-        return result.rows[0];
+        return { ...result.rows[0], approval_block_reason: purchaseApprovalBlockReason(result.rows[0].require_independent_purchase_approver, result.rows[0].created_by, user.sub) };
     }
     async rejectPurchaseRequest(user, id, input) {
         const reason = (0, management_input_1.changeReason)(input?.reason);
@@ -534,7 +549,10 @@ let CommerceService = class CommerceService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            const requestRec = await client.query(`SELECT id, supplier_id, status, subtotal, tax_total, grand_total
+            const policy = await client.query('SELECT require_independent_purchase_approver FROM companies WHERE id=$1 FOR SHARE', [user.companyId]);
+            if (!policy.rows[0])
+                throw new common_1.NotFoundException('Company not found.');
+            const requestRec = await client.query(`SELECT id, supplier_id, status, subtotal, tax_total, grand_total, created_by
          FROM purchase_requests
          WHERE id = $1 AND company_id = $2
          LIMIT 1
@@ -547,6 +565,13 @@ let CommerceService = class CommerceService {
             }
             if (requestRec.rows[0].status === 'rejected') {
                 throw new common_1.BadRequestException('Rejected purchase request cannot be approved.');
+            }
+            const approvalBlock = purchaseApprovalBlockReason(policy.rows[0].require_independent_purchase_approver, requestRec.rows[0].created_by, user.sub);
+            if (approvalBlock === 'unknown_creator') {
+                throw new common_1.ConflictException('Independent approval requires a known request creator. Review this legacy request.');
+            }
+            if (approvalBlock === 'self_approval') {
+                throw new common_1.ForbiddenException('Another administrator must approve this request. Its creator cannot approve it.');
             }
             const po = await client.query(`INSERT INTO purchase_orders
           (company_id, supplier_id, request_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
@@ -574,6 +599,8 @@ let CommerceService = class CommerceService {
             await this.insertAudit(client, user, 'commerce.purchase.request.approve', requestRec.rows[0].id, {
                 purchase_order_id: po.rows[0].id,
                 purchase_order_number: po.rows[0].order_number,
+                request_created_by: requestRec.rows[0].created_by,
+                independent_approval_required: policy.rows[0].require_independent_purchase_approver,
             });
             await client.query('COMMIT');
             return {

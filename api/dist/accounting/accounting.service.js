@@ -25,6 +25,96 @@ let AccountingService = class AccountingService {
        FROM accounting_accounts WHERE company_id=$1 ORDER BY code`, [user.companyId]);
         return result.rows;
     }
+    async listBankAccounts(user) {
+        return (await this.db.query(`SELECT id, code, bank_name, iban, currency_code, is_active, created_at
+       FROM bank_accounts WHERE company_id=$1 ORDER BY created_at DESC`, [user.companyId])).rows;
+    }
+    async upsertBankAccount(user, input) {
+        if (typeof input?.code !== 'string' || !input.code.trim())
+            throw new common_1.BadRequestException('code is required.');
+        if (typeof input?.bankName !== 'string' || !input.bankName.trim())
+            throw new common_1.BadRequestException('bankName is required.');
+        const code = input.code.trim().toUpperCase();
+        const bankName = input.bankName.trim();
+        const iban = input.iban === undefined || input.iban === null || input.iban === '' ? null : String(input.iban).trim();
+        const currencyCode = (input.currencyCode ?? 'USD').toString().trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(currencyCode))
+            throw new common_1.BadRequestException('currencyCode must be a three-letter ISO code.');
+        if (iban !== null && iban.length > 64)
+            throw new common_1.BadRequestException('iban cannot exceed 64 characters.');
+        const result = await this.db.query(`INSERT INTO bank_accounts(company_id,code,bank_name,iban,currency_code,is_active,created_by,updated_at)
+       VALUES($1,$2,$3,$4,$5,$6,$7,NOW())
+       ON CONFLICT(company_id,code) DO UPDATE SET
+         bank_name=EXCLUDED.bank_name,
+         iban=EXCLUDED.iban,
+         currency_code=EXCLUDED.currency_code,
+         is_active=COALESCE(EXCLUDED.is_active,bank_accounts.is_active),
+         updated_at=NOW()
+       RETURNING id`, [user.companyId, code, bankName, iban, currencyCode, input.isActive ?? true, user.sub]);
+        await this.insertAuditDirect(user, 'accounting.bank_account.upsert', result.rows[0].id, {
+            code, bank_name: bankName, iban, currency_code: currencyCode, is_active: input.isActive ?? true,
+        });
+        return { id: result.rows[0].id, code, bankName: bankName, iban, currencyCode, isActive: input.isActive ?? true };
+    }
+    async getFinancialStatements(user, asOfDate) {
+        if (asOfDate !== undefined && asOfDate !== '') {
+            if (typeof asOfDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || asOfDate.startsWith('0000') ||
+                !Number.isFinite(Date.parse(asOfDate)) || new Date(asOfDate).toISOString().slice(0, 10) !== asOfDate) {
+                throw new common_1.BadRequestException('asOfDate must be a valid YYYY-MM-DD date.');
+            }
+        }
+        const params = [user.companyId];
+        let dateCondition = '';
+        if (asOfDate) {
+            params.push(asOfDate);
+            dateCondition = ` AND je.entry_date <= $${params.length}`;
+        }
+        const result = await this.db.query(`SELECT a.account_type,
+              COALESCE(SUM(CASE
+                WHEN je.company_id = $1 AND je.status = 'posted'${dateCondition} THEN
+                  CASE a.account_type
+                    WHEN 'asset' THEN jl.debit - jl.credit
+                    WHEN 'liability' THEN jl.credit - jl.debit
+                    WHEN 'equity' THEN jl.credit - jl.debit
+                    WHEN 'revenue' THEN jl.credit - jl.debit
+                    WHEN 'expense' THEN jl.debit - jl.credit
+                    ELSE 0
+                  END
+                ELSE 0 END), 0)::text AS balance
+       FROM accounting_accounts a
+       LEFT JOIN accounting_journal_lines jl ON jl.account_id = a.id
+       LEFT JOIN accounting_journal_entries je ON je.id = jl.journal_entry_id
+       WHERE a.company_id = $1
+       GROUP BY a.account_type`, params);
+        const balances = Object.fromEntries(result.rows.map(row => [row.account_type, Number(row.balance)]));
+        const assets = Number(balances.asset ?? 0);
+        const liabilities = Number(balances.liability ?? 0);
+        const equity = Number(balances.equity ?? 0);
+        const revenue = Number(balances.revenue ?? 0);
+        const expenses = Number(balances.expense ?? 0);
+        const balanceSheet = {
+            asOfDate: asOfDate ?? null,
+            assets,
+            liabilities,
+            equity,
+            totalLiabilitiesAndEquity: liabilities + equity,
+            balancesMatch: Math.abs(assets - (liabilities + equity)) < 0.0001,
+        };
+        const incomeStatement = {
+            revenue,
+            expenses,
+            netIncome: revenue - expenses,
+        };
+        await this.insertAuditDirect(user, 'accounting.report.financial_statements', user.companyId, {
+            as_of_date: asOfDate ?? null,
+            assets,
+            liabilities,
+            equity,
+            revenue,
+            expenses,
+        });
+        return { balanceSheet, incomeStatement };
+    }
     async generalLedger(user, options) {
         if (typeof options.accountCode !== 'string' || !options.accountCode.trim() || options.accountCode.length > 32) {
             throw new common_1.BadRequestException('accountCode is required (1 to 32 characters).');
@@ -314,9 +404,9 @@ let AccountingService = class AccountingService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            const invoice = await client.query(`SELECT id, status, grand_total
-         FROM sales_invoices
-         WHERE id = $1 AND company_id = $2
+            const invoice = await client.query(`SELECT i.id, i.status, i.grand_total, i.currency_code
+         FROM sales_invoices i
+         WHERE i.id = $1 AND i.company_id = $2
          LIMIT 1
          FOR UPDATE`, [invoiceId, user.companyId]);
             if (!invoice.rows[0]) {
@@ -326,6 +416,7 @@ let AccountingService = class AccountingService {
                 throw new common_1.BadRequestException('Cannot pay a void invoice.');
             }
             await this.assertSourceEntryExists(client, user.companyId, 'sales_invoice', invoiceId);
+            const amounts = await this.resolvePaymentAmounts(client, user.companyId, invoice.rows[0].currency_code, input);
             const balance = await client.query(`SELECT remaining::text, (remaining - $3::numeric)::text AS remaining_after,
                 remaining > 0 AS has_balance, $3::numeric <= remaining AS fits, $3::numeric = remaining AS settles
          FROM (
@@ -334,34 +425,49 @@ let AccountingService = class AccountingService {
            LEFT JOIN accounting_payments p ON p.company_id = i.company_id AND p.invoice_id = i.id
            WHERE i.company_id = $1 AND i.id = $2
            GROUP BY i.id
-         ) balance`, [user.companyId, invoiceId, input.amount]);
+         ) balance`, [user.companyId, invoiceId, amounts.amountInDocumentCurrency]);
             const { remaining, remaining_after: newRemaining, has_balance: hasBalance, fits, settles } = balance.rows[0];
             if (!hasBalance) {
                 throw new common_1.BadRequestException('Invoice is already fully paid.');
             }
             if (!fits) {
-                throw new common_1.BadRequestException(`Payment amount exceeds remaining balance (${remaining}).`);
+                throw new common_1.BadRequestException(`Payment amount exceeds remaining balance (${remaining} ${amounts.documentCurrencyCode}).`);
             }
-            const paymentInsert = await client.query(`INSERT INTO accounting_payments (company_id, invoice_id, payment_reference, amount, status, created_by)
-         VALUES ($1,$2,$3,$4,'registered',$5)
-         RETURNING id`, [user.companyId, invoiceId, input.paymentReference.trim(), input.amount, user.sub]);
+            const paymentInsert = await client.query(`INSERT INTO accounting_payments
+           (company_id, invoice_id, payment_reference, amount, payment_currency_code, exchange_rate, amount_base, status, created_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'registered',$8)
+         RETURNING id`, [
+                user.companyId,
+                invoiceId,
+                input.paymentReference.trim(),
+                amounts.amountInDocumentCurrency,
+                amounts.paymentCurrencyCode,
+                amounts.exchangeRate,
+                amounts.amountInBaseCurrency,
+                user.sub,
+            ]);
             if (!paymentInsert.rows[0]) {
                 throw new common_1.BadRequestException('Could not register payment.');
             }
             const paymentId = paymentInsert.rows[0].id;
             const accounts = await this.getSystemAccounts(client, user.companyId, ['1100', '1110']);
             const entryId = await this.createEntryHeader(client, user, 'invoice_payment', paymentId, `Registro de pago ${input.paymentReference}`);
-            await this.insertLine(client, entryId, accounts['1110'], 'Ingreso a caja/bancos', input.amount, 0);
-            await this.insertLine(client, entryId, accounts['1100'], 'Disminucion de cuenta por cobrar', 0, input.amount);
+            await this.insertLine(client, entryId, accounts['1110'], 'Ingreso a caja/bancos', amounts.amountInBaseCurrency, 0);
+            await this.insertLine(client, entryId, accounts['1100'], 'Disminucion de cuenta por cobrar', 0, amounts.amountInBaseCurrency);
             await client.query(`INSERT INTO accounting_reconciliations (company_id, invoice_id, payment_id, amount)
-         VALUES ($1,$2,$3,$4)`, [user.companyId, invoiceId, paymentId, input.amount]);
+         VALUES ($1,$2,$3,$4)`, [user.companyId, invoiceId, paymentId, amounts.amountInDocumentCurrency]);
             await client.query(`UPDATE accounting_payments SET status = 'reconciled' WHERE id = $1`, [paymentId]);
             if (settles) {
                 await client.query(`UPDATE sales_invoices SET status = 'paid' WHERE id = $1`, [invoiceId]);
             }
             await this.insertAudit(client, user, 'accounting.invoice.payment.registered', paymentId, {
                 invoice_id: invoiceId,
-                amount: input.amount,
+                amount_document_currency: amounts.amountInDocumentCurrency,
+                amount_base_currency: amounts.amountInBaseCurrency,
+                payment_currency_code: amounts.paymentCurrencyCode,
+                document_currency_code: amounts.documentCurrencyCode,
+                base_currency_code: amounts.baseCurrencyCode,
+                exchange_rate: amounts.exchangeRate,
                 remaining: Number(newRemaining),
             });
             await client.query('COMMIT');
@@ -369,7 +475,12 @@ let AccountingService = class AccountingService {
                 invoiceId,
                 paymentId,
                 paymentReference: input.paymentReference.trim(),
-                amount: input.amount,
+                amount: amounts.amountInDocumentCurrency,
+                amountBase: amounts.amountInBaseCurrency,
+                paymentCurrencyCode: amounts.paymentCurrencyCode,
+                documentCurrencyCode: amounts.documentCurrencyCode,
+                baseCurrencyCode: amounts.baseCurrencyCode,
+                exchangeRate: amounts.exchangeRate,
                 remainingBalance: Number(newRemaining),
             };
         }
@@ -596,27 +707,55 @@ let AccountingService = class AccountingService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            const order = await client.query('SELECT grand_total,status FROM purchase_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+            const order = await client.query('SELECT grand_total,status,currency_code FROM purchase_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
             if (!order.rows[0])
                 throw new common_1.NotFoundException('Purchase order not found.');
             if (order.rows[0].status !== 'received')
                 throw new common_1.BadRequestException('Only received and posted purchases can be paid.');
             await this.assertSourceEntryExists(client, user.companyId, 'purchase_order', id);
+            const amounts = await this.resolvePaymentAmounts(client, user.companyId, order.rows[0].currency_code, input);
             const paid = await client.query(`SELECT ((SELECT COALESCE(SUM(amount),0) FROM accounting_supplier_payments WHERE company_id=$1 AND purchase_order_id=$2)
             +(SELECT COALESCE(SUM(grand_total),0) FROM purchase_supplier_returns WHERE company_id=$1 AND purchase_order_id=$2)
             -(SELECT COALESCE(SUM(amount),0) FROM accounting_supplier_refunds WHERE company_id=$1 AND purchase_order_id=$2))::text AS total`, [user.companyId, id]);
             const remaining = Number((Number(order.rows[0].grand_total) - Number(paid.rows[0].total)).toFixed(4));
-            if (input.amount > remaining)
+            if (amounts.amountInDocumentCurrency > remaining)
                 throw new common_1.BadRequestException('Payment exceeds remaining payable.');
-            const payment = await client.query(`INSERT INTO accounting_supplier_payments(company_id,purchase_order_id,payment_reference,amount,created_by)
-           VALUES($1,$2,$3,$4,$5) RETURNING id`, [user.companyId, id, input.paymentReference.trim(), input.amount, user.sub]);
+            const payment = await client.query(`INSERT INTO accounting_supplier_payments
+            (company_id,purchase_order_id,payment_reference,amount,payment_currency_code,exchange_rate,amount_base,created_by)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [
+                user.companyId,
+                id,
+                input.paymentReference.trim(),
+                amounts.amountInDocumentCurrency,
+                amounts.paymentCurrencyCode,
+                amounts.exchangeRate,
+                amounts.amountInBaseCurrency,
+                user.sub,
+            ]);
             const accounts = await this.getSystemAccounts(client, user.companyId, ['1110', '2100']);
             const entryId = await this.createEntryHeader(client, user, 'supplier_payment', payment.rows[0].id, `Pago proveedor ${input.paymentReference.trim()}`);
-            await this.insertLine(client, entryId, accounts['2100'], 'Disminucion de cuenta por pagar', input.amount, 0);
-            await this.insertLine(client, entryId, accounts['1110'], 'Egreso caja/bancos', 0, input.amount);
-            await this.insertAudit(client, user, 'accounting.supplier.payment', payment.rows[0].id, { purchase_order_id: id, amount: input.amount });
+            await this.insertLine(client, entryId, accounts['2100'], 'Disminucion de cuenta por pagar', amounts.amountInBaseCurrency, 0);
+            await this.insertLine(client, entryId, accounts['1110'], 'Egreso caja/bancos', 0, amounts.amountInBaseCurrency);
+            await this.insertAudit(client, user, 'accounting.supplier.payment', payment.rows[0].id, {
+                purchase_order_id: id,
+                amount_document_currency: amounts.amountInDocumentCurrency,
+                amount_base_currency: amounts.amountInBaseCurrency,
+                payment_currency_code: amounts.paymentCurrencyCode,
+                document_currency_code: amounts.documentCurrencyCode,
+                base_currency_code: amounts.baseCurrencyCode,
+                exchange_rate: amounts.exchangeRate,
+            });
             await client.query('COMMIT');
-            return { paymentId: payment.rows[0].id, remainingBalance: Number((remaining - input.amount).toFixed(4)) };
+            return {
+                paymentId: payment.rows[0].id,
+                remainingBalance: Number((remaining - amounts.amountInDocumentCurrency).toFixed(4)),
+                amount: amounts.amountInDocumentCurrency,
+                amountBase: amounts.amountInBaseCurrency,
+                paymentCurrencyCode: amounts.paymentCurrencyCode,
+                documentCurrencyCode: amounts.documentCurrencyCode,
+                baseCurrencyCode: amounts.baseCurrencyCode,
+                exchangeRate: amounts.exchangeRate,
+            };
         }
         catch (error) {
             await client.query('ROLLBACK');
@@ -808,6 +947,78 @@ let AccountingService = class AccountingService {
             }
         }
         return map;
+    }
+    async resolvePaymentAmounts(client, companyId, rawDocumentCurrencyCode, input) {
+        const company = await client.query('SELECT currency_code FROM companies WHERE id=$1 LIMIT 1', [companyId]);
+        if (!company.rows[0]) {
+            throw new common_1.NotFoundException('Company not found.');
+        }
+        const baseCurrencyCode = company.rows[0].currency_code;
+        const documentCurrencyCode = (rawDocumentCurrencyCode ?? baseCurrencyCode).toUpperCase();
+        if (input.currencyCode !== undefined && typeof input.currencyCode !== 'string') {
+            throw new common_1.BadRequestException('currencyCode must be a three-letter ISO code when provided.');
+        }
+        const paymentCurrencyCode = (input.currencyCode ?? documentCurrencyCode).trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(paymentCurrencyCode)) {
+            throw new common_1.BadRequestException('currencyCode must be a three-letter ISO code when provided.');
+        }
+        if (paymentCurrencyCode !== documentCurrencyCode && paymentCurrencyCode !== baseCurrencyCode) {
+            throw new common_1.BadRequestException('Payments are supported in document currency or company base currency.');
+        }
+        if (documentCurrencyCode === baseCurrencyCode && paymentCurrencyCode !== baseCurrencyCode) {
+            throw new common_1.BadRequestException('Payments in foreign currency require a foreign-currency document.');
+        }
+        let exchangeRate = 1;
+        if (documentCurrencyCode !== baseCurrencyCode) {
+            exchangeRate = await this.resolveBaseToDocumentRate(client, companyId, documentCurrencyCode, input.exchangeRate);
+        }
+        else if (input.exchangeRate !== undefined) {
+            const provided = Number(input.exchangeRate);
+            if (!Number.isFinite(provided) || provided <= 0) {
+                throw new common_1.BadRequestException('exchangeRate must be a positive number when provided.');
+            }
+        }
+        if (paymentCurrencyCode === documentCurrencyCode) {
+            return {
+                amountInDocumentCurrency: this.round4(input.amount),
+                amountInBaseCurrency: this.round4(documentCurrencyCode === baseCurrencyCode ? input.amount : input.amount / exchangeRate),
+                paymentCurrencyCode,
+                documentCurrencyCode,
+                baseCurrencyCode,
+                exchangeRate: Number(exchangeRate.toFixed(8)),
+            };
+        }
+        return {
+            amountInDocumentCurrency: this.round4(input.amount * exchangeRate),
+            amountInBaseCurrency: this.round4(input.amount),
+            paymentCurrencyCode,
+            documentCurrencyCode,
+            baseCurrencyCode,
+            exchangeRate: Number(exchangeRate.toFixed(8)),
+        };
+    }
+    async resolveBaseToDocumentRate(client, companyId, documentCurrencyCode, inputExchangeRate) {
+        if (inputExchangeRate !== undefined) {
+            const provided = Number(inputExchangeRate);
+            if (!Number.isFinite(provided) || provided <= 0) {
+                throw new common_1.BadRequestException('exchangeRate must be a positive number when provided.');
+            }
+            return provided;
+        }
+        const rate = await client.query(`SELECT rate::text AS rate
+       FROM currency_exchange_rates
+       WHERE company_id=$1 AND to_currency=$2
+         AND valid_from <= NOW()
+         AND (valid_to IS NULL OR valid_to > NOW())
+       ORDER BY valid_from DESC, created_at DESC
+       LIMIT 1`, [companyId, documentCurrencyCode]);
+        if (!rate.rows[0]) {
+            throw new common_1.BadRequestException(`Missing exchange rate from company base currency to ${documentCurrencyCode}. Set it in /companies/currency-rates or provide exchangeRate.`);
+        }
+        return Number(rate.rows[0].rate);
+    }
+    round4(value) {
+        return Number(value.toFixed(4));
     }
     async assertNoExistingSourceEntry(client, companyId, sourceType, sourceId) {
         await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`accounting-source:${companyId}:${sourceType}:${sourceId}`]);

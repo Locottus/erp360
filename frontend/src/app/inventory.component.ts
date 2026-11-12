@@ -7,6 +7,7 @@ import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
 import { EmptyStateComponent } from './shared/empty-state.component';
 import { ReplenishmentComponent } from './replenishment.component';
+import { AssistantContextService } from './core/assistant-context.service';
 
 type StockRow = {
   product_id: string;
@@ -86,9 +87,9 @@ type FulfillmentOrder = {
         @if (stock.length) {
           <div class="table-scroll"><table class="table-list">
             <caption>Existencia física, comprometida y disponible. La ubicación se filtra en servidor.</caption>
-            <thead><tr><th scope="col">Producto</th><th scope="col">Ubicación</th><th scope="col">Físico</th><th scope="col">Reservado</th><th scope="col">Disponible</th></tr></thead>
+            <thead><tr><th scope="col">Producto</th><th scope="col">Ubicación</th><th scope="col">Físico</th><th scope="col">Reservado</th><th scope="col">Disponible</th><th scope="col">Diagnóstico</th></tr></thead>
             <tbody>@for (row of stock; track row.product_id + row.location_code) {
-              <tr><th scope="row">{{ row.product_name }}</th><td>{{ row.location_code }}</td><td>{{ row.on_hand | number:'1.0-4' }}</td><td>{{ row.reserved | number:'1.0-4' }}</td><td><strong>{{ row.available | number:'1.0-4' }}</strong></td></tr>
+              <tr><th scope="row">{{ row.product_name }}</th><td>{{ row.location_code }}</td><td>{{ row.on_hand | number:'1.0-4' }}</td><td>{{ row.reserved | number:'1.0-4' }}</td><td><strong>{{ row.available | number:'1.0-4' }}</strong></td><td><button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'stock', id: row.product_id, locationCode: row.location_code}, '/inventory')">Analizar saldo</button></td></tr>
             }</tbody>
           </table></div>
         } @else if (!loading) {
@@ -139,6 +140,7 @@ type FulfillmentOrder = {
                   <th scope="row">{{ order.order_number }}</th><td>{{ order.customer_name }}</td><td>{{ order.status }}</td>
                   <td>{{ reservationLabel(order.reservation_status) }}</td>
                   <td>
+                    <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'sales-order', id: order.id, locationCode: orderLocations[order.id] || locationCode}, '/inventory')">Analizar pedido</button>
                     @if (order.reservation_status === 'reserved') { {{ order.reservation_location }} }
                     @else { <input [name]="'loc-' + order.id" [(ngModel)]="orderLocations[order.id]" maxlength="32" aria-label="Ubicación para el pedido {{ order.order_number }}" /> }
                   </td>
@@ -185,6 +187,7 @@ type FulfillmentOrder = {
   `,
 })
 export class InventoryComponent implements OnInit {
+  readonly assistant = inject(AssistantContextService);
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
   private readonly api = API_BASE_URL;

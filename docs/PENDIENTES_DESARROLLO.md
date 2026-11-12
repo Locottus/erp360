@@ -15,10 +15,34 @@ Angular, NestJS y PostgreSQL 16. API local `http://127.0.0.1:3001`,
 frontend `http://127.0.0.1:4201`, proxy frontend `/api`.
 Contenedor de datos `erp360-db`: conservar su volumen.
 
-Migraciones incrementales hasta `0026_replenishment_proposals.sql`.
+Migraciones incrementales hasta `0027_purchase_approval_policy.sql`.
 Respaldar antes de migrar; no volver a inicializar datos existentes.
 El directorio padre contiene Odoo como referencia de lógica, no es la aplicación
 que se está ejecutando.
+
+### Avance actual: aprobación independiente de compras (0027)
+
+Mi empresa permite exigir otro administrador para aprobar solicitudes.
+La opción inicia desactivada y su cambio requiere motivo/revisión con
+auditoría. Activada, impide la autoaprobación, incluidas propuestas de
+reposición. Solicitudes sin creador conocido requieren revisión y no se
+aprueban mientras esté activa; no se asignó autor a históricos.
+Lista y detalle exponen el motivo del bloqueo; la API vuelve a comprobarlo
+en transacción, coordinada con cambios de política empresarial.
+No cambia órdenes aprobadas ni los permisos existentes.
+
+Antes de activar, provisionar otro administrador activo. Sigue pendiente
+un rol granular de aprobación, umbrales, delegaciones y restringir quién
+puede desactivar la política. Admin conserva esa posibilidad con auditoría;
+este paso no declara Compras preparado para producción.
+Referencia y diferencias: [adaptación Odoo](ADAPTACION_ODOO.md).
+Verificación focalizada: builds API/Angular, 11 unitarias API, 18 e2e API
+y 12 pruebas UI. Navegador: política guardada con auditoría, autoaprobación
+oculta, rechazo disponible y texto de bloqueo visible a 375/768/1280 px.
+La concurrencia comprueba el bloqueo real en PostgreSQL y la política
+confirmada antes de aprobar. El type-check del alcance cambiado pasa;
+el chequeo global de tests sigue bloqueado por el tipo previo de parámetros
+del libro mayor en `api/test/core-management.e2e-spec.ts:219`.
 
 ### Avance actual: compromisos de compra visibles
 
@@ -35,7 +59,8 @@ navegador y 24 combinaciones ruta/ancho sin errores. Manual 3.12.
 Se añadió consulta de líneas y totales de solicitudes antes de decidir.
 Es una lectura informativa y no bloquea la solicitud ni garantiza que no
 cambie después. Sigue pendiente segregar creación de aprobación y ampliar la
-protección de duplicados a compras manuales y otras ubicaciones.
+protección de duplicados a compras manuales y otras ubicaciones. La separación
+opt-in de creador/aprobador se incorporó después en 0027.
 Manual 3.11; 36 unitarias API, 77 e2e, 59 frontend; cinco flujos reales y
 20 combinaciones ruta/ancho sin errores.
 

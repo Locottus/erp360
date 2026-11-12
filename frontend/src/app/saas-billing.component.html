@@ -11,6 +11,11 @@
   @if (error) { <p class="status status-error" role="alert">{{ error }}</p> }
   @if (message) { <p class="status status-success" role="status">{{ message }}</p> }
   @if (saas.role()) {
+    <details #assistantSettings class="surface-card"><summary>Servicio de IA y proveedores</summary>
+      @defer (on interaction(assistantSettings)) {
+        <app-assistant-admin [companies]="companies" />
+      } @error { <p class="status status-error" role="alert">No se pudo cargar la configuración de IA. Comprueba la conexión y recarga.</p> }
+    </details>
     <aside class="surface-card notice"><strong>Registro administrativo · {{ saas.role() }}</strong>
       <p>Pasarela, cobro automático y envío de correo: no configurados. No se restringe el acceso a módulos por deuda. Un seguimiento de correo solo deja constancia manual.</p>
       @if (!saas.writable()) { <p>Modo consulta: no puedes crear ni modificar registros.</p> }

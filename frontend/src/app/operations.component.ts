@@ -6,6 +6,8 @@ import { RouterLink, ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { AssistantContextService } from './core/assistant-context.service';
 
 type Customer = { id: string; code: string; name: string; email: string | null; tax_id: string | null; is_active: boolean };
 type Product = { id: string; sku: string; name: string; unit_price: string; description?: string; is_active: boolean };
@@ -18,6 +20,7 @@ type PurchaseRequest = {
   supplier_name: string; purchase_order_id: string | null; purchase_order_number: string | null;
   purchase_order_status: string | null; inventory_received: boolean; is_posted: boolean;
   rejection_reason: string | null;
+  approval_block_reason: 'self_approval' | 'unknown_creator' | null;
 };
 type PurchaseRequestDetails = {
   id: string; request_number: string; status: string; currency_code: string | null;
@@ -145,7 +148,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               <tbody>@for (item of quotations; track item.id) { <tr><th scope="row">{{ item.quotation_number }}</th><td>{{ item.is_expired ? 'Vencida · requiere revisión' : item.status }}</td><td>{{ item.valid_until || 'Sin caducidad' }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td><td>@if (item.status === 'draft' && !item.is_expired) { <div class="inline-action"><input [name]="'order-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número del pedido" placeholder="Número de pedido" /><button class="btn btn-secondary" type="button" (click)="confirmQuotation(item)" [disabled]="busy || !orderNumbers[item.id]">Confirmar</button></div> }</td></tr> }</tbody>
             </table></div> } @else { <p class="muted">Sin cotizaciones.</p> }
             <h3>Pedidos confirmados</h3>
-            @if (salesOrders.length) { <div class="table-scroll"><table class="table-list"><caption>Pedidos de venta</caption><thead><tr><th scope="col">Pedido</th><th scope="col">Cliente</th><th scope="col">Estado</th><th scope="col">Total</th></tr></thead><tbody>@for (item of salesOrders; track item.id) { <tr><th scope="row">{{ item.order_number }}</th><td>{{ item.customer_name }}</td><td>{{ item.status }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td></tr> }</tbody></table></div> } @else { <p class="muted">Sin pedidos.</p> }
+            @if (salesOrders.length) { <div class="table-scroll"><table class="table-list"><caption>Pedidos de venta</caption><thead><tr><th scope="col">Pedido</th><th scope="col">Cliente</th><th scope="col">Estado</th><th scope="col">Total</th><th scope="col">Diagnóstico</th></tr></thead><tbody>@for (item of salesOrders; track item.id) { <tr><th scope="row">{{ item.order_number }}</th><td>{{ item.customer_name }}</td><td>{{ item.status }}</td><td>{{ item.grand_total | number:'1.2-4' }}</td><td><button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'sales-order', id: item.id, locationCode: 'MAIN'}, '/operations?tab=sales')">Analizar pedido en MAIN</button></td></tr> }</tbody></table></div> } @else { <p class="muted">Sin pedidos.</p> }
           </article>
           <article class="surface-card"><h2>Revisar vigencia de cotización</h2>
             <p>Solo borradores. Conserva precios y líneas; no recalcula importes ni cambia un pedido existente. Si cambió el precio, crea una nueva cotización.</p>
@@ -186,8 +189,13 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               <tbody>@for (item of purchaseRequests; track item.id) { <tr><th scope="row">{{ item.request_number }}<br><small>{{ item.supplier_name }}</small></th><td>{{ item.grand_total | number:'1.2-4' }}</td><td>{{ item.status }} @if (item.status === 'rejected' && item.rejection_reason) { <br><small>Motivo: {{ item.rejection_reason }}</small> }</td>
                 <td>{{ item.purchase_order_number || '—' }}<br><small>{{ item.purchase_order_status || '' }}</small></td>
                 <td><button class="btn btn-secondary" type="button" (click)="showPurchaseDetails(item)" [disabled]="busy || loading">Ver detalle de {{ item.request_number }}</button>
+                  <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'purchase-request', id: item.id}, '/operations?tab=purchases')">Analizar solicitud</button>
                   @if (!item.purchase_order_id && (item.status === 'draft' || item.status === 'submitted')) {
-                    <div class="inline-action"><input [name]="'po-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número de orden de compra" placeholder="Orden de compra" /><button class="btn btn-secondary" type="button" (click)="approvePurchase(item)" [disabled]="busy || !orderNumbers[item.id]">Aprobar</button></div>
+                    @if (item.approval_block_reason) {
+                      <p class="muted">{{ purchaseApprovalMessage(item) }}</p>
+                    } @else {
+                      <div class="inline-action"><input [name]="'po-' + item.id" [(ngModel)]="orderNumbers[item.id]" aria-label="Número de orden de compra" placeholder="Orden de compra" /><button class="btn btn-secondary" type="button" (click)="approvePurchase(item)" [disabled]="busy || !orderNumbers[item.id]">Aprobar</button></div>
+                    }
                     <label>Motivo de rechazo de {{ item.request_number }}<input [name]="'reject-' + item.id" [(ngModel)]="rejectionReasons[item.id]" minlength="10" maxlength="1000" [disabled]="busy" /></label>
                     <button class="btn btn-secondary" type="button" (click)="rejectPurchase(item)" [disabled]="busy || loading || (rejectionReasons[item.id] || '').trim().length < 10">Rechazar solicitud</button>
                   }
@@ -315,6 +323,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
   `,
 })
 export class OperationsComponent implements OnInit {
+  readonly assistant = inject(AssistantContextService);
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
   private readonly route = inject(ActivatedRoute);
@@ -372,6 +381,10 @@ export class OperationsComponent implements OnInit {
   message = '';
 
   constructor() {
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(params => {
+      const tab = this.tabs.find(item => item.id === params.get('tab'));
+      if (tab) this.activeTab = tab.id;
+    });
     effect(() => {
       this.session.user();
       this.validityQuotation = null;
@@ -386,8 +399,6 @@ export class OperationsComponent implements OnInit {
   }
 
   ngOnInit() {
-    const requestedTab = this.route.snapshot.queryParamMap.get('tab');
-    if (this.tabs.some(tab => tab.id === requestedTab)) this.activeTab = requestedTab!;
     if (this.isAdmin) void this.refresh();
   }
 
@@ -513,17 +524,41 @@ export class OperationsComponent implements OnInit {
   }
 
   async approvePurchase(item: PurchaseRequest) {
-    await this.perform(async () => {
+    if (item.approval_block_reason) {
+      this.error = this.purchaseApprovalMessage(item);
+      this.message = '';
+      return;
+    }
+    const orderNumber = this.orderNumbers[item.id]?.trim();
+    if (this.busy || this.loading || !this.isAdmin || !orderNumber) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = '';
+    try {
       const result = await firstValueFrom(this.http.post<{ purchaseOrderId: string }>(
         `${this.api}/commerce/purchases/requests/${item.id}/approve`,
-        { orderNumber: this.orderNumbers[item.id].trim() },
+        { orderNumber },
       ));
+      if (this.session.user() !== identity) return;
+      if (!result.purchaseOrderId) throw new Error('Purchase order response is invalid.');
       this.receiptNumbers[item.id] = this.autoNumber('RCV');
       this.locations[item.id] = 'MAIN';
-      this.message = `Orden ${this.orderNumbers[item.id]} creada.`;
       await this.refresh();
-      if (!result.purchaseOrderId) throw new Error('Purchase order response is invalid.');
-    });
+      if (this.session.user() === identity && !this.error) this.message = `Orden ${orderNumber} creada.`;
+    } catch (error) {
+      if (this.session.user() === identity) {
+        this.error = error instanceof HttpErrorResponse && error.status === 403
+          ? 'Aprobación denegada: requiere administrador y, con la política activa, una persona distinta del creador. Actualiza la lista.'
+          : error instanceof HttpErrorResponse && error.status === 409
+            ? 'La solicitud requiere revisión o la referencia ya existe. Actualiza y consulta el detalle antes de aprobar.'
+            : this.errorMessage(error, 'No se pudo aprobar la solicitud.');
+      }
+    } finally { if (this.session.user() === identity) this.busy = false; }
+  }
+
+  purchaseApprovalMessage(item: PurchaseRequest) {
+    return item.approval_block_reason === 'unknown_creator'
+      ? 'Aprobación bloqueada: solicitud antigua sin creador identificado. Revisa el documento con administración.'
+      : 'Debe aprobar otro administrador: no puedes aprobar tu propia solicitud.';
   }
 
   async rejectPurchase(item: PurchaseRequest) {
