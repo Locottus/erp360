@@ -19,6 +19,7 @@ const database_service_1 = require("../common/database.service");
 const document_sequence_1 = require("../common/document-sequence");
 const iso_date_1 = require("../common/iso-date");
 const management_input_1 = require("../common/management-input");
+const purchase_plan_1 = require("../common/purchase-plan");
 const pdfkit_1 = __importDefault(require("pdfkit"));
 function purchaseApprovalBlockReason(required, createdBy, approverId) {
     if (!required)
@@ -124,13 +125,22 @@ let CommerceService = class CommerceService {
     }
     async createQuotation(user, input) {
         this.validateSalesInput(input.quotationNumber, input.customerId, input.lines);
-        const validUntil = input.validUntil == null ? null : (0, iso_date_1.requiredDate)(input.validUntil, 'validUntil');
+        let validUntil = input.validUntil == null ? null : (0, iso_date_1.requiredDate)(input.validUntil, 'validUntil');
         if (/^WEBQ-/i.test(input.quotationNumber.trim()))
             throw new common_1.BadRequestException('WEBQ- is reserved for automatic storefront numbering.');
         const taxRate = await this.resolveTaxRatePercent(user.companyId, input.taxRateCode);
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
+            const company = await client.query(`SELECT currency_code,
+          CASE WHEN quotation_validity_days > 0
+            THEN ((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date + quotation_validity_days)::text
+            ELSE NULL END AS default_valid_until
+         FROM companies WHERE id=$1 FOR SHARE`, [user.companyId]);
+            if (!company.rows[0])
+                throw new common_1.NotFoundException('Company not found.');
+            if (input.validUntil === undefined)
+                validUntil = company.rows[0].default_valid_until;
             if (validUntil) {
                 const valid = await client.query(`SELECT $1::date >= (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AS valid`, [validUntil]);
                 if (!valid.rows[0].valid)
@@ -141,7 +151,7 @@ let CommerceService = class CommerceService {
             const { subtotal, taxTotal, grandTotal } = this.calculateTotals(lineCalc.subtotal, taxRate);
             const quotation = await client.query(`INSERT INTO sales_quotations
           (company_id, customer_id, quotation_number, status, subtotal, tax_total, grand_total, notes, created_by, currency_code, valid_until)
-         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,(SELECT currency_code FROM companies WHERE id=$1),$9::date)
+         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,$10,$9::date)
          RETURNING id, quotation_number`, [
                 user.companyId,
                 input.customerId,
@@ -152,6 +162,7 @@ let CommerceService = class CommerceService {
                 input.notes ?? null,
                 user.sub,
                 validUntil,
+                company.rows[0].currency_code,
             ]);
             for (const line of lineCalc.lines) {
                 await client.query(`INSERT INTO sales_quotation_lines (quotation_id, product_id, quantity, unit_price, line_total)
@@ -409,6 +420,7 @@ let CommerceService = class CommerceService {
     }
     async createPurchaseRequest(user, input) {
         this.validatePurchaseInput(input.requestNumber, input.supplierId, input.lines);
+        const plan = (0, purchase_plan_1.normalizePurchasePlan)(input);
         const taxRate = await this.resolveTaxRatePercent(user.companyId, input.taxRateCode);
         const client = await this.db.connect();
         try {
@@ -417,8 +429,9 @@ let CommerceService = class CommerceService {
             const lineCalc = await this.calculatePurchaseLines(client, user.companyId, input.lines);
             const { subtotal, taxTotal, grandTotal } = this.calculateTotals(lineCalc.subtotal, taxRate);
             const requestRec = await client.query(`INSERT INTO purchase_requests
-          (company_id, supplier_id, request_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
-         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,(SELECT currency_code FROM companies WHERE id=$1))
+          (company_id, supplier_id, request_number, status, subtotal, tax_total, grand_total, created_by, currency_code,
+           destination_location_code, expected_receipt_date)
+         VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,(SELECT currency_code FROM companies WHERE id=$1),$8,$9::date)
          RETURNING id, request_number`, [
                 user.companyId,
                 input.supplierId,
@@ -427,12 +440,14 @@ let CommerceService = class CommerceService {
                 taxTotal,
                 grandTotal,
                 user.sub,
+                plan.destinationLocationCode,
+                plan.expectedReceiptDate,
             ]);
             for (const line of lineCalc.lines) {
                 await client.query(`INSERT INTO purchase_request_lines (request_id, product_id, quantity, unit_cost, line_total)
            VALUES ($1,$2,$3,$4,$5)`, [requestRec.rows[0].id, line.productId, line.quantity, line.unitCost, line.lineTotal]);
             }
-            await this.insertAudit(client, user, 'commerce.purchase.request.create', requestRec.rows[0].id, { request_number: input.requestNumber, line_count: lineCalc.lines.length });
+            await this.insertAudit(client, user, 'commerce.purchase.request.create', requestRec.rows[0].id, { request_number: input.requestNumber, line_count: lineCalc.lines.length, ...plan });
             await client.query('COMMIT');
             return {
                 id: requestRec.rows[0].id,
@@ -441,6 +456,7 @@ let CommerceService = class CommerceService {
                 subtotal,
                 taxTotal,
                 grandTotal,
+                ...plan,
             };
         }
         catch (error) {
@@ -457,6 +473,12 @@ let CommerceService = class CommerceService {
     async listPurchaseRequests(user) {
         const result = await this.db.query(`SELECT pr.id, pr.request_number, pr.status, pr.subtotal, pr.tax_total, pr.grand_total,
               pr.supplier_id, s.name AS supplier_name, pr.created_by,
+              pr.destination_location_code, pr.expected_receipt_date::text,
+              pr.delivery_plan_revision, po.delivery_plan_revision AS order_delivery_plan_revision,
+              po.destination_location_code AS order_destination_location_code,
+              po.expected_receipt_date::text AS order_expected_receipt_date,
+              COALESCE(po.status IN ('ordered','partially_received') AND
+                po.expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date, FALSE) AS is_receipt_overdue,
               c.require_independent_purchase_approver,
               (SELECT a.payload->>'reason' FROM audit_log a
                WHERE a.company_id=pr.company_id AND a.entity_id=pr.id::text
@@ -495,6 +517,7 @@ let CommerceService = class CommerceService {
     }
     async purchaseRequestDetails(user, id) {
         const result = await this.db.query(`SELECT pr.id,pr.request_number,pr.status,pr.currency_code,pr.created_by,
+        pr.destination_location_code,pr.expected_receipt_date::text,pr.delivery_plan_revision,
         c.require_independent_purchase_approver,
         pr.subtotal::text,pr.tax_total::text,pr.grand_total::text,
         s.name AS supplier_name,
@@ -542,6 +565,70 @@ let CommerceService = class CommerceService {
             client.release();
         }
     }
+    async purchaseDeliveryPlan(user, id, kind) {
+        const table = kind === 'request' ? 'purchase_requests' : 'purchase_orders';
+        const number = kind === 'request' ? 'request_number' : 'order_number';
+        const result = await this.db.query(`SELECT d.id,d.${number} AS document_number,d.status,d.delivery_plan_revision,
+        d.destination_location_code,d.expected_receipt_date::text,
+        COALESCE((SELECT json_agg(h ORDER BY (h.after->>'revision')::int DESC) FROM (
+          SELECT a.created_at,a.actor_user_id,a.payload->>'reason' AS reason,
+            a.payload->'before' AS before,a.payload->'after' AS after
+          FROM audit_log a WHERE a.company_id=d.company_id AND a.entity_id=d.id::text
+            AND a.event_name=$3 AND a.entity_name='commerce'
+          ORDER BY (a.payload->'after'->>'revision')::int DESC LIMIT 51
+        ) h),'[]'::json) AS history
+       FROM ${table} d WHERE d.id=$1 AND d.company_id=$2`, [id, user.companyId, `commerce.purchase.${kind}.delivery_plan.update`]);
+        const current = result.rows[0];
+        if (!current)
+            throw new common_1.NotFoundException('Purchase document not found.');
+        return { ...current, history: current.history.slice(0, 50), history_has_more: current.history.length > 50 };
+    }
+    async revisePurchaseDeliveryPlan(user, id, kind, input) {
+        const revision = (0, management_input_1.expectedRevision)(input?.expectedRevision);
+        const reason = (0, management_input_1.changeReason)(input?.reason);
+        if (!input || input.destinationLocationCode === undefined || input.expectedReceiptDate === undefined) {
+            throw new common_1.BadRequestException('Explicit destinationLocationCode and expectedReceiptDate are required; use null to clear.');
+        }
+        const plan = (0, purchase_plan_1.normalizePurchasePlan)(input);
+        const table = kind === 'request' ? 'purchase_requests' : 'purchase_orders';
+        const editableStatuses = kind === 'request' ? ['draft', 'submitted'] : ['ordered', 'partially_received'];
+        const client = await this.db.connect();
+        try {
+            await client.query('BEGIN');
+            const current = await client.query(`SELECT status,destination_location_code,expected_receipt_date::text,delivery_plan_revision
+         FROM ${table} WHERE id=$1 AND company_id=$2 FOR UPDATE`, [id, user.companyId]);
+            const row = current.rows[0];
+            if (!row)
+                throw new common_1.NotFoundException('Purchase document not found.');
+            if (!editableStatuses.includes(row.status)) {
+                throw new common_1.ConflictException('Only open purchase documents can be rescheduled.');
+            }
+            if (row.delivery_plan_revision !== revision) {
+                throw new common_1.ConflictException('Delivery plan changed. Reload before rescheduling.');
+            }
+            if (row.destination_location_code === plan.destinationLocationCode && row.expected_receipt_date === plan.expectedReceiptDate) {
+                throw new common_1.ConflictException('Delivery plan has no changes.');
+            }
+            const before = {
+                destination_location_code: row.destination_location_code, expected_receipt_date: row.expected_receipt_date, revision,
+            };
+            const after = {
+                destination_location_code: plan.destinationLocationCode, expected_receipt_date: plan.expectedReceiptDate, revision: revision + 1,
+            };
+            await client.query(`UPDATE ${table} SET destination_location_code=$3,expected_receipt_date=$4::date,
+          delivery_plan_revision=delivery_plan_revision+1,updated_at=NOW() WHERE id=$1 AND company_id=$2`, [id, user.companyId, after.destination_location_code, after.expected_receipt_date]);
+            await this.insertAudit(client, user, `commerce.purchase.${kind}.delivery_plan.update`, id, { reason, before, after });
+            await client.query('COMMIT');
+            return { id, ...after };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     async approvePurchaseRequest(user, requestId, orderNumber) {
         if (!orderNumber?.trim()) {
             throw new common_1.BadRequestException('orderNumber is required.');
@@ -552,7 +639,8 @@ let CommerceService = class CommerceService {
             const policy = await client.query('SELECT require_independent_purchase_approver FROM companies WHERE id=$1 FOR SHARE', [user.companyId]);
             if (!policy.rows[0])
                 throw new common_1.NotFoundException('Company not found.');
-            const requestRec = await client.query(`SELECT id, supplier_id, status, subtotal, tax_total, grand_total, created_by
+            const requestRec = await client.query(`SELECT id, supplier_id, status, subtotal, tax_total, grand_total, created_by,
+                destination_location_code, expected_receipt_date::text, delivery_plan_revision
          FROM purchase_requests
          WHERE id = $1 AND company_id = $2
          LIMIT 1
@@ -574,8 +662,9 @@ let CommerceService = class CommerceService {
                 throw new common_1.ForbiddenException('Another administrator must approve this request. Its creator cannot approve it.');
             }
             const po = await client.query(`INSERT INTO purchase_orders
-          (company_id, supplier_id, request_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code)
-         VALUES ($1,$2,$3,$4,'ordered',$5,$6,$7,$8,(SELECT currency_code FROM purchase_requests WHERE id=$3))
+          (company_id, supplier_id, request_id, order_number, status, subtotal, tax_total, grand_total, created_by, currency_code,
+           destination_location_code, expected_receipt_date)
+         VALUES ($1,$2,$3,$4,'ordered',$5,$6,$7,$8,(SELECT currency_code FROM purchase_requests WHERE id=$3),$9,$10::date)
          RETURNING id, order_number`, [
                 user.companyId,
                 requestRec.rows[0].supplier_id,
@@ -585,6 +674,8 @@ let CommerceService = class CommerceService {
                 requestRec.rows[0].tax_total,
                 requestRec.rows[0].grand_total,
                 user.sub,
+                requestRec.rows[0].destination_location_code,
+                requestRec.rows[0].expected_receipt_date,
             ]);
             const lines = await client.query(`SELECT product_id, quantity, unit_cost, line_total
          FROM purchase_request_lines
@@ -601,6 +692,9 @@ let CommerceService = class CommerceService {
                 purchase_order_number: po.rows[0].order_number,
                 request_created_by: requestRec.rows[0].created_by,
                 independent_approval_required: policy.rows[0].require_independent_purchase_approver,
+                destination_location_code: requestRec.rows[0].destination_location_code,
+                expected_receipt_date: requestRec.rows[0].expected_receipt_date,
+                request_delivery_plan_revision: requestRec.rows[0].delivery_plan_revision,
             });
             await client.query('COMMIT');
             return {

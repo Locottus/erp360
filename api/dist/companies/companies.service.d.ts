@@ -17,6 +17,7 @@ export declare class CompaniesService {
         profile_revision: number;
         currency_code: string;
         require_independent_purchase_approver: boolean;
+        quotation_validity_days: number;
     }>;
     updateCurrentCompany(user: AuthenticatedUser, input: {
         name: string;
@@ -25,6 +26,7 @@ export declare class CompaniesService {
         reason: string;
         requireIndependentPurchaseApprover?: boolean;
         currencyCode?: string;
+        quotationValidityDays?: number;
     }): Promise<any>;
     getExchangeRates(user: AuthenticatedUser): Promise<{
         id: string;
@@ -54,6 +56,7 @@ export declare class CompaniesService {
         profile_revision: number;
         currency_code: string;
         require_independent_purchase_approver: boolean;
+        quotation_validity_days: number;
     }>;
     private logAudit;
 }

@@ -1,12 +1,15 @@
 import { DatabaseService } from '../common/database.service';
-import type { AuthUser, StockAdjustmentInput } from './inventory.types';
+import type { AuthUser, PurchasePlanning, StockAdjustmentInput } from './inventory.types';
 import { type QuantityDocument } from '../common/quantity-document';
+import { type PurchasePlanInput } from '../common/purchase-plan';
 export declare class InventoryService {
     private readonly db;
     constructor(db: DatabaseService);
     listReplenishment(user: AuthUser, locationCode?: string): Promise<import("pg").QueryResultRow[]>;
     purchaseCommitments(user: AuthUser, productId: string): Promise<import("pg").QueryResultRow[]>;
-    createReplenishmentProposal(user: AuthUser, productId: string, input: {
+    purchasePlanning(user: AuthUser, productId: string): Promise<PurchasePlanning>;
+    purchasePlanningCsv(user: AuthUser, productId: string): Promise<string>;
+    createReplenishmentProposal(user: AuthUser, productId: string, input: PurchasePlanInput & {
         locationCode: string;
         expectedRevision: number;
         supplierId: string;
@@ -16,6 +19,8 @@ export declare class InventoryService {
         reason: string;
         reviewedCommitments: boolean;
     }): Promise<{
+        destinationLocationCode: string | null;
+        expectedReceiptDate: string | null;
         id: string;
         requestNumber: string;
         status: string;

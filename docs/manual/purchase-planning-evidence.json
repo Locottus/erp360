@@ -1,0 +1,42 @@
+{
+  "capturedAt": "2026-11-17T19:54:34.626Z",
+  "database": "erp360_validation_planning_71fe43ec",
+  "frontend": "http://127.0.0.1:4201",
+  "backend": "http://127.0.0.1:3011",
+  "isolation": "Browser /api redirected to restored isolated database; operational records untouched",
+  "syntheticFailures": [
+    "One planning GET and one CSV GET intercepted with synthetic503; actual backend used on retry"
+  ],
+  "flows": [
+    "Exact company summary grouped by destination/date, unknown plans and excluded legacy receipt; source and destination separated in open requests",
+    "Approval moves manual request to order on refresh without double counting; true purchases-only account denied both new endpoints",
+    "Real CSV browser download with separate quantity columns; explicit export/planning errors on synthetic503 and successful retry"
+  ],
+  "responsive": [
+    {
+      "route": "/inventory",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/inventory",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/inventory",
+      "width": 1280,
+      "scrollWidth": 1280
+    }
+  ],
+  "pageErrors": 0,
+  "csvDocumentRows": 5,
+  "beforeApproval": {
+    "pendingQuantity": "5.0001",
+    "unapprovedQuantity": "3.0002"
+  },
+  "afterApproval": {
+    "pendingQuantity": "7.0002",
+    "unapprovedQuantity": "1.0001"
+  }
+}

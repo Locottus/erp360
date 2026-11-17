@@ -12,6 +12,7 @@ export declare class CompaniesController {
         profile_revision: number;
         currency_code: string;
         require_independent_purchase_approver: boolean;
+        quotation_validity_days: number;
     }>;
     updateCurrentCompany(request: AuthenticatedRequest, input: {
         name: string;
@@ -20,6 +21,7 @@ export declare class CompaniesController {
         reason: string;
         requireIndependentPurchaseApprover?: boolean;
         currencyCode?: string;
+        quotationValidityDays?: number;
     }): Promise<any>;
     getExchangeRates(request: AuthenticatedRequest): Promise<{
         id: string;
@@ -49,5 +51,6 @@ export declare class CompaniesController {
         profile_revision: number;
         currency_code: string;
         require_independent_purchase_approver: boolean;
+        quotation_validity_days: number;
     }>;
 }

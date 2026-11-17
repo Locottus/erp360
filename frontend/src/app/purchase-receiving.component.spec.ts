@@ -71,4 +71,29 @@ describe('Purchase receiving lifecycle and quantities', () => {
     expect(component.receipt.confirmed).toBe(false);
     expect(component.message).toContain('inventario actualizado');
   });
+  it('suggests the selected order destination, warns on differences and preserves actual location on refresh', async () => {
+    const fixture = TestBed.createComponent(PurchaseReceivingComponent);
+    user.set(admin); fixture.detectChanges();
+    const purchases = [{ purchase_order_id: 'order-1', purchase_order_status: 'ordered' }];
+    http.expectOne(orders).flush(purchases); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    const planned = { ...detail, order: { ...detail.order, destination_location_code: 'WH-B',
+      expected_receipt_date: '2000-01-01', is_receipt_overdue: true } };
+    const selected = component.selectOrder('order-1');
+    http.expectOne(detailUrl).flush(planned); await selected; fixture.detectChanges();
+    expect(component.receipt.locationCode).toBe('WH-B');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Fecha comprometida superada');
+    component.receipt.locationCode = 'actual dock'; fixture.detectChanges();
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain('La ubicación real difiere');
+    const refreshed = component.refresh();
+    http.expectOne(orders).flush(purchases); await Promise.resolve();
+    http.expectOne(detailUrl).flush(planned); await refreshed;
+    expect(component.receipt.locationCode).toBe('actual dock');
+    const unknown = component.selectOrder('order-1');
+    http.expectOne(detailUrl).flush({ ...detail, order: { ...detail.order,
+      destination_location_code: null, expected_receipt_date: null, is_receipt_overdue: false } });
+    await unknown;
+    expect(component.receipt.locationCode).toBe('MAIN');
+    expect(component.destinationDiffers).toBeFalse();
+  });
 });

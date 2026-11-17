@@ -6,7 +6,11 @@ export declare class InventoryController {
     constructor(inventoryService: InventoryService);
     replenishment(request: AuthenticatedRequest, locationCode?: string): Promise<import("pg").QueryResultRow[]>;
     purchaseCommitments(request: AuthenticatedRequest, productId: string): Promise<import("pg").QueryResultRow[]>;
+    purchasePlanning(request: AuthenticatedRequest, productId: string): Promise<import("./inventory.types").PurchasePlanning>;
+    purchasePlanningCsv(request: AuthenticatedRequest, productId: string): Promise<string>;
     createReplenishmentProposal(request: AuthenticatedRequest, productId: string, input: Parameters<InventoryService['createReplenishmentProposal']>[2]): Promise<{
+        destinationLocationCode: string | null;
+        expectedReceiptDate: string | null;
         id: string;
         requestNumber: string;
         status: string;

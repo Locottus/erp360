@@ -1,0 +1,44 @@
+{
+  "capturedAt": "2026-11-17T18:32:20.502Z",
+  "database": "erp360_validation_71fe43ec",
+  "backend": "http://127.0.0.1:3011",
+  "frontend": "http://127.0.0.1:4201",
+  "isolation": "Browser /api requests redirected to the isolated validation API; operational DB untouched",
+  "flows": [
+    "Company form saves a 30-day default with revision and reason",
+    "Sales forms apply company default, explicit date, and explicit unlimited despite a retained date"
+  ],
+  "responsive": [
+    {
+      "route": "/company",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/company",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/company",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 1280,
+      "scrollWidth": 1280
+    }
+  ],
+  "pageErrors": 0
+}

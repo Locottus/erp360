@@ -61,6 +61,18 @@ let CommerceController = class CommerceController {
     purchaseRequestDetails(request, id) {
         return this.commerceService.purchaseRequestDetails(request.user, id);
     }
+    purchaseRequestDeliveryPlan(request, id) {
+        return this.commerceService.purchaseDeliveryPlan(request.user, id, 'request');
+    }
+    purchaseOrderDeliveryPlan(request, id) {
+        return this.commerceService.purchaseDeliveryPlan(request.user, id, 'order');
+    }
+    revisePurchaseRequestDeliveryPlan(request, id, input) {
+        return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'request', input);
+    }
+    revisePurchaseOrderDeliveryPlan(request, id, input) {
+        return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'order', input);
+    }
     rejectPurchaseRequest(request, id, input) {
         return this.commerceService.rejectPurchaseRequest(request.user, id, input);
     }
@@ -190,6 +202,44 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], CommerceController.prototype, "purchaseRequestDetails", null);
+__decorate([
+    (0, common_1.Get)('purchases/requests/:id/delivery-plan'),
+    (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "purchaseRequestDeliveryPlan", null);
+__decorate([
+    (0, common_1.Get)('purchases/orders/:id/delivery-plan'),
+    (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "purchaseOrderDeliveryPlan", null);
+__decorate([
+    (0, common_1.Patch)('purchases/requests/:id/delivery-plan'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "revisePurchaseRequestDeliveryPlan", null);
+__decorate([
+    (0, common_1.Patch)('purchases/orders/:id/delivery-plan'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], CommerceController.prototype, "revisePurchaseOrderDeliveryPlan", null);
 __decorate([
     (0, common_1.Post)('purchases/requests/:id/reject'),
     (0, roles_decorator_1.Roles)('admin'),

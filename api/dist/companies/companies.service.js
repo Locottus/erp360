@@ -19,7 +19,7 @@ let CompaniesService = class CompaniesService {
         this.db = db;
     }
     async getCurrentCompany(user) {
-        const result = await this.db.query(`SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver
+        const result = await this.db.query(`SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver, quotation_validity_days
        FROM companies
        WHERE id = $1
        LIMIT 1`, [user.companyId]);
@@ -35,6 +35,11 @@ let CompaniesService = class CompaniesService {
     async updateCurrentCompany(user, input) {
         const revision = (0, management_input_1.expectedRevision)(input.expectedRevision);
         const reason = (0, management_input_1.changeReason)(input.reason);
+        if (input.quotationValidityDays !== undefined &&
+            (!Number.isInteger(input.quotationValidityDays) ||
+                input.quotationValidityDays < 0 || input.quotationValidityDays > 3650)) {
+            throw new common_1.BadRequestException('quotationValidityDays must be an integer from 0 to 3650 when provided.');
+        }
         if (input.requireIndependentPurchaseApprover !== undefined &&
             typeof input.requireIndependentPurchaseApprover !== 'boolean') {
             throw new common_1.BadRequestException('requireIndependentPurchaseApprover must be boolean when provided.');
@@ -60,7 +65,7 @@ let CompaniesService = class CompaniesService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            const before = await client.query('SELECT name,tax_id,profile_revision,currency_code,require_independent_purchase_approver FROM companies WHERE id=$1 FOR UPDATE', [user.companyId]);
+            const before = await client.query('SELECT name,tax_id,profile_revision,currency_code,require_independent_purchase_approver,quotation_validity_days FROM companies WHERE id=$1 FOR UPDATE', [user.companyId]);
             if (!before.rows[0])
                 throw new common_1.NotFoundException('Company not found.');
             if (before.rows[0].profile_revision !== revision)
@@ -68,13 +73,15 @@ let CompaniesService = class CompaniesService {
             const finalCurrencyCode = currencyCode ?? before.rows[0].currency_code;
             const requireIndependentApprover = input.requireIndependentPurchaseApprover ??
                 before.rows[0].require_independent_purchase_approver;
+            const quotationValidityDays = input.quotationValidityDays ?? before.rows[0].quotation_validity_days;
             if (before.rows[0].name === name && before.rows[0].tax_id === taxId &&
                 before.rows[0].currency_code === finalCurrencyCode &&
+                before.rows[0].quotation_validity_days === quotationValidityDays &&
                 before.rows[0].require_independent_purchase_approver === requireIndependentApprover)
                 throw new common_1.ConflictException('No profile changes.');
-            const updated = await client.query(`UPDATE companies SET name=$2,tax_id=$3,currency_code=$4,require_independent_purchase_approver=$5,
+            const updated = await client.query(`UPDATE companies SET name=$2,tax_id=$3,currency_code=$4,require_independent_purchase_approver=$5,quotation_validity_days=$6,
            profile_revision=profile_revision+1,updated_at=NOW()
-           WHERE id=$1 RETURNING id,code,name,tax_id,currency_code,is_active,profile_revision,require_independent_purchase_approver`, [user.companyId, name, taxId, finalCurrencyCode, requireIndependentApprover]);
+           WHERE id=$1 RETURNING id,code,name,tax_id,currency_code,is_active,profile_revision,require_independent_purchase_approver,quotation_validity_days`, [user.companyId, name, taxId, finalCurrencyCode, requireIndependentApprover, quotationValidityDays]);
             await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
            VALUES($1::uuid,$2,'company.profile.update','companies',($1::uuid)::text,$3)`, [
                 user.companyId,
@@ -82,7 +89,7 @@ let CompaniesService = class CompaniesService {
                 JSON.stringify({
                     before: before.rows[0],
                     after: { name, tax_id: taxId, currency_code: finalCurrencyCode, profile_revision: revision + 1,
-                        require_independent_purchase_approver: requireIndependentApprover },
+                        require_independent_purchase_approver: requireIndependentApprover, quotation_validity_days: quotationValidityDays },
                     reason,
                 }),
             ]);
@@ -139,7 +146,7 @@ let CompaniesService = class CompaniesService {
             });
             throw new common_1.ForbiddenException('You cannot access another company.');
         }
-        const result = await this.db.query(`SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver
+        const result = await this.db.query(`SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver, quotation_validity_days
        FROM companies
        WHERE id = $1
        LIMIT 1`, [id]);

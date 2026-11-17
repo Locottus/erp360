@@ -46,6 +46,55 @@ describe('Purchase request decisions', () => {
   });
   afterAll(async () => { await app.close(); });
 
+  it('separates manual and cross-location proposals from approved commitments and exports exact safe CSV', async () => {
+    const product = (await post('/masters/products', { sku: 'PLAN-REQUESTS', name: '=SUM(1,1)', unitPrice: 1 }).expect(201)).body.id;
+    const url = `/inventory/replenishment/${product}/purchase-planning`;
+    expect((await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body)
+      .toMatchObject({ pending_quantity: '0.0000', open_request_quantity: '0.0000', groups: [], requests: [], orders: [] });
+    const manual = (await post('/commerce/purchases/requests', { requestNumber: 'PLAN-MANUAL', supplierId,
+      lines: [{ productId: product, quantity: 0.0001, unitCost: 1 }, { productId: product, quantity: 2, unitCost: 1 }] }).expect(201)).body.id;
+    for (const locationCode of ['ORIGIN-A', 'ORIGIN-B']) {
+      await request(app.getHttpServer()).patch(`/inventory/replenishment/${product}`).auth(token, { type: 'bearer' })
+        .send({ locationCode, minimumQuantity: '1', targetQuantity: '3', expectedRevision: 0,
+          reason: 'Configure separate source locations' }).expect(200);
+      await post(`/inventory/replenishment/${product}/proposals`, {
+        locationCode, expectedRevision: 1, supplierId, requestNumber: `PLAN-${locationCode}`,
+        quantity: '1.0001', unitCost: '1', reason: 'Reviewed requests across both locations', reviewedCommitments: true,
+        destinationLocationCode: 'DESTINATION', expectedReceiptDate: '2099-01-01',
+      }).expect(201);
+    }
+    const plan = (await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(plan).toMatchObject({ open_requests: 3, open_request_quantity: '4.0003', pending_quantity: '0.0000', orders: [] });
+    expect(plan.requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ request_number: 'PLAN-MANUAL', origin: 'manual', source_location_code: null,
+        destination_location_code: null, quantity: '2.0001' }),
+      expect.objectContaining({ origin: 'replenishment', source_location_code: 'ORIGIN-A', destination_location_code: 'DESTINATION' }),
+      expect.objectContaining({ origin: 'replenishment', source_location_code: 'ORIGIN-B', destination_location_code: 'DESTINATION' }),
+    ]));
+    const approve = post(`/commerce/purchases/requests/${manual}/approve`, { orderNumber: 'PLAN-APPROVED' });
+    const read = request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' });
+    const [approved, snapshot] = await Promise.all([approve, read]);
+    expect(approved.status).toBe(201); expect(snapshot.status).toBe(200);
+    expect([['4.0003', '0.0000'], ['2.0002', '2.0001']])
+      .toContainEqual([snapshot.body.open_request_quantity, snapshot.body.pending_quantity]);
+    const current = (await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(current).toMatchObject({ open_requests: 2, open_request_quantity: '2.0002', pending_orders: 1, pending_quantity: '2.0001' });
+    expect(current.requests.some((row: { request_id: string }) => row.request_id === manual)).toBe(false);
+    const csv = await request(app.getHttpServer()).get(`${url}.csv`).auth(token, { type: 'bearer' })
+      .expect(200).expect('Content-Type', /text\/csv/).expect('Cache-Control', 'no-store');
+    expect(csv.text).toContain(`"'=SUM(1,1)"`);
+    expect(csv.text).toContain('"2.0001"'); expect(csv.text).toContain('"1.0001"');
+    expect(csv.text.trim().split('\r\n')).toHaveLength(4);
+    expect(csv.text).toContain('"verifiable_pending_quantity","unapproved_request_quantity"');
+    for (const path of [url, `${url}.csv`]) {
+      await request(app.getHttpServer()).get(path).auth(otherToken, { type: 'bearer' }).expect(404);
+      await request(app.getHttpServer()).get(path).auth(employeeToken, { type: 'bearer' }).expect(403);
+      await request(app.getHttpServer()).get(path).auth(purchasesToken, { type: 'bearer' }).expect(403);
+    }
+    await post(`/commerce/purchases/requests/${current.requests[0].request_id}/reject`, { reason }).expect(201);
+    expect((await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body.open_requests).toBe(1);
+  });
+
   it('rejects with audit, excludes other tenants and prevents approval', async () => {
     const id = await makeRequest('REJECT');
     const getDetails = (bearer: string) => request(app.getHttpServer()).get(`/commerce/purchases/requests/${id}`).auth(bearer, { type: 'bearer' });
@@ -97,18 +146,133 @@ describe('Purchase request decisions', () => {
       : { status: 'rejected', orders: 0, audits: 1 });
     if (approved.status === 201) await post(`/commerce/purchases/requests/${id}/reject`, { reason }).expect(409);
   });
+  it('requires explicit valid plans and serializes revisions with tenant-safe readable history', async () => {
+    const id = await makeRequest('PLAN-REVISIONS');
+    const url = `/commerce/purchases/requests/${id}/delivery-plan`;
+    const patch = (data: object, bearer = token) => request(app.getHttpServer()).patch(url)
+      .auth(bearer, { type: 'bearer' }).send(data);
+    const get = (bearer = token) => request(app.getHttpServer()).get(url).auth(bearer, { type: 'bearer' });
+    const input = { destinationLocationCode: ' wh-b ', expectedReceiptDate: '2000-01-01', expectedRevision: 0, reason };
+    expect((await get().expect(200)).body).toMatchObject({ delivery_plan_revision: 0, history: [], history_has_more: false });
+    await patch(input, purchasesToken).expect(403);
+    await patch(input, employeeToken).expect(403);
+    await patch(input, otherToken).expect(404);
+    await get(employeeToken).expect(403);
+    await get(otherToken).expect(404);
+    await request(app.getHttpServer()).patch('/commerce/purchases/requests/not-a-uuid/delivery-plan')
+      .auth(token, { type: 'bearer' }).send(input).expect(400);
+    for (const invalid of [
+      { destinationLocationCode: undefined }, { expectedReceiptDate: undefined }, { expectedRevision: undefined },
+      { destinationLocationCode: '' }, { destinationLocationCode: 'x'.repeat(33) }, { destinationLocationCode: 'bad\ncode' },
+      { expectedReceiptDate: '2026-02-30' }, { expectedReceiptDate: '' }, { expectedReceiptDate: 123 },
+      { expectedRevision: '0' }, { expectedRevision: -1 }, { expectedRevision: 0.1 }, { reason: 'short' }, { reason: 'bad\nreason long' },
+    ]) await patch({ ...input, ...invalid }).expect(400);
+    await patch({ ...input, expectedRevision: 1 }).expect(409);
+    await patch({ ...input, destinationLocationCode: null, expectedReceiptDate: null }).expect(409);
+    const concurrent = await Promise.all([patch(input), patch({ ...input, destinationLocationCode: 'WH-C' })]);
+    expect(concurrent.map(reply => reply.status).sort()).toEqual([200, 409]);
+    const winner = concurrent.find(reply => reply.status === 200)!.body;
+    const result = (await get(purchasesToken).expect(200)).body;
+    expect(result).toMatchObject({ delivery_plan_revision: 1, destination_location_code: winner.destination_location_code,
+      expected_receipt_date: input.expectedReceiptDate, history_has_more: false });
+    expect(result.history).toHaveLength(1);
+    expect(result.history[0]).toMatchObject({ reason,
+      before: { destination_location_code: null, expected_receipt_date: null, revision: 0 },
+      after: { destination_location_code: winner.destination_location_code, expected_receipt_date: input.expectedReceiptDate, revision: 1 } });
+    expect(result.history[0].actor_user_id).toBeTruthy();
+    await patch(input).expect(409);
+    expect((await get().expect(200)).body).toEqual(result);
+  });
+
+  it('copies the latest request plan on approval, keeps order revisions independent and protects terminal states', async () => {
+    const id = await makeRequest('PLAN-SNAPSHOT');
+    const requestUrl = `/commerce/purchases/requests/${id}/delivery-plan`;
+    const patch = (url: string, input: object, bearer = token) => request(app.getHttpServer()).patch(url)
+      .auth(bearer, { type: 'bearer' }).send(input);
+    const plan = { destinationLocationCode: 'WH-A', expectedReceiptDate: '2099-01-01', expectedRevision: 0, reason };
+    await patch(requestUrl, plan).expect(200);
+    await patch(requestUrl, { ...plan, destinationLocationCode: null, expectedRevision: 1 }).expect(200);
+    const approved = (await post(`/commerce/purchases/requests/${id}/approve`, { orderNumber: 'PLAN-SNAPSHOT-PO' }).expect(201)).body;
+    const orderUrl = `/commerce/purchases/orders/${approved.purchaseOrderId}/delivery-plan`;
+    const get = (url: string, bearer = token) => request(app.getHttpServer()).get(url).auth(bearer, { type: 'bearer' });
+    expect((await get(orderUrl).expect(200)).body).toMatchObject({
+      delivery_plan_revision: 0, destination_location_code: null, expected_receipt_date: plan.expectedReceiptDate, history: [],
+    });
+    await patch(requestUrl, { ...plan, expectedRevision: 2 }).expect(409);
+    await patch(orderUrl, plan, purchasesToken).expect(403);
+    await patch(orderUrl, plan, otherToken).expect(404);
+    await get(orderUrl, otherToken).expect(404);
+    await get(orderUrl, employeeToken).expect(403);
+    const edited = await patch(orderUrl, { ...plan, expectedReceiptDate: null }).expect(200);
+    expect(edited.body).toMatchObject({ destination_location_code: 'WH-A', expected_receipt_date: null, revision: 1 });
+    expect((await get(orderUrl, purchasesToken).expect(200)).body).toMatchObject({
+      delivery_plan_revision: 1, destination_location_code: 'WH-A', expected_receipt_date: null, history: [{ reason }],
+    });
+    expect((await get(requestUrl).expect(200)).body).toMatchObject({
+      delivery_plan_revision: 2, destination_location_code: null, expected_receipt_date: plan.expectedReceiptDate,
+    });
+    const audit = await db.query(`SELECT payload FROM audit_log
+      WHERE entity_id=$1 AND event_name='commerce.purchase.request.approve'`, [id]);
+    expect(audit.rows[0].payload).toMatchObject({ request_delivery_plan_revision: 2,
+      destination_location_code: null, expected_receipt_date: plan.expectedReceiptDate });
+    const amounts = await db.query(`SELECT po.grand_total::text,l.quantity::text,l.unit_cost::text
+      FROM purchase_orders po JOIN purchase_order_lines l ON l.order_id=po.id WHERE po.id=$1`, [approved.purchaseOrderId]);
+    expect(amounts.rows).toEqual([{ grand_total: '6.0000', quantity: '2.0000', unit_cost: '3.0000' }]);
+    await post(`/commerce/purchases/orders/${approved.purchaseOrderId}/cancel`, { reason }).expect(201);
+    await patch(orderUrl, { ...plan, expectedRevision: 1 }).expect(409);
+    const rejected = await makeRequest('PLAN-REJECTED');
+    await post(`/commerce/purchases/requests/${rejected}/reject`, { reason }).expect(201);
+    await patch(`/commerce/purchases/requests/${rejected}/delivery-plan`, plan).expect(409);
+  });
+
+  it('serializes approval against request rescheduling without a stale order snapshot', async () => {
+    const id = await makeRequest('PLAN-APPROVAL-RACE');
+    const input = { destinationLocationCode: 'RACE-DEST', expectedReceiptDate: '2099-02-02', expectedRevision: 0, reason };
+    const [revised, approved] = await Promise.all([
+      request(app.getHttpServer()).patch(`/commerce/purchases/requests/${id}/delivery-plan`)
+        .auth(token, { type: 'bearer' }).send(input),
+      post(`/commerce/purchases/requests/${id}/approve`, { orderNumber: 'PLAN-APPROVAL-RACE-PO' }),
+    ]);
+    expect(approved.status).toBe(201);
+    expect([200, 409]).toContain(revised.status);
+    const order = await db.query(`SELECT po.destination_location_code,po.expected_receipt_date::text,
+      pr.delivery_plan_revision AS request_revision,po.delivery_plan_revision AS order_revision
+      FROM purchase_orders po JOIN purchase_requests pr ON pr.id=po.request_id WHERE po.id=$1`, [approved.body.purchaseOrderId]);
+    expect(order.rows).toEqual([revised.status === 200
+      ? { destination_location_code: 'RACE-DEST', expected_receipt_date: input.expectedReceiptDate, request_revision: 1, order_revision: 0 }
+      : { destination_location_code: null, expected_receipt_date: null, request_revision: 0, order_revision: 0 }]);
+  });
+
+  it('returns the latest 50 revisions in order and explicitly indicates older history', async () => {
+    const id = await makeRequest('PLAN-HISTORY-LIMIT');
+    const url = `/commerce/purchases/requests/${id}/delivery-plan`;
+    for (let revision = 0; revision < 51; revision++) {
+      await request(app.getHttpServer()).patch(url).auth(token, { type: 'bearer' }).send({
+        destinationLocationCode: `WH-${revision + 1}`, expectedReceiptDate: null, expectedRevision: revision, reason,
+      }).expect(200);
+    }
+    const result = (await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(result).toMatchObject({ delivery_plan_revision: 51, destination_location_code: 'WH-51', history_has_more: true });
+    expect(result.history).toHaveLength(50);
+    expect(result.history.map((entry: { after: { revision: number } }) => entry.after.revision))
+      .toEqual(Array.from({ length: 50 }, (_, index) => 51 - index));
+  });
+
   it('creates one audited exact proposal per rule while open, and supports rejection then approval', async () => {
     await request(app.getHttpServer()).patch(`/inventory/replenishment/${productId}`).auth(token, { type: 'bearer' })
       .send({ locationCode: 'MAIN', minimumQuantity: '2', targetQuantity: '5', expectedRevision: 0,
         reason: 'Configure proposal test policy' }).expect(200);
     const url = `/inventory/replenishment/${productId}/proposals`;
     const input = { locationCode: 'main', expectedRevision: 1, supplierId, requestNumber: 'PROP',
-      quantity: '1.2345', unitCost: '2.0001', reason: 'Reviewed purchases and stock', reviewedCommitments: true };
+      quantity: '1.2345', unitCost: '2.0001', reason: 'Reviewed purchases and stock', reviewedCommitments: true,
+      destinationLocationCode: ' wh-b ', expectedReceiptDate: '2099-01-01' };
     await post(url, input, employeeToken).expect(403);
     await post(url, input, otherToken).expect(404);
     await post(url, { ...input, reviewedCommitments: false }).expect(400);
     await post(url, { ...input, expectedRevision: 2 }).expect(409);
     await post(url, { ...input, quantity: '0' }).expect(400);
+    await post(url, { ...input, destinationLocationCode: 'bad\nlocation' }).expect(400);
+    await post(url, { ...input, expectedReceiptDate: '2026-02-30' }).expect(400);
     const replies = await Promise.all([post(url, input), post(url, { ...input, requestNumber: 'PROP-2' })]);
     expect(replies.map(r => r.status).sort()).toEqual([201, 409]);
     const created = replies.find(r => r.status === 201)!.body;
@@ -116,15 +280,22 @@ describe('Purchase request decisions', () => {
       .auth(token, { type: 'bearer' }).expect(200)).body;
     expect(details).toMatchObject({ status: 'draft', replenishment_location: 'MAIN', replenishment_rule_revision: 1,
       replenishment_reason: input.reason, subtotal: '2.4691', tax_total: '0.0000', grand_total: '2.4691',
+      destination_location_code: 'WH-B', expected_receipt_date: input.expectedReceiptDate,
       lines: [{ quantity: '1.2345', unit_cost: '2.0001', line_total: '2.4691' }] });
     const rows = (await request(app.getHttpServer()).get('/inventory/replenishment').auth(token, { type: 'bearer' }).expect(200)).body;
     expect(rows.find((r: { product_id: string }) => r.product_id === productId).open_proposal_number).toBe(created.requestNumber);
     expect((await db.query('SELECT id FROM purchase_orders WHERE request_id=$1', [created.id])).rows).toHaveLength(0);
-    expect((await db.query(`SELECT id FROM audit_log WHERE entity_id=$1 AND event_name='inventory.replenishment.proposal.create'`, [created.id])).rows).toHaveLength(1);
+    const audit = await db.query(`SELECT payload FROM audit_log WHERE entity_id=$1 AND event_name='inventory.replenishment.proposal.create'`, [created.id]);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].payload).toMatchObject({ location_code: 'MAIN', destinationLocationCode: 'WH-B',
+      expectedReceiptDate: input.expectedReceiptDate });
     await post(`/commerce/purchases/requests/${created.id}/reject`, { reason }).expect(201);
     const next = await post(url, { ...input, requestNumber: 'PROP-AFTER-REJECT' }).expect(201);
     await post(`/commerce/purchases/requests/${next.body.id}/approve`, { orderNumber: 'PROP-ORDER' }).expect(201);
-    expect((await db.query('SELECT id FROM purchase_orders WHERE request_id=$1', [next.body.id])).rows).toHaveLength(1);
+    expect((await db.query(`SELECT destination_location_code,expected_receipt_date::text
+      FROM purchase_orders WHERE request_id=$1`, [next.body.id])).rows).toEqual([
+      { destination_location_code: 'WH-B', expected_receipt_date: input.expectedReceiptDate },
+    ]);
   });
   it('opts into independent approval with revision/audit and enforces it for requests and replenishment', async () => {
     const profile = (await request(app.getHttpServer()).get('/companies/current').auth(token, { type: 'bearer' }).expect(200)).body;
@@ -160,6 +331,7 @@ describe('Purchase request decisions', () => {
       locationCode: 'MAIN', expectedRevision: 1, supplierId, requestNumber: 'INDEPENDENT-PROP',
       quantity: '2.0001', unitCost: '3.0001', reason: 'Reviewed independent proposal', reviewedCommitments: true,
     }).expect(201);
+    expect(proposal.body).toMatchObject({ destinationLocationCode: null, expectedReceiptDate: null });
     await post(`/commerce/purchases/requests/${proposal.body.id}/approve`, { orderNumber: 'PROP-BLOCKED' }).expect(403);
     await post(`/commerce/purchases/requests/${proposal.body.id}/reject`, { reason }).expect(201);
 

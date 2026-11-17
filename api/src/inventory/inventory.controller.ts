@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
@@ -20,6 +20,21 @@ export class InventoryController {
   @Roles('admin')
   purchaseCommitments(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string) {
     return this.inventoryService.purchaseCommitments(request.user, productId);
+  }
+
+  @Get('replenishment/:productId/purchase-planning')
+  @Roles('admin')
+  purchasePlanning(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string) {
+    return this.inventoryService.purchasePlanning(request.user, productId);
+  }
+
+  @Get('replenishment/:productId/purchase-planning.csv')
+  @Roles('admin')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header('Content-Disposition', 'attachment; filename="purchase-planning.csv"')
+  @Header('Cache-Control', 'no-store')
+  purchasePlanningCsv(@Req() request: AuthenticatedRequest, @Param('productId', ParseUUIDPipe) productId: string) {
+    return this.inventoryService.purchasePlanningCsv(request.user, productId);
   }
 
   @Post('replenishment/:productId/proposals')

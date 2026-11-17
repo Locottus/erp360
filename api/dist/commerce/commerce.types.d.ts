@@ -1,3 +1,4 @@
+import type { PurchasePlanInput } from '../common/purchase-plan';
 export type AuthUser = {
     sub: string;
     email: string;
@@ -22,9 +23,13 @@ export type PurchaseLineInput = {
     quantity: number;
     unitCost?: number;
 };
-export type CreatePurchaseRequestInput = {
+export type CreatePurchaseRequestInput = PurchasePlanInput & {
     requestNumber: string;
     supplierId: string;
     taxRateCode?: string;
     lines: PurchaseLineInput[];
+};
+export type RevisePurchaseDeliveryPlanInput = Required<PurchasePlanInput> & {
+    expectedRevision: number;
+    reason: string;
 };

@@ -15,6 +15,35 @@ Este directorio concentra la migración del nuevo ERP basada en el requerimiento
 
 Fase actual: **Etapa 2 — Ejecución técnica**.
 
+Último corte verificado: **17 de noviembre de 2026**. API local en 3001,
+Angular en 4201 y PostgreSQL existente conservado. La migración 0032 permite
+configurar vigencia de cotizaciones en Mi empresa, con auditoría y revisión,
+sin reescribir ofertas anteriores. Ver [estado vigente](docs/ESTADO_PROYECTO.md)
+y [pendientes para continuar](docs/PENDIENTES_DESARROLLO.md).
+La continuación **0033** añade destino previsto y fecha comprometida opcionales
+desde solicitud/propuesta a orden y recepción. Muestra fechas superadas en
+órdenes abiertas y conserva ubicación real distinta del plan con auditoría;
+no altera históricos ni descuenta tránsito de reposición.
+La continuación **0034** permite reprogramar destino/fecha con revisión,
+motivo e historial en solicitudes y órdenes abiertas, sin reescribir lotes
+recibidos. Incluye protección ante cambios simultáneos y retirada explícita
+de valores. La ayuda de las pantallas y el
+[manual de usuario, edición 3.19](docs/manual/MANUAL_ERP360_OPERACION_Y_CONFIGURACION.docx)
+describen los bloques 0032–0034 y sus límites.
+La continuación UX corrige la carga inicial de Operaciones al restaurar la
+sesión: catálogos y listados se consultan automáticamente, sin pulsar
+Actualizar. Conserva el reintento manual y descarta cargas anteriores de
+listas/balance cuando cambia el contexto. No añade migraciones ni permisos.
+
+Tres bloques posteriores, disponibles en **Inventario → Reposición → Ver órdenes**:
+resumen exacto por destino/fecha, solicitudes abiertas manuales y de otras reglas
+separadas de órdenes, y exportación CSV autenticada con columnas de cantidad distintas.
+Una instantánea SQL mantiene coherentes total, grupos y documentos; planes ausentes
+y exclusiones se muestran explícitamente. No descuenta tránsito ni crea compras.
+Sin migración; API reiniciada y datos operativos conservados. Builds correctos,
+42 e2e y 32 pruebas Angular; tres flujos reales en copia aislada.
+Ayuda, manual 3.19 y documentación técnica actualizados al finalizar los tres bloques.
+
 ## Estado por lotes
 
 - **Lote 0**: base técnica (frontend, API, PostgreSQL local, health checks) — completado.

@@ -1,7 +1,410 @@
 # Bitácora de implementación y continuidad de ERP360
 
-Fecha de corte: 2026-11-11 UTC y local UTC-6.
+Fecha de corte vigente: 2026-11-17 UTC y local UTC-6.
 Proyecto: `C:\angular\erp360\erp360-modernizado`.
+
+## Tres bloques posteriores: planificación de compras y manual 3.19
+
+Implementados el 17 de noviembre de 2026. A petición del usuario, documentación
+consolidada al terminar los tres bloques; sin nueva migración.
+
+### 1. Resumen exacto por destino y fecha
+
+Nueva consulta `GET inventory/replenishment/:productId/purchase-planning`.
+Reutiliza `purchaseCommitmentCtes` (pedido menos recibos documentados por línea,
+excluyendo histórico sin detalle y sobre-recepción). Agrega cada orden/producto
+una sola vez, muestra total empresarial y grupos por destino/fecha, incluyendo
+planes desconocidos y contadores de exclusión. Órdenes agotadas/cerradas no cuentan.
+Fecha superada usa comparación estricta con hoy UTC. No asigna destinos por regla
+ni descuenta tránsito de la sugerencia.
+
+Total, grupos y documentos se materializan en una sentencia SQL; la tabla de
+reglas es otra lectura y puede ser anterior. Actualizar planificación relee el
+detalle. API de compromisos anterior conservada sin cambiar su contrato.
+
+### 2. Solicitudes abiertas visibles antes de volver a comprar
+
+El mismo snapshot incluye draft/submitted sin orden, con cantidad exacta del
+producto y origen manual/reposición. Se consultan todas las reglas, no solo
+la ubicación seleccionada. Origen y destino son datos independientes.
+No se mezclan cantidades no aprobadas y pendientes de órdenes.
+Prueba concurrente de aprobación acepta solo snapshot anterior o posterior;
+al aprobar desaparece solicitud y aparece orden, sin doble conteo.
+Rechazar retira la solicitud. No es deduplicación automática ni bloqueo de necesidad.
+
+### 3. CSV de planificación
+
+GET con sufijo `.csv`, admin/empresa, no-store. Consulta nueva, no necesariamente
+idéntica a la pantalla previa. Una fila por orden o solicitud del producto,
+columnas separadas, anomalía con pendiente vacío y banderas. Solo encabezados
+si no hay documentos, sin filas de totales. UTF-8 BOM, CSV con comillas/CRLF,
+escape de fórmulas y normalización de saltos/tabuladores.
+Extraído `common/csv.ts` del escape ya usado por SaaS; regresión SaaS incluida.
+UI informa errores, conserva separación de cantidades y descarta exportaciones
+tardías tras cambio de sesión. No es auditoría integral de todas las escrituras.
+
+### Verificación y límites
+
+- Builds API y Angular correctos.
+- **42 e2e en tres suites**: partial-receipts, purchase-request-decision y SaaS.
+  Dos pruebas nuevas de integración cubren agregaciones, parcial, desconocidos,
+  exclusión, reprogramación, cancelación admisible, manuales/propuestas,
+  aprobación concurrente, rechazo, precisión, CSV, permisos y aislamiento.
+- **32 Angular en tres suites**: Operaciones, Reposición y Recepciones.
+  Vista de grupos/solicitudes, CSV, error explícito y no descargar tras logout.
+- El primer ensayo intentó cancelar una orden parcial y devolvió 400 según
+  la regla vigente; se corrigió el fixture a una orden aún no recibida.
+  No se cambió la política comercial para hacer pasar la prueba.
+- Navegador real: **tres flujos, tres anchos 375/768/1280**, cero errores y
+  overflow global. Cantidades 5.0001 pendientes/3.0002 solicitadas; aprobar
+  manual cambia a 7.0002/1.0001. Descarga real con cinco documentos y columnas
+  distintas. Usuario purchases real rechazado con 403.
+- Dos 503 **sintéticos** (planificación y CSV) probaron mensajes/reintento.
+  Se usó API real aislada en el resto. Evidencia
+  `manual/purchase-planning-evidence.json`, captura 42 nueva visualmente revisada.
+- No se ejecutó toda la batería histórica ni se certificó paginación completa
+  del Word en el procesador instalado.
+
+Fuente oficial local analizada: purchase_stock/models/product.py:164/190 y
+stock.py:354. Concepto de documentos en proceso y ubicación; implementación
+propia y más limitada. No se ejecutó Odoo/REA ni se copiaron recursos.
+
+### Persistencia y documentación
+
+Respaldo actual restaurado en `erp360_validation_planning_71fe43ec`. Pruebas y
+fixtures exclusivamente allí; navegador `/api` redirigido a 3011, no proxy
+operativo end-to-end. API temporal, base y dump temporal de contenedor retirados;
+respaldo privado de sesión retenido. Se reinició solo API ERP en 3001, handle
+`erp360-api-planning`; Angular conserva 4201. Health/proxy 200, bootstrap 403,
+rutas nuevas sin sesión 401; no se reiniciaron otros proyectos.
+
+Comparadas huellas exactas antes/después de seis conjuntos: solicitudes264,
+órdenes241, recepciones210, movimientos1169, saldos320 y asientos893, sin cambios.
+Manual **3.19**, 12.2–12.4, ayuda, README, estado, despliegue, adaptación y
+pendientes actualizados al final. Próximos pendientes: política de deduplicación
+transversal, almacenes autorizados y fechas por línea; no inferir devengos,
+cierre de remanentes parciales o política monetaria sin responsable contable.
+
+## Continuación UX: carga de Operaciones y manual de usuario 3.18
+
+Implementación del 17 de noviembre de 2026, posterior al bloque 0034.
+No ocupa el número de una migración: no cambia API ni esquema.
+
+### Causa y corrección
+
+`SessionService` restaura `/auth/me` asíncronamente desde sessionStorage.
+Operaciones antes solo cargaba listados en `ngOnInit` si ya había admin;
+su efecto de sesión limpiaba algunos campos pero no consultaba al restaurar.
+Por eso el usuario debía pulsar Actualizar después de una recarga directa.
+
+- Sustituida la carga puntual por el patrón `effect`/`untracked` ya usado en
+  Catálogos/Workspace. Reacciona a la identidad, sin una segunda carga inicial.
+- Conserva la pestaña de query params. Solo consulta listados con rol admin;
+  no amplía permisos ni cambia el servicio/interceptor de autenticación.
+- Limpia datos leídos, detalle, balance, token de portal mostrado y mensajes
+  al cambiar la sesión. No implementa persistencia de borradores.
+- La carga captura identidad y generación; descarta resultados/errores
+  obsoletos y evita que su finally desactive el indicador de la nueva carga.
+  También protege la consulta de balance porque comparte ese indicador.
+- Aviso accesible Cargando datos de Operaciones; error explícito y reintento
+  manual conservado. No hay polling ni reintentos ilimitados.
+- No cambia reglas comerciales, acciones de escritura o duración de sesión;
+  no es una revisión integral de todas las transacciones/interceptores.
+
+### Verificación
+
+Cuatro regresiones se ejecutaron contra el código previo y fallaron como se
+esperaba: restauración tras inicializar, transición con carga pendiente,
+retorno al mismo objeto de usuario y error/recuperación. Se añadió además
+la carrera de balance pendiente frente a la carga de una identidad nueva.
+Se usa `fakeAsync`/`flushMicrotasks` para vaciar determinísticamente la cadena
+de promesas; un primer ensayo con `whenStable` no drenaba toda esa cadena.
+
+Resultado final: **30 pruebas Angular en tres suites** (Operaciones,
+Reposición y Recepciones), **build Angular correcto**. No se reejecutaron
+API/e2e backend porque no hubo modificaciones allí.
+
+Chrome real con frontend 4201 y `/api` redirigido a API/base aisladas:
+
+1. `/auth/me` real retenido hasta montar Operaciones sin usuario; cero
+   consultas privilegiadas antes de restaurar, y luego una por cada endpoint.
+   Recargas directas de Compras, Ventas y Catálogos sin pulsar Actualizar.
+2. Un GET de producto interceptado devuelve **503 sintético**; se ve el
+   error y no se presenta como carga vacía exitosa. Actualizar recupera
+   listados reales del backend aislado.
+3. Login/restauración de usuario purchases sin controles administrativos
+   ni consultas de listados de Operaciones.
+
+**Tres flujos, nueve combinaciones de ruta/ancho (375/768/1280), cero errores
+de página y cero overflow global**. Evidencia con contadores por endpoint:
+`manual/operations-session-evidence.json`; captura nueva
+`manual/images/41-operations-session.png`, solo datos ficticios.
+
+La copia se restauró desde un dump actual en
+`erp360_validation_session_71fe43ec`, sin aplicar SQL a la base operativa.
+API temporal 3011, copia, dump de contenedor y runner se retiraron al cerrar.
+No se reiniciaron API operativa, Angular ni contenedores de otros proyectos.
+Se conservaron 264 solicitudes, 241 órdenes y 210 recepciones operativas.
+Health/proxy 200; bootstrap sigue deshabilitado.
+
+### Documentación de usuario y continuidad
+
+Ayuda de Operaciones actualizada: carga automática, indicador, significado
+del error y uso de Actualizar para reintentar o consultar cambios posteriores.
+Word regenerado como **edición 3.18**, sección 4.1, nueva figura de
+demostración y evidencia de este bloque separada de las históricas.
+Salida: 26 capítulos principales, 55 figuras, 68 tablas y 161 endpoints.
+Se valida estructura DOCX, imágenes, encabezado, instrucciones, conservación
+de compras y ausencia de tokens reales; Pylance sin errores sintácticos.
+No se afirma revisión visual completa de la paginación final en Word.
+
+Referencias oficiales Angular: [effect](https://angular.dev/api/core/effect)
+y [untracked](https://angular.dev/api/core/untracked). No se atribuye este
+arreglo a Odoo ni al REA de login anterior.
+
+**Siguiente bloque sugerido:** desglose informativo de compras pendientes por
+destino/fecha, sin doble conteo ni descuento automático de tránsito; mantener
+el total empresarial y actualizar el manual al cerrar ese bloque.
+
+## Continuación 0034: reprogramación auditada y manual de usuario 3.17
+
+Implementación del 17 de noviembre de 2026, posterior al corte 0033.
+
+### Funcionalidad y límites
+
+- Migración `0034_purchase_delivery_plan_revision.sql`: revisión del plan
+  independiente en solicitudes y órdenes, cero por defecto y no negativa.
+- GET/PATCH del plan en `commerce/purchases/requests/:id/delivery-plan`
+  y `commerce/purchases/orders/:id/delivery-plan`. Lectura admin/purchases,
+  edición admin; ambos limitados a la empresa autenticada.
+- Reprogramación explícita: destino y fecha presentes (null los retira),
+  `expectedRevision`, motivo 10–1000. Reutiliza normalizador de 0033 y
+  validadores de revisión/motivo. Datos inválidos/omitidos: 400; sin cambio,
+  revisión obsoleta o documento cerrado: 409.
+- Bloqueo de fila coordina aprobación, recepción y cancelación. Solo
+  solicitudes draft/submitted u órdenes ordered/partially_received.
+  No cambia cantidades, costos, estado ni política de aprobación.
+- Auditoría transaccional antes/después con actor, motivo y revisión.
+  Plan e historial se leen en una consulta coherente; UI muestra las últimas
+  50 reprogramaciones y avisa si hay anteriores, sin eliminarlas.
+- Aprobar audita la revisión del plan copiada; la orden inicia su revisión
+  independiente en cero. Solicitud y orden no se sincronizan retroactivamente.
+- Recepciones nuevas auditan revisión y plan vigentes. El payload de replay
+  no cambia: un lote idéntico sigue reproduciéndose después de reprogramar.
+  No se reescriben lotes, auditorías de recepción, movimientos ni importes.
+- UI exige motivo y confirmación del efecto de los campos vacíos; ante 409
+  conserva formulario sin afirmar éxito y ofrece recarga explícita.
+  Documentos cerrados conservan historial sin edición; cambio de sesión
+  limpia el formulario y descarta respuestas tardías.
+
+Fuentes: análisis directo de la fuente suministrada, método
+`_update_date_planned_for_lines` de Odoo en `purchase_order.py:1361`, más
+documentación oficial pública 19.0 como contraste conceptual. No se ejecutó
+Odoo ni se atribuye al runtime REA de login evidencia de esta funcionalidad.
+Ver [adaptación y diferencias](ADAPTACION_ODOO.md#reprogramación-auditada-de-compras-0034).
+
+### Validación y despliegue
+
+- Respaldo custom privado `erp360-before-0034.dump`, restaurado con
+  `pg_restore --exit-on-error` en `erp360_validation_0034_71fe43ec`.
+  Solo se aplicó allí la migración nueva; fixtures y UI no tocaron la base real.
+- Builds API y Angular correctos. Cuatro suites e2e, **34 pruebas**;
+  Angular Operations/Reposición/Recepciones, **25 pruebas**; cuatro suites
+  unitarias relevantes de API, **9 pruebas**. Incluyen carreras entre
+  revisiones, aprobación/edición, recepción final/edición, aislamiento,
+  permisos, retiradas null, límite exacto de historial y replay sin doble stock.
+- Navegador Chrome real: **4 flujos y 9 combinaciones de estado/ruta/ancho**
+  375/768/1280 sin errores ni desbordamiento global. Solicitud y reprogramación
+  desde formularios, aprobación, plan independiente de orden, recepción parcial
+  real en otro sitio, retiro de plan e historial, conflicto obsoleto y consulta
+  cerrada. La modificación concurrente y última entrega se hicieron por API
+  de prueba, no se presentan como clics de usuario.
+- Evidencia: `manual/purchase-rescheduling-evidence.json` y capturas 39/40,
+  datos ficticios. El primer ensayo no terminó por selector exacto del texto
+  de una celda; se corrigió el selector y la ejecución completa posterior pasó.
+- Aplicada 0034 a la base operativa y reiniciada solo API ERP. Antes/después:
+  mismas huellas de solicitudes, órdenes, recepciones, movimientos, saldos y
+  asientos, excluyendo únicamente la nueva columna de revisión.
+  Conservados **264 solicitudes, 241 órdenes, 210 recepciones, 1169 movimientos,
+  320 saldos y 893 asientos**. Todas las revisiones de históricos inician cero.
+- API 3001, Angular 4201 en loopback; health/live, health/ready y proxy 200;
+  bootstrap público 403; nueva ruta GET del plan sin token 401.
+  Otros contenedores Docker no se reiniciaron.
+- API temporal 3011 detenida y base de validación retirada; respaldo privado
+  retenido. No se crearon documentos de prueba en la base operativa.
+
+### Documentación de usuario al cerrar el bloque
+
+Actualizados generador y **manual Word edición 3.17**, incluyendo también
+las brechas pendientes de Word para 0032/0033: vigencia empresarial, herencia
+frente a fecha/null, plan opcional, propuesta con origen distinto del destino,
+recepción física, reprogramación, conflictos, retiro e historial.
+Dos capturas nuevas; 26 capítulos principales, 53 figuras, 68 tablas y
+catálogo generado de 161 endpoints. Se verificaron ZIP/DOCX, imágenes,
+encabezado/edición, texto vigente y las cuatro rutas nuevas con sus roles.
+Pylance no encontró errores sintácticos. La paginación final depende de Word;
+no se afirma revisión visual de todas las páginas impresas.
+
+Ayuda contextual actualizada en Mi empresa, Compras, Inventario y Recepciones.
+Para generar Word faltaba Pillow en Python; se instaló desde PyPI oficial
+en venv de sesión con reutilización de python-docx existente, sin instalación
+global. La validación por stdin en Windows requiere UTF-8 explícito para
+no convertir los acentos a interrogaciones.
+
+**Siguiente bloque:** carga inicial de Operaciones tras restauración de sesión,
+con pruebas y documentación de usuario actualizada al completarlo. Después,
+visibilidad por destino/fecha sin alterar el total empresarial. No ampliar
+devengo parcial, COGS o políticas monetarias sin decisiones funcionales.
+
+## Continuación 0033: destino previsto y fecha comprometida de compras
+
+Implementación del 17 de noviembre de 2026, posterior al corte 0032.
+
+### Alcance implementado
+
+- Migración aditiva `0033_purchase_delivery_plan.sql`: columnas nullable
+  `destination_location_code` y `expected_receipt_date` en solicitudes y
+  órdenes. No hay relleno histórico ni cambio de importes o existencias.
+- Creación manual y propuestas admiten `destinationLocationCode` y
+  `expectedReceiptDate` opcionales. Omisión/null significan desconocido.
+  Destino: texto no vacío, sin controles, normalizado a mayúsculas y máximo
+  32 caracteres. Fecha: ISO real YYYY-MM-DD. Una fecha pasada se admite como
+  compromiso declarado; no se interpreta como caducidad comercial.
+- Aprobación copia ambos campos bajo el bloqueo existente de solicitud y
+  registra el plan en auditoría. No cambia la política independiente de 0027.
+- Lista/detalle de Compras, compromisos por producto y detalle de Recepciones
+  muestran el plan. El aviso de fecha superada usa UTC y solo órdenes
+  abiertas; hoy no se considera superado. Recibir completo o cancelar quita
+  el aviso, sin borrar la fecha declarada.
+- Recepciones propone el destino al seleccionar la compra. Si se registra
+  otra ubicación, la UI avisa y el lote ingresa allí realmente; auditoría
+  guarda plan y ubicación real. Recargar el detalle no pisa la elección.
+  El flujo histórico de recepción mantiene sus reglas.
+- La regla de reposición conserva su ubicación origen por separado. No se
+  deduce destino de ella, ni se resta compra pendiente de la sugerencia,
+  ni se filtra el total empresarial por destino/fecha.
+
+Referencia estática suministrada: Odoo
+`odoo/addons/purchase/models/purchase_order.py:136` (llegada esperada) y
+`odoo/addons/purchase_stock/models/purchase_order.py:23,355` (operación de
+entrada y resolución de destino). Implementación propia, sin copiar código ni
+ejecutar Odoo/instalador. No se consultaron fuentes no oficiales externas.
+Esta fase usa fuente completa, no decompilación REA. El bundle REA del corte
+0032 solo demuestra aquel login y no se presenta como prueba de esta función.
+Ver [diferencias](ADAPTACION_ODOO.md#planificación-de-entrega-de-compras-0033).
+
+### Evidencia y despliegue
+
+- Builds API y Angular correctos, sin instalar dependencias.
+- 8 unitarias API (3 suites); 28 e2e (partial-receipts,
+  purchase-request-decision, catalogs-commerce y quotation-validity), con
+  `--runInBand --testTimeout=30000`. No se ejecutó la suite global.
+- 22 pruebas Angular: Operations, Replenishment y PurchaseReceiving.
+- Navegador real: solicitud/aprobación con plan, recepción parcial en otra
+  ubicación y propuesta con destino diferente de su regla. Nueve medidas de
+  ruta/ancho en 375/768/1280, sin overflow ni errores de página.
+  [Resultado generado](manual/purchase-plan-evidence.json).
+  Frontend 4201 con `/api` redirigido por el runner a API temporal 3011
+  y copia restaurada; no confundirlo con prueba del proxy operativo.
+- Respaldo previo:
+  `C:\Users\herli\.copilot\session-state\71fe43ec-33c4-4a8f-a720-56015a9752c7\files\erp360-before-0033.dump`.
+  Restauración completa y migración sin errores en
+  `erp360_validation_0033_71fe43ec`. Pruebas exclusivamente allí.
+  Al terminar se retiraron base/API temporales y dump del contenedor;
+  se conserva el respaldo privado fuera del repositorio.
+- Después se aplicó 0033 a ERP y se reinició solo su API en loopback 3001.
+  Angular continúa en 4201. Readiness, frontend y proxy: HTTP 200.
+  Bootstrap sin autenticación: HTTP 403. Otros contenedores intactos.
+- Conteos operativos antes/después: 264 solicitudes, 241 órdenes,
+  210 recepciones. Todos sus destinos/fechas nuevos siguen null.
+  No se insertaron fixtures ni se modificaron históricos en esa base.
+
+### Límites y continuación
+
+La planificación es informativa e inmutable desde la aplicación en este corte:
+no confirma que un proveedor haya aceptado el compromiso, no valida un almacén
+contra un catálogo y no obliga el destino físico. No hay reprogramación,
+fecha por línea/entrega, calendario laboral, penalización, provisión automática
+ni devengo parcial. La auditoría ampliada cubre los nuevos lotes, no inventa
+planes para recepciones históricas. El manual Word conserva su edición previa.
+
+Siguiente bloque sugerido: reprogramación con revisión, motivo e historial sin
+reescribir lotes. Sigue pendiente corregir la carga de Operaciones tras
+restaurar sesión (puede requerir Actualizar), además de las políticas contables,
+monetarias y fiscales y demás pendientes de producción.
+
+## Continuación del 17 de noviembre: ambiente recuperado y migración 0032
+
+Las secciones siguientes conservan registros históricos y sus métricas.
+Para el estado actual prevalece esta entrada y
+[el documento de pendientes](PENDIENTES_DESARROLLO.md).
+
+### Entorno y preservación
+
+- Docker ya había iniciado `erp360-db`; solo se iniciaron API y Angular ERP,
+  en `127.0.0.1:3001` y `127.0.0.1:4201`, respectivamente, en segundo plano.
+  API readiness, frontend y proxy `/api/health/live`: HTTP 200.
+- Se conserva `.env`, `BOOTSTRAP_ENABLED=false`, volumen y otros proyectos
+  Docker. No se crearon cuentas ni documentos de prueba en la base operativa.
+- Respaldo custom privado previo a 0032:
+  `C:\Users\herli\.copilot\session-state\71fe43ec-33c4-4a8f-a720-56015a9752c7\files\erp360-before-0032.dump`.
+  Catálogo legible (582 líneas) y restauración completa sin errores en
+  `erp360_validation_71fe43ec`. Pruebas y fixtures exclusivamente en esa copia.
+  No es una política de retención/cifrado ni un ensayo productivo RPO/RTO.
+- Migración aplicada primero en la copia y después en ERP. Al aplicarla,
+  permanecieron 557 empresas y 402 cotizaciones; todas las empresas quedaron
+  con 0 días. No se modificaron fechas ni importes históricos.
+
+### Funcionalidad propia contrastada con fuente Odoo
+
+Mi empresa configura vigencia predeterminada de 0 a 3650 días enteros. Cambios
+con revisión esperada, bloqueo empresarial y auditoría antes/después/motivo.
+Crear una cotización sin fecha hereda hoy UTC más esos días; null explícito
+evita caducidad y una fecha explícita prevalece. La creación bloquea en modo
+compartido la política para esperar cambios concurrentes confirmados.
+Operaciones ofrece las tres opciones. No afecta ofertas previas, sus precios,
+pedidos confirmados ni cotizaciones automáticas de checkout.
+
+Referencia estática única: fuente local suministrada de Odoo,
+`sale/models/res_company.py:30,44` y `sale/models/sale_order.py:551`
+(bajo `odoo/addons`). No se ejecutó el instalador ni Odoo, ni se consultaron
+fuentes de terceros. No se copió implementación. Cero inicial, máximo 3650,
+UTC y semántica omitido/null son decisiones propias documentadas en
+[adaptación](ADAPTACION_ODOO.md#vigencia-predeterminada-por-empresa-0032).
+La procedencia del paquete local no fue autenticada criptográficamente.
+
+### Verificación de este corte
+
+- Builds API y Angular correctos, sin instalar dependencias nuevas.
+- Unitarias API focalizadas: 7 pruebas, 3 suites.
+- E2e focalizadas: 20 pruebas en 6 suites: quotation-validity,
+  purchase-request-decision, ecommerce, store-controls, catalogs-commerce e
+  inventory-billing. Base restaurada aislada; `--runInBand --testTimeout=30000`.
+  El primer intento con timeout por defecto falló en un hook de 5 segundos;
+  la repetición conjunta pasó. No se ejecutó la suite global.
+- Angular ChromeHeadless: 15 pruebas de Company y Operations.
+- Playwright Core ya disponible con REA: formularios reales de empresa y
+  ventas (heredar, fecha y null), 6 combinaciones de ruta/ancho
+  375/768/1280, sin overflow ni errores de página. Frontend real 4201,
+  peticiones `/api` redirigidas por el runner a API temporal 3011 con copia de
+  datos; no se presenta como una prueba end-to-end del proxy operativo.
+  [Resultado generado](manual/quotation-default-evidence.json).
+- REA abrió el login real 4201 y capturó DOM/accesibilidad:
+  `ev_f6e89c2f38894a0f3e789292886eb0594dad65ea24433d9978d37ff7079df52e`.
+  [Bundle persistente](rea-runtime-20261117-evidence.json).
+  Solo demuestra ese recorrido público, no autenticación ni paridad Odoo.
+  El navegador propiedad de REA se cerró correctamente.
+
+Los proveedores IA, tipos de cambio, cuentas bancarias, reportes iniciales y
+pagos multimoneda ya existían hasta 0031, aunque las notas antiguas no los
+integraban. No se verificó su corrección financiera completa. Hay dos
+migraciones con prefijo 0029; no renumerarlas después de aplicadas.
+
+Próximo bloque propuesto: destino/fecha comprometida de compras. Luego,
+definir políticas contables/monetarias antes de devengo parcial, COGS y crédito
+parcial. Siguen pendientes ledger de migraciones, restauración productiva,
+permisos finos, fiscal real y demás brechas del backlog. El manual Word
+conserva su edición anterior; estas notas y la UI describen 0032.
 
 ## 1. Resumen ejecutivo y límites de la entrega
 

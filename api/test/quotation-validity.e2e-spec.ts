@@ -98,6 +98,76 @@ describe('Quotation validity adapted from observed sales workflow', () => {
     await patch(row.id, { ...payload, expectedRevision: 2, validUntil: null }).expect(409);
   });
 
+  it('revises the company default with audit, rejects invalid input and preserves tenant and historical offers', async () => {
+    const getProfile = (bearer = token) => request(app.getHttpServer())
+      .get('/companies/current').auth(bearer, { type: 'bearer' });
+    const before = (await getProfile().expect(200)).body;
+    const otherBefore = (await getProfile(otherToken).expect(200)).body;
+    const existing = (await create().expect(201)).body;
+    const data = { name: before.name, taxId: before.tax_id, expectedRevision: before.profile_revision,
+      quotationValidityDays: 30, reason: 'Reviewed default validity for future offers' };
+    const update = (extra: object) => request(app.getHttpServer()).patch('/companies/current')
+      .auth(token, { type: 'bearer' }).send({ ...data, ...extra });
+    for (const quotationValidityDays of [-1, 0.1, 3651, '30', null, true]) {
+      await update({ quotationValidityDays }).expect(400);
+    }
+    const results = await Promise.all([update({}), update({})]);
+    expect(results.map(r => r.status).sort()).toEqual([200, 409]);
+    expect((await getProfile().expect(200)).body).toMatchObject({
+      quotation_validity_days: 30, profile_revision: before.profile_revision + 1,
+    });
+    expect((await getProfile(otherToken).expect(200)).body).toEqual(otherBefore);
+    expect((await create().expect(201)).body.validUntil).toBe(future);
+    expect((await create(null).expect(201)).body.validUntil).toBeNull();
+    expect((await create(today).expect(201)).body.validUntil).toBe(today);
+    const historical = (await list().expect(200)).body.find((row: { id: string }) => row.id === existing.id);
+    expect(historical).toMatchObject({ valid_until: null, revision: 0 });
+    const audit = await db.query(`SELECT payload FROM audit_log
+      WHERE company_id=$1 AND event_name='company.profile.update'`, [companyId]);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].payload).toMatchObject({
+      before: { quotation_validity_days: 0 }, after: { quotation_validity_days: 30 }, reason: data.reason,
+    });
+    await update({ expectedRevision: before.profile_revision + 1, quotationValidityDays: undefined,
+      name: 'Renamed without changing validity' }).expect(200);
+    expect((await getProfile().expect(200)).body.quotation_validity_days).toBe(30);
+    await update({ expectedRevision: before.profile_revision + 2, quotationValidityDays: 3650 }).expect(200);
+    const limit = await db.query<{ date: string }>(
+      `SELECT ((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date+3650)::text AS date`);
+    expect((await create().expect(201)).body.validUntil).toBe(limit.rows[0].date);
+    await update({ expectedRevision: before.profile_revision + 3, quotationValidityDays: 0 }).expect(200);
+    expect((await create().expect(201)).body.validUntil).toBeNull();
+  });
+
+  it('uses the committed company policy when creation waits for a concurrent profile update', async () => {
+    const client = await db.connect();
+    let pending: Promise<request.Response> | undefined;
+    try {
+      await client.query('BEGIN');
+      await client.query('UPDATE companies SET quotation_validity_days=30 WHERE id=$1', [companyId]);
+      pending = create().then(response => response);
+      let blocked = false;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const activity = await db.query<{ blocked: boolean }>(
+          `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+           WHERE datname=current_database() AND wait_event_type='Lock'
+             AND query LIKE '%default_valid_until%') AS blocked`);
+        if (activity.rows[0].blocked) { blocked = true; break; }
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      expect(blocked).toBe(true);
+      await client.query('COMMIT');
+      const result = await pending;
+      expect(result.status).toBe(201);
+      expect(result.body.validUntil).toBe(future);
+    } finally {
+      await client.query('ROLLBACK');
+      client.release();
+      if (pending) await pending;
+      await db.query('UPDATE companies SET quotation_validity_days=0 WHERE id=$1', [companyId]);
+    }
+  });
+
   it('allows explicit removal with a reason, but rejects stale revisions and foreign tenants', async () => {
     const quote = await create(today).expect(201);
     const payload = { validUntil: null, expectedRevision: 0, reason: 'Authorized unlimited offer after commercial review' };
@@ -112,5 +182,9 @@ describe('Quotation validity adapted from observed sales workflow', () => {
     const user = await db.query<{ id: string }>('SELECT id FROM users WHERE company_id=$1', [companyId]);
     await db.query('DELETE FROM user_roles WHERE user_id=$1', [user.rows[0].id]);
     await patch(row.id, { ...payload, expectedRevision: 1, validUntil: future }).expect(403);
+    await request(app.getHttpServer()).patch('/companies/current').auth(token, { type: 'bearer' }).send({
+      name: 'Not authorized', taxId: null, expectedRevision: 0, quotationValidityDays: 30,
+      reason: 'Trying to change company default without admin',
+    }).expect(403);
   });
 });

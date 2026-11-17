@@ -28,6 +28,12 @@ let InventoryController = class InventoryController {
     purchaseCommitments(request, productId) {
         return this.inventoryService.purchaseCommitments(request.user, productId);
     }
+    purchasePlanning(request, productId) {
+        return this.inventoryService.purchasePlanning(request.user, productId);
+    }
+    purchasePlanningCsv(request, productId) {
+        return this.inventoryService.purchasePlanningCsv(request.user, productId);
+    }
     createReplenishmentProposal(request, productId, input) {
         return this.inventoryService.createReplenishmentProposal(request.user, productId, input);
     }
@@ -90,6 +96,27 @@ __decorate([
     __metadata("design:paramtypes", [Object, String]),
     __metadata("design:returntype", void 0)
 ], InventoryController.prototype, "purchaseCommitments", null);
+__decorate([
+    (0, common_1.Get)('replenishment/:productId/purchase-planning'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "purchasePlanning", null);
+__decorate([
+    (0, common_1.Get)('replenishment/:productId/purchase-planning.csv'),
+    (0, roles_decorator_1.Roles)('admin'),
+    (0, common_1.Header)('Content-Type', 'text/csv; charset=utf-8'),
+    (0, common_1.Header)('Content-Disposition', 'attachment; filename="purchase-planning.csv"'),
+    (0, common_1.Header)('Cache-Control', 'no-store'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "purchasePlanningCsv", null);
 __decorate([
     (0, common_1.Post)('replenishment/:productId/proposals'),
     (0, roles_decorator_1.Roles)('admin'),

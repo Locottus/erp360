@@ -1,0 +1,113 @@
+{
+  "capturedAt": "2026-11-17T19:38:41.931Z",
+  "database": "erp360_validation_session_71fe43ec",
+  "frontend": "http://127.0.0.1:4201",
+  "backend": "http://127.0.0.1:3011",
+  "isolation": "Browser /api redirected to restored isolated database; operational data untouched",
+  "syntheticFailures": [
+    "One intercepted GET /masters/products responds503; subsequent retry uses real backend"
+  ],
+  "flows": [
+    "Delayed real auth/me until Operations mounted without a user, then restored purchases/products automatically once; direct reloads of Sales and Masters also load once without clicking Refresh",
+    "Synthetic503 on one initial catalog is shown explicitly without a success/empty fallback; manual Refresh retries and recovers real lists",
+    "Restored purchases-only user is denied Operations and makes no admin list requests; logout/login uses the real isolated backend"
+  ],
+  "protectedReadsPerRestoredRoute": [
+    {
+      "tab": "purchases",
+      "/masters/customers": 1,
+      "/masters/products": 1,
+      "/masters/suppliers": 1,
+      "/masters/tax-rates": 1,
+      "/commerce/sales/quotations": 1,
+      "/commerce/sales/orders": 1,
+      "/commerce/purchases/requests": 1,
+      "/hr/employees": 1,
+      "/hr/attendance": 1,
+      "/hr/leave-requests": 1,
+      "/commerce/sales/invoices": 1,
+      "/fiscal/documents": 1,
+      "/portal/access-tokens": 1
+    },
+    {
+      "tab": "sales",
+      "/masters/customers": 1,
+      "/masters/products": 1,
+      "/masters/suppliers": 1,
+      "/masters/tax-rates": 1,
+      "/commerce/sales/quotations": 1,
+      "/commerce/sales/orders": 1,
+      "/commerce/purchases/requests": 1,
+      "/hr/employees": 1,
+      "/hr/attendance": 1,
+      "/hr/leave-requests": 1,
+      "/commerce/sales/invoices": 1,
+      "/fiscal/documents": 1,
+      "/portal/access-tokens": 1
+    },
+    {
+      "tab": "masters",
+      "/masters/customers": 1,
+      "/masters/products": 1,
+      "/masters/suppliers": 1,
+      "/masters/tax-rates": 1,
+      "/commerce/sales/quotations": 1,
+      "/commerce/sales/orders": 1,
+      "/commerce/purchases/requests": 1,
+      "/hr/employees": 1,
+      "/hr/attendance": 1,
+      "/hr/leave-requests": 1,
+      "/commerce/sales/invoices": 1,
+      "/fiscal/documents": 1,
+      "/portal/access-tokens": 1
+    }
+  ],
+  "responsive": [
+    {
+      "route": "/operations?tab=purchases",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=sales",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/operations?tab=masters",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=masters",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=masters",
+      "width": 1280,
+      "scrollWidth": 1280
+    }
+  ],
+  "pageErrors": 0
+}

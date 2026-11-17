@@ -18,7 +18,7 @@ export class CompaniesController {
   @Roles('admin')
   updateCurrentCompany(@Req() request: AuthenticatedRequest,
     @Body() input: { name: string; taxId: string | null; expectedRevision: number; reason: string;
-      requireIndependentPurchaseApprover?: boolean; currencyCode?: string }) {
+      requireIndependentPurchaseApprover?: boolean; currencyCode?: string; quotationValidityDays?: number }) {
     return this.companiesService.updateCurrentCompany(request.user, input);
   }
 

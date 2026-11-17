@@ -33,6 +33,107 @@ foreach ($migration in $migrations) {
 Si faltan dependencias tras clonar: `npm ci` en `api` y `frontend`.
 No es necesario reinstalarlas en cada arranque.
 
+### Tres bloques: planificación, solicitudes y CSV
+
+Sin migración adicional; requiere esquema existente hasta 0034. Construir API
+y frontend con `npm run build` en cada directorio, reiniciar solo API ERP con
+la configuración segura indicada abajo y servir el frontend actualizado.
+En el ambiente actual API 3001 ya fue reiniciada, Angular 4201 sigue disponible;
+health/proxy 200, bootstrap 403 y nuevas rutas sin credencial 401.
+
+GET `inventory/replenishment/:productId/purchase-planning` devuelve resumen
+por destino/fecha, órdenes y solicitudes abiertas sin orden, en una instantánea
+de la empresa autenticada. GET con sufijo `.csv` exporta una consulta nueva,
+solo admin, `Cache-Control: no-store`; no deja archivos comerciales en el servidor.
+El endpoint anterior `purchase-commitments` permanece compatible.
+
+No ejecutar pruebas de integración sobre la base operativa. Se restauró un dump
+actual en `erp360_validation_planning_71fe43ec` y se comprobaron 42 e2e en tres
+suites, 32 Angular, builds y tres flujos de navegador. `/api` del navegador se
+redirigió a API temporal 3011, no al proxy operativo de punta a punta.
+Retiradas base/API temporales y dump de contenedor. Respaldo custom privado
+retenido; huellas de documentos, movimientos, saldos y asientos sin alteración.
+Manual 3.19 y ayuda actualizados; no hay nuevas dependencias de ejecución.
+
+### Continuación UX: restauración de Operaciones
+
+Sin migración nueva ni cambios en la API. Tras actualizar el frontend y
+ejecutar `npm run build`, Operaciones consulta sus listados cuando se restaura
+una sesión administradora, también al abrir directamente una pestaña de
+Compras, Ventas o Catálogos. No requiere pulsar Actualizar inicialmente.
+El servidor Angular local ya sirve este cambio; no se reiniciaron servicios.
+
+El indicador de carga y los errores se muestran explícitamente. Actualizar
+sigue disponible para reintentar o refrescar datos posteriores; no es polling
+automático. Lecturas antiguas de listas/balance no sustituyen el estado local
+ni finalizan la carga de otro contexto. No cambia roles ni sesión del servidor.
+
+Verificado con 30 pruebas Angular, build y tres flujos reales contra copia
+restaurada aislada. El 503 usado para probar recuperación fue sintético.
+API 3001 y frontend 4201 siguen en loopback; no se crearon documentos de
+prueba en la base operativa. Manual Word 3.18 y ayuda contextual actualizados.
+
+### Actualización 0034: revisión del plan de compras
+
+La base local existente ya tiene aplicada `0034_purchase_delivery_plan_revision.sql`.
+Añade `delivery_plan_revision` entero no negativo, inicialmente cero, en
+solicitudes y órdenes. No cambia otros campos. En otra base: comprobar que
+0033 esté aplicada y estas columnas todavía no existan; respaldar, restaurar
+en una copia aislada, probar y aplicar solo la migración pendiente. No es
+repetible ni debe ocultarse una aplicación duplicada.
+
+**Operaciones → Compras → Plan e historial** permite reprogramar destino/fecha
+de solicitudes draft/submitted u órdenes ordered/partially_received, con motivo,
+revisión y confirmación. Vacío en formulario envía null explícito; omisión en
+PATCH devuelve 400. Tras aprobar, usar el plan de orden. Los cerrados son de
+consulta. No cambia lotes, importes ni stock; el replay de recepción no incluye
+el plan y conserva su identidad anterior.
+
+Despliegue verificado: API 3001 y frontend 4201 en loopback, health/proxy 200,
+bootstrap deshabilitado. Base de validación retirada; backup custom privado
+previo retenido. Huellas de seis conjuntos operativos sin alteración.
+Manual de usuario Word actualizado a 3.17, con pasos y capturas nuevas.
+Para regenerarlo, usar Python con `python-docx` y `Pillow`, ejecutar
+`python .\docs\manual\generate_manual.py` y comprobar DOCX/capturas/contratos.
+En esta iteración Pillow se instaló desde PyPI oficial en un venv de sesión,
+sin cambiar el entorno global ni las dependencias de ejecución del ERP.
+
+### Actualización 0033: planificación de compras
+
+La base local existente ya tiene aplicada `0033_purchase_delivery_plan.sql`.
+Añade columnas nullable de destino previsto y fecha a solicitudes/órdenes,
+sin rellenar históricos. Antes de actualizar otra base, comprobar ausencia de
+ambas columnas en ambas tablas, generar respaldo y probar su restauración.
+Aplicar solo esta migración si corresponde. No es repetible: una duplicación
+falla explícitamente, no volver a ejecutarla ni ocultar errores con
+`IF NOT EXISTS`. No cambiar datos existentes para simular una aplicación.
+
+En **Operaciones → Compras**, o al crear propuesta desde **Inventario**,
+se puede indicar destino y fecha opcionales. Se conservan al aprobar.
+En **Recepciones** verificar siempre la ubicación física real: la propuesta
+de destino es solo una sugerencia. Una fecha pasada solo genera aviso en
+órdenes abiertas, no bloquea la recepción ni recalcula inventario/contabilidad.
+0033 no habilitaba edición posterior; ahora se ofrece con las restricciones de 0034.
+
+### Actualización 0032 (17 de noviembre de 2026)
+
+El entorno local existente ya tiene aplicada
+`0032_quotation_default_validity.sql`. No volver a ejecutarla: añade una columna
+sin `IF NOT EXISTS` para hacer visible una aplicación duplicada. En otra base,
+comprobar primero que no exista `companies.quotation_validity_days`, generar
+y restaurar un respaldo de prueba y aplicar solo la migración pendiente.
+Conserva 0 días por empresa y no actualiza cotizaciones.
+
+Hay dos archivos históricos con prefijo 0029 (asistente y tipos de cambio).
+Comprobar **nombre completo y esquema**, no solo el número máximo; todavía
+no existe ledger automatizado que permita deducir estado por ese prefijo.
+No renombrarlos ni ejecutar todas las migraciones sobre la base existente.
+
+Desde **Mi empresa**, un administrador puede configurar de 0 a 3650 días
+enteros con motivo y revisión. En Ventas, fecha vacía hereda la configuración;
+la casilla sin caducidad fuerza una oferta sin fecha. Los cambios solo afectan
+cotizaciones nuevas. Ver [adaptación](ADAPTACION_ODOO.md#vigencia-predeterminada-por-empresa-0032).
+
 ## API (terminal 1)
 
 ```powershell

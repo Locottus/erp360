@@ -29,8 +29,9 @@ export class CompaniesService {
       profile_revision: number;
       currency_code: string;
       require_independent_purchase_approver: boolean;
+      quotation_validity_days: number;
     }>(
-      `SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver
+      `SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver, quotation_validity_days
        FROM companies
        WHERE id = $1
        LIMIT 1`,
@@ -61,10 +62,16 @@ export class CompaniesService {
       reason: string;
       requireIndependentPurchaseApprover?: boolean;
       currencyCode?: string;
+      quotationValidityDays?: number;
     },
   ) {
     const revision = expectedRevision(input.expectedRevision);
     const reason = changeReason(input.reason);
+    if (input.quotationValidityDays !== undefined &&
+        (!Number.isInteger(input.quotationValidityDays) ||
+          input.quotationValidityDays < 0 || input.quotationValidityDays > 3650)) {
+      throw new BadRequestException('quotationValidityDays must be an integer from 0 to 3650 when provided.');
+    }
     if (input.requireIndependentPurchaseApprover !== undefined &&
         typeof input.requireIndependentPurchaseApprover !== 'boolean') {
       throw new BadRequestException('requireIndependentPurchaseApprover must be boolean when provided.');
@@ -100,8 +107,9 @@ export class CompaniesService {
         profile_revision: number;
         currency_code: string;
         require_independent_purchase_approver: boolean;
+        quotation_validity_days: number;
       }>(
-        'SELECT name,tax_id,profile_revision,currency_code,require_independent_purchase_approver FROM companies WHERE id=$1 FOR UPDATE',
+        'SELECT name,tax_id,profile_revision,currency_code,require_independent_purchase_approver,quotation_validity_days FROM companies WHERE id=$1 FOR UPDATE',
         [user.companyId],
       );
       if (!before.rows[0]) throw new NotFoundException('Company not found.');
@@ -110,15 +118,17 @@ export class CompaniesService {
       const finalCurrencyCode = currencyCode ?? before.rows[0].currency_code;
       const requireIndependentApprover = input.requireIndependentPurchaseApprover ??
         before.rows[0].require_independent_purchase_approver;
+      const quotationValidityDays = input.quotationValidityDays ?? before.rows[0].quotation_validity_days;
       if (before.rows[0].name === name && before.rows[0].tax_id === taxId &&
           before.rows[0].currency_code === finalCurrencyCode &&
+          before.rows[0].quotation_validity_days === quotationValidityDays &&
           before.rows[0].require_independent_purchase_approver === requireIndependentApprover)
         throw new ConflictException('No profile changes.');
       const updated = await client.query(
-        `UPDATE companies SET name=$2,tax_id=$3,currency_code=$4,require_independent_purchase_approver=$5,
+        `UPDATE companies SET name=$2,tax_id=$3,currency_code=$4,require_independent_purchase_approver=$5,quotation_validity_days=$6,
            profile_revision=profile_revision+1,updated_at=NOW()
-           WHERE id=$1 RETURNING id,code,name,tax_id,currency_code,is_active,profile_revision,require_independent_purchase_approver`,
-        [user.companyId, name, taxId, finalCurrencyCode, requireIndependentApprover],
+           WHERE id=$1 RETURNING id,code,name,tax_id,currency_code,is_active,profile_revision,require_independent_purchase_approver,quotation_validity_days`,
+        [user.companyId, name, taxId, finalCurrencyCode, requireIndependentApprover, quotationValidityDays],
       );
       await client.query(
         `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
@@ -129,7 +139,7 @@ export class CompaniesService {
           JSON.stringify({
             before: before.rows[0],
             after: { name, tax_id: taxId, currency_code: finalCurrencyCode, profile_revision: revision + 1,
-              require_independent_purchase_approver: requireIndependentApprover },
+              require_independent_purchase_approver: requireIndependentApprover, quotation_validity_days: quotationValidityDays },
             reason,
           }),
         ],
@@ -226,8 +236,9 @@ export class CompaniesService {
       profile_revision: number;
       currency_code: string;
       require_independent_purchase_approver: boolean;
+      quotation_validity_days: number;
     }>(
-      `SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver
+      `SELECT id, code, name, tax_id, is_active, profile_revision, currency_code, require_independent_purchase_approver, quotation_validity_days
        FROM companies
        WHERE id = $1
        LIMIT 1`,

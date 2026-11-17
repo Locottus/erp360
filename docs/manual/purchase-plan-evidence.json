@@ -1,0 +1,60 @@
+{
+  "capturedAt": "2026-11-17T19:05:08.877Z",
+  "database": "erp360_validation_0033_71fe43ec",
+  "backend": "http://127.0.0.1:3011",
+  "frontend": "http://127.0.0.1:4201",
+  "isolation": "Browser /api redirected to isolated validation API; operational data untouched",
+  "flows": [
+    "Manual request form stores normalized destination and UTC date; approval snapshots planning and shows open overdue status",
+    "Receiving suggests planned destination, warns on different actual location, posts partial batch and preserves both planning and actual location",
+    "Replenishment displays planned commitments, does not subtract transit and creates proposal with destination distinct from source rule"
+  ],
+  "responsive": [
+    {
+      "route": "/operations?tab=purchases",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/receiving",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/receiving",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/receiving",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/inventory",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/inventory",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/inventory",
+      "width": 1280,
+      "scrollWidth": 1280
+    }
+  ],
+  "pageErrors": 0
+}

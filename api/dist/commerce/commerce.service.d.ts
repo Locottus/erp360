@@ -1,5 +1,5 @@
 import { DatabaseService } from '../common/database.service';
-import type { AuthUser, CreatePurchaseRequestInput, CreateQuotationInput } from './commerce.types';
+import type { AuthUser, CreatePurchaseRequestInput, CreateQuotationInput, RevisePurchaseDeliveryPlanInput } from './commerce.types';
 export declare function purchaseApprovalBlockReason(required: boolean, createdBy: string | null, approverId: string): "unknown_creator" | "self_approval" | null;
 export declare class CommerceService {
     private readonly db;
@@ -51,6 +51,8 @@ export declare class CommerceService {
         status: string;
     }>;
     createPurchaseRequest(user: AuthUser, input: CreatePurchaseRequestInput): Promise<{
+        destinationLocationCode: string | null;
+        expectedReceiptDate: string | null;
         id: string;
         requestNumber: string;
         status: string;
@@ -69,6 +71,10 @@ export declare class CommerceService {
         supplier_id: string;
         created_by: string | null;
         require_independent_purchase_approver: boolean;
+        destination_location_code: string | null;
+        expected_receipt_date: string | null;
+        delivery_plan_revision: number;
+        order_delivery_plan_revision: number | null;
     }[]>;
     purchaseRequestDetails(user: AuthUser, id: string): Promise<{
         approval_block_reason: string | null;
@@ -85,6 +91,9 @@ export declare class CommerceService {
         replenishment_location: string | null;
         replenishment_rule_revision: number | null;
         replenishment_reason: string | null;
+        destination_location_code: string | null;
+        expected_receipt_date: string | null;
+        delivery_plan_revision: number;
         lines: Array<{
             id: string;
             product_id: string;
@@ -100,6 +109,36 @@ export declare class CommerceService {
     }): Promise<{
         id: string;
         status: string;
+    }>;
+    purchaseDeliveryPlan(user: AuthUser, id: string, kind: 'request' | 'order'): Promise<{
+        history: {
+            created_at: string;
+            actor_user_id: string;
+            reason: string;
+            before: {
+                destination_location_code: string | null;
+                expected_receipt_date: string | null;
+                revision: number;
+            };
+            after: {
+                destination_location_code: string | null;
+                expected_receipt_date: string | null;
+                revision: number;
+            };
+        }[];
+        history_has_more: boolean;
+        id: string;
+        document_number: string;
+        status: string;
+        delivery_plan_revision: number;
+        destination_location_code: string | null;
+        expected_receipt_date: string | null;
+    }>;
+    revisePurchaseDeliveryPlan(user: AuthUser, id: string, kind: 'request' | 'order', input: RevisePurchaseDeliveryPlanInput): Promise<{
+        destination_location_code: string | null;
+        expected_receipt_date: string | null;
+        revision: number;
+        id: string;
     }>;
     approvePurchaseRequest(user: AuthUser, requestId: string, orderNumber: string): Promise<{
         requestId: string;

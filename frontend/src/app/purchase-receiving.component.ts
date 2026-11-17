@@ -8,7 +8,8 @@ import { SessionService } from './core/session.service';
 
 type Purchase = { purchase_order_id: string | null; purchase_order_number: string | null; purchase_order_status: string | null; supplier_name: string; is_posted: boolean };
 type ReceiptDetails = {
-  order: { id: string; order_number: string; status: string; currency_code: string | null };
+  order: { id: string; order_number: string; status: string; currency_code: string | null;
+    destination_location_code: string | null; expected_receipt_date: string | null; is_receipt_overdue: boolean };
   lines: { id: string; product_name: string; quantity: string; unit_cost: string; received: string; remaining: string }[];
   receipts: { id: string; receipt_number: string; product_name: string; location_code: string; quantity: string; unit_cost: string; returnable: string }[];
   legacyReceipts: { id: string; receipt_number: string }[];
@@ -42,6 +43,10 @@ type ReceiptDetails = {
         @if (details; as data) {
           <article class="surface-card"><h2>{{ data.order.order_number }} · {{ statusLabel(data.order.status) }}</h2>
             <p>Moneda: {{ data.order.currency_code || 'No definida (histórico)' }}. El costo de cada lote se conserva desde la orden aprobada.</p>
+            <p>Destino previsto: {{ data.order.destination_location_code || 'No definido' }}.
+              Fecha comprometida UTC: {{ data.order.expected_receipt_date || 'No definida' }}.
+              La planificación no confirma recepción ni obliga la ubicación física real.</p>
+            @if (data.order.is_receipt_overdue) { <p class="status status-info">Fecha comprometida superada con orden abierta. Confirma la entrega pendiente con el proveedor.</p> }
             @if (data.legacyReceipts.length) {
               <p class="status status-info">Esta compra usa recepción histórica sin líneas de lote. Continúa su aplicación desde Operaciones; no mezcles flujos ni inventes ubicaciones históricas. Las devoluciones por lote requieren conciliación previa.</p>
             } @else {
@@ -51,6 +56,7 @@ type ReceiptDetails = {
                   <label>Referencia de recepción<input name="receiptReference" [(ngModel)]="receipt.reference" maxlength="64" required /></label>
                   <label>Ubicación de recepción<input name="receiptLocation" [(ngModel)]="receipt.locationCode" maxlength="32" required /></label>
                 </div>
+                @if (destinationDiffers) { <p class="status status-info">La ubicación real difiere del destino previsto. Verifica dónde recibiste físicamente; se conservarán ambos datos en auditoría.</p> }
                 }
                 <div class="table-scroll"><table class="table-list receiving-table"><caption>Cantidades pedidas, recibidas y pendientes por línea</caption>
                   <thead><tr><th>Producto / costo</th><th>Pedido</th><th>Recibido</th><th>Pendiente</th><th>Recibir ahora</th></tr></thead>
@@ -122,6 +128,10 @@ export class PurchaseReceivingComponent {
   get selectedPurchase() { return this.purchases.find(row => row.purchase_order_id === this.orderId); }
   get hasReceiptQuantity() { return Object.values(this.receiveQuantities).some(value => value !== null && value > 0); }
   get hasReturnQuantity() { return Object.values(this.returnQuantities).some(value => value !== null && value > 0); }
+  get destinationDiffers() {
+    const planned = this.details?.order.destination_location_code;
+    return !!planned && this.receipt.locationCode.trim().toUpperCase() !== planned;
+  }
 
   constructor() {
     effect(() => {
@@ -146,11 +156,12 @@ export class PurchaseReceivingComponent {
     this.purchases = purchases.filter(row => row.purchase_order_id && ['ordered', 'partially_received', 'received'].includes(row.purchase_order_status ?? ''));
     if (this.orderId) await this.loadDetails();
   }
-  private async loadDetails() {
+  private async loadDetails(prepareLocation = false) {
     const user = this.session.user(); const id = this.orderId;
     const details = await firstValueFrom(this.http.get<ReceiptDetails>(`${API_BASE_URL}/inventory/purchases/orders/${id}/receipts`));
     if (this.session.user() !== user || this.orderId !== id) return;
     this.details = details;
+    if (prepareLocation) this.receipt.locationCode = details.order.destination_location_code ?? 'MAIN';
     this.receiveQuantities = Object.fromEntries(details.lines.map(line => [line.id, 0]));
     this.returnQuantities = Object.fromEntries(details.receipts.map(line => [line.id, 0]));
   }
@@ -158,7 +169,7 @@ export class PurchaseReceivingComponent {
   async selectOrder(id: string) {
     if (this.busy) return;
     this.orderId = id; this.clearDetails(); this.receipt.confirmed = false; this.supplierReturn.confirmed = false;
-    if (id) await this.perform(() => this.loadDetails());
+    if (id) await this.perform(() => this.loadDetails(true));
   }
   private selectedLines(quantities: Record<string, number | null>) {
     return Object.entries(quantities).filter((entry): entry is [string, number] => entry[1] !== null && entry[1] > 0)

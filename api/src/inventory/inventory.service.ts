@@ -1,10 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { DatabaseService } from '../common/database.service';
-import type { AuthUser, StockAdjustmentInput } from './inventory.types';
+import type { AuthUser, PurchasePlanning, StockAdjustmentInput } from './inventory.types';
 import { normalizeQuantityDocument, type QuantityDocument } from '../common/quantity-document';
 import { requiredDecimal } from '../common/decimal-input';
 import { changeReason, expectedRevision } from '../common/management-input';
 import { requiredDate } from '../common/iso-date';
+import { normalizePurchasePlan, type PurchasePlanInput } from '../common/purchase-plan';
+import { csvCell } from '../common/csv';
 
 type DbClient = Awaited<ReturnType<DatabaseService['connect']>>;
 
@@ -68,6 +70,8 @@ export class InventoryService {
     const result = await this.db.query(
       `WITH ${purchaseCommitmentCtes}
        SELECT po.id AS order_id,po.order_number,po.status,s.name AS supplier_name,
+         po.destination_location_code,po.expected_receipt_date::text,
+         COALESCE(po.expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date, FALSE) AS is_receipt_overdue,
          op.ordered::text AS ordered_quantity,op.received::text AS documented_received_quantity,
          CASE WHEN op.requires_review THEN NULL ELSE op.pending::text END AS pending_quantity,
          op.has_legacy,op.over_received
@@ -79,7 +83,73 @@ export class InventoryService {
     return result.rows;
   }
 
-  async createReplenishmentProposal(user: AuthUser, productId: string, input: {
+  async purchasePlanning(user: AuthUser, productId: string): Promise<PurchasePlanning> {
+    const result = await this.db.query<{ planning: PurchasePlanning }>(
+      `WITH ${purchaseCommitmentCtes}, orders AS (
+        SELECT po.id AS order_id,po.order_number,po.status,s.name AS supplier_name,
+          po.destination_location_code,po.expected_receipt_date::text,
+          COALESCE(po.expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,FALSE) AS is_receipt_overdue,
+          op.ordered::text AS ordered_quantity,op.received::text AS documented_received_quantity,
+          CASE WHEN op.requires_review THEN NULL ELSE op.pending::text END AS pending_quantity,
+          op.has_legacy,op.over_received
+        FROM order_products op JOIN purchase_orders po ON po.id=op.order_id AND po.company_id=$1
+        JOIN suppliers s ON s.id=po.supplier_id AND s.company_id=po.company_id
+        WHERE op.product_id=$2 AND (op.requires_review OR op.pending>0)
+      ), plan_groups AS (
+        SELECT destination_location_code,expected_receipt_date,is_receipt_overdue,
+          ROUND(COALESCE(SUM(pending_quantity::numeric),0),4)::text AS pending_quantity,
+          COUNT(pending_quantity)::integer AS pending_orders,
+          COUNT(*) FILTER (WHERE pending_quantity IS NULL)::integer AS review_orders
+        FROM orders GROUP BY destination_location_code,expected_receipt_date,is_receipt_overdue
+      ), requests AS (
+        SELECT pr.id AS request_id,pr.request_number,pr.status,s.name AS supplier_name,
+          SUM(l.quantity)::text AS quantity,pr.destination_location_code,pr.expected_receipt_date::text,
+          CASE WHEN rp.request_id IS NULL THEN 'manual' ELSE 'replenishment' END AS origin,
+          rp.location_code AS source_location_code
+        FROM purchase_requests pr JOIN purchase_request_lines l ON l.request_id=pr.id
+        JOIN suppliers s ON s.id=pr.supplier_id AND s.company_id=pr.company_id
+        LEFT JOIN replenishment_purchase_proposals rp ON rp.request_id=pr.id AND rp.company_id=pr.company_id
+        WHERE pr.company_id=$1 AND l.product_id=$2 AND pr.status IN ('draft','submitted')
+          AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.request_id=pr.id AND po.company_id=pr.company_id)
+        GROUP BY pr.id,s.name,rp.request_id,rp.location_code
+      )
+      SELECT jsonb_build_object(
+        'product_id',p.id,'sku',p.sku,'product_name',p.name,
+        'as_of',CURRENT_TIMESTAMP,'as_of_date',(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,
+        'pending_quantity',(SELECT ROUND(COALESCE(SUM(pending_quantity::numeric),0),4)::text FROM orders),
+        'pending_orders',(SELECT COUNT(pending_quantity)::integer FROM orders),
+        'review_orders',(SELECT COUNT(*)::integer FROM orders WHERE pending_quantity IS NULL),
+        'groups',COALESCE((SELECT jsonb_agg(g ORDER BY destination_location_code NULLS LAST,expected_receipt_date NULLS LAST) FROM plan_groups g),'[]'::jsonb),
+        'orders',COALESCE((SELECT jsonb_agg(o ORDER BY order_number,order_id) FROM orders o),'[]'::jsonb),
+        'open_request_quantity',(SELECT ROUND(COALESCE(SUM(quantity::numeric),0),4)::text FROM requests),
+        'open_requests',(SELECT COUNT(*)::integer FROM requests),
+        'requests',COALESCE((SELECT jsonb_agg(r ORDER BY request_number,request_id) FROM requests r),'[]'::jsonb)
+      ) AS planning FROM products p WHERE p.company_id=$1 AND p.id=$2`,
+      [user.companyId, productId]);
+    if (!result.rows[0]) throw new NotFoundException('Product not found.');
+    return result.rows[0].planning;
+  }
+
+  async purchasePlanningCsv(user: AuthUser, productId: string): Promise<string> {
+    const plan = await this.purchasePlanning(user, productId);
+    const headers = ['as_of_utc', 'reference_date_utc', 'sku', 'product', 'document_type', 'document_number',
+      'status', 'supplier', 'origin', 'source_location', 'planned_destination', 'expected_receipt_date_utc',
+      'ordered_quantity', 'documented_received_quantity', 'verifiable_pending_quantity', 'unapproved_request_quantity',
+      'legacy_receipt', 'over_received', 'excluded_from_pending'];
+    const prefix = [plan.as_of, plan.as_of_date, plan.sku, plan.product_name];
+    const rows = [
+      ...plan.orders.map(order => [...prefix, 'order', order.order_number, order.status, order.supplier_name,
+        '', '', order.destination_location_code, order.expected_receipt_date, order.ordered_quantity,
+        order.documented_received_quantity, order.pending_quantity, '', order.has_legacy, order.over_received,
+        order.pending_quantity === null]),
+      ...plan.requests.map(item => [...prefix, 'request', item.request_number, item.status, item.supplier_name,
+        item.origin, item.source_location_code, item.destination_location_code, item.expected_receipt_date,
+        '', '', '', item.quantity, '', '', '']),
+    ];
+    return '\uFEFF' + [headers, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
+  }
+
+  async createReplenishmentProposal(user: AuthUser, productId: string, input: PurchasePlanInput & {
     locationCode: string; expectedRevision: number; supplierId: string; requestNumber: string;
     quantity: string; unitCost: string; reason: string; reviewedCommitments: boolean;
   }) {
@@ -87,6 +157,7 @@ export class InventoryService {
       throw new BadRequestException('An explicit locationCode is required.');
     }
     const location = this.normalizeLocation(input.locationCode);
+    const plan = normalizePurchasePlan(input);
     const revision = expectedRevision(input.expectedRevision);
     const reason = changeReason(input.reason);
     const quantity = requiredDecimal(input.quantity, 'quantity');
@@ -120,9 +191,11 @@ export class InventoryService {
           ROUND($1::numeric*$2::numeric,4)<100000000000000::numeric AS valid`, [quantity, unitCost]);
       if (!amount.rows[0].valid) throw new BadRequestException('Purchase amount exceeds supported precision.');
       const request = await client.query<{ id: string; request_number: string }>(
-        `INSERT INTO purchase_requests(company_id,supplier_id,request_number,status,subtotal,tax_total,grand_total,created_by,currency_code)
-         VALUES($1,$2,$3,'draft',$4,0,$4,$5,(SELECT currency_code FROM companies WHERE id=$1)) RETURNING id,request_number`,
-        [user.companyId, input.supplierId, input.requestNumber.trim(), amount.rows[0].total, user.sub]);
+        `INSERT INTO purchase_requests(company_id,supplier_id,request_number,status,subtotal,tax_total,grand_total,created_by,currency_code,
+          destination_location_code,expected_receipt_date)
+         VALUES($1,$2,$3,'draft',$4,0,$4,$5,(SELECT currency_code FROM companies WHERE id=$1),$6,$7::date) RETURNING id,request_number`,
+        [user.companyId, input.supplierId, input.requestNumber.trim(), amount.rows[0].total, user.sub,
+          plan.destinationLocationCode, plan.expectedReceiptDate]);
       await client.query(
         `INSERT INTO purchase_request_lines(request_id,product_id,quantity,unit_cost,line_total) VALUES($1,$2,$3,$4,$5)`,
         [request.rows[0].id, productId, quantity, unitCost, amount.rows[0].total]);
@@ -135,9 +208,10 @@ export class InventoryService {
         [user.companyId, user.sub, request.rows[0].id, JSON.stringify({
           product_id: productId, location_code: location, rule_revision: revision, supplier_id: input.supplierId,
           quantity, unit_cost: unitCost, reason, reviewed_commitments: true,
+          ...plan,
         })]);
       await client.query('COMMIT');
-      return { id: request.rows[0].id, requestNumber: request.rows[0].request_number, status: 'draft' };
+      return { id: request.rows[0].id, requestNumber: request.rows[0].request_number, status: 'draft', ...plan };
     } catch (error) {
       await client.query('ROLLBACK');
       if (String(error).includes('purchase_requests_company_id_request_number_key')) {
@@ -194,7 +268,10 @@ export class InventoryService {
 
   async purchaseReceiptDetails(user: AuthUser, id: string) {
     const order = await this.db.query(
-      'SELECT id,order_number,status,currency_code FROM purchase_orders WHERE id=$1 AND company_id=$2', [id, user.companyId],
+      `SELECT id,order_number,status,currency_code,destination_location_code,expected_receipt_date::text,delivery_plan_revision,
+        COALESCE(status IN ('ordered','partially_received') AND
+          expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date, FALSE) AS is_receipt_overdue
+       FROM purchase_orders WHERE id=$1 AND company_id=$2`, [id, user.companyId],
     );
     if (!order.rows[0]) throw new NotFoundException('Purchase order not found.');
     const lines = await this.db.query(
@@ -236,8 +313,10 @@ export class InventoryService {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-      const order = await client.query<{ status: string }>(
-        'SELECT status FROM purchase_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId],
+      const order = await client.query<{
+        status: string; destination_location_code: string | null; expected_receipt_date: string | null; delivery_plan_revision: number;
+      }>(
+        'SELECT status,destination_location_code,expected_receipt_date::text,delivery_plan_revision FROM purchase_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId],
       );
       if (!order.rows[0]) throw new NotFoundException('Purchase order not found.');
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`purchase-receipt:${user.companyId}:${document.reference}`]);
@@ -289,7 +368,12 @@ export class InventoryService {
       );
       const status = pending.rows[0].pending ? 'partially_received' : 'received';
       await client.query('UPDATE purchase_orders SET status=$1,updated_at=NOW() WHERE id=$2', [status, id]);
-      await this.insertAudit(client, user, 'inventory.purchase.partial.receive', receipt.rows[0].id, { ...payload, reference: document.reference });
+      await this.insertAudit(client, user, 'inventory.purchase.partial.receive', receipt.rows[0].id, {
+        ...payload, reference: document.reference,
+        planned_destination_location_code: order.rows[0].destination_location_code,
+        expected_receipt_date: order.rows[0].expected_receipt_date,
+        delivery_plan_revision: order.rows[0].delivery_plan_revision,
+      });
       await client.query('COMMIT');
       return { receiptId: receipt.rows[0].id, status, replayed: false };
     } catch (error) {

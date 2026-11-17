@@ -31,7 +31,7 @@ for name in ["Title", "Heading 1", "Heading 2", "Heading 3"]:
     doc.styles[name].paragraph_format.keep_with_next = True
 doc.styles["Heading 1"].paragraph_format.page_break_before = True
 header = section.header.paragraphs[0]
-header.text = "ERP360  |  Operación y configuración  |  Edición 3.16"
+header.text = "ERP360  |  Operación y configuración  |  Edición 3.19"
 header.style = doc.styles["Caption"]
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -140,7 +140,7 @@ def flow(title, purpose, prerequisites, operations, result, controls):
 doc.add_heading("ERP360", 0)
 p("MANUAL DE OPERACIÓN Y CONFIGURACIÓN", "Subtitle")
 p("Guía de usuario, administración funcional e integración")
-p(f"Edición 3.16 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
+p(f"Edición 3.19 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
 p("Audiencia: usuarios, responsables de empresa, integradores y soporte.")
 note("Este manual describe la implementación existente, no una promesa de paridad con otro ERP. "
      "Distingue pantallas web de operaciones disponibles solo por API. Fiscal es simulación sandbox; "
@@ -269,7 +269,7 @@ steps(["Como administrador abre Mi empresa y verifica el código inmutable de la
        "Introduce motivo de 10 a 1000 caracteres y pulsa Guardar perfil de empresa.",
        "El nombre actualizado aparece en la barra superior sin cambiar de tenant. Se conserva auditoría antes/después, actor y motivo.",
        "Ante conflicto pulsa Recargar perfil y revisa la versión actual antes de editar nuevamente."])
-note("El perfil permite actualizar nombre, identificación tributaria y la política de aprobación independiente de compras: "
+note("El perfil permite actualizar nombre, identificación tributaria, vigencia predeterminada de cotizaciones y la política de aprobación independiente de compras: "
      "no código, país, moneda, actividad, usuarios ni contrato SaaS. "
      "Las facturas con instantánea conservan el nombre de emisión. Los PDF legados sin instantánea muestran datos "
      "descriptivos actuales con un aviso; no se inventan ni reescriben instantáneas históricas.")
@@ -296,6 +296,16 @@ p("API: requireIndependentPurchaseApprover es un booleano opcional de PATCH /com
   "Omitirlo conserva el valor existente; null o una cadena no son válidos. "
   "La lista y detalle de compras muestran approval_block_reason; la aprobación comprueba la política "
   "vigente en transacción y conserva autor y actor en auditoría.")
+
+h("3.7 Configurar vigencia predeterminada de cotizaciones", 2)
+steps(["Como administrador abre Mi empresa y revisa la revisión actual del perfil.",
+       "En Vigencia predeterminada de cotizaciones (días UTC) introduce un entero entre 0 y 3650. Cero desactiva la caducidad predeterminada.",
+       "Indica motivo de 10 a 1000 caracteres y guarda el perfil. Si hay conflicto, actualiza y vuelve a revisar los datos.",
+       "Al crear una cotización en Operaciones → Ventas, deja Válida hasta vacía para usar esta regla: hoy UTC más los días configurados.",
+       "Una fecha escrita tiene prioridad. La casilla Sin caducidad para esta oferta evita la regla solo para esa oferta.",
+       "Comprueba la fecha resultante antes de confirmar. Cambiar la configuración no modifica ofertas existentes ni cotizaciones de checkout."])
+p("API: quotationValidityDays opcional en PATCH /companies/current; omitir conserva la regla. "
+  "No admite null, texto, fracciones ni valores fuera de 0–3650. Comparte expectedRevision y reason con el perfil.")
 
 h("4. Navegación, accesibilidad y apariencia")
 steps(["En pantallas de 1280 píxeles CSS o más, utiliza la barra lateral permanente. "
@@ -337,6 +347,19 @@ note("Se hicieron comprobaciones de accesibilidad y tamaños, pero no una certif
      "Ante una barrera registra pantalla, tarea, ancho/zoom y referencia, sin datos personales.")
 image("10-mobile.png", "Dashboard móvil con barra de acciones compacta y menú cerrado", True)
 image("11-dark.png", "Modo oscuro con datos reales de demostración")
+
+h("4.1 Abrir y recargar Operaciones con una sesión guardada", 2)
+steps(["Con una sesión vigente en la misma pestaña, puedes recargar Operaciones o abrir directamente /operations?tab=purchases, /operations?tab=sales o /operations?tab=masters.",
+       "La aplicación restaura tu identidad y, si eres administrador, carga automáticamente catálogos y listados. Ya no necesitas pulsar Actualizar para iniciar esa carga.",
+       "Espera a que termine Cargando datos de Operaciones... antes de revisar los resultados. El aviso también aparece durante la consulta de balance.",
+       "Comprueba la empresa de la barra superior y los documentos antes de operar. Recargar no crea ni aprueba compras y no confirma cotizaciones.",
+       "Si aparece No se pudieron cargar los módulos de operación, revisa conexión y sesión; pulsa Actualizar en el listado para volver a intentar. Un error no significa que la empresa no tenga documentos.",
+       "Una respuesta antigua de la carga de listas o del balance no reemplaza el estado local de una sesión posterior. Al cambiar la sesión se limpian listados, detalle, balance y el token de portal mostrado.",
+       "El centro sigue requiriendo administrador; un rol purchases no obtiene acceso por tener una sesión guardada. Si la sesión expiró, vuelve a Acceso."])
+note("La carga automática es una consulta al abrir/restaurar la sesión, no actualización continua. "
+     "Actualizar sigue disponible para consultar cambios posteriores o reintentar un error. "
+     "No restaura borradores de formularios al recargar la página, ni cambia permisos o vigencia de sesión.")
+image("41-operations-session.png", "Compras y catálogos cargados automáticamente después de restaurar una sesión de demostración")
 
 h("5. Dashboard e interpretación de indicadores")
 steps(["Inicia sesión y abre Dashboard.",
@@ -529,7 +552,7 @@ code('POST /commerce/sales/quotations\n'
      '{"quotationNumber":"COT-DEMO-001","customerId":"<UUID cliente>",'
      '"taxRateCode":"IVA13","lines":[{"productId":"<UUID producto>","quantity":2,"unitPrice":25}]}')
 h("10.5 Vigencia y revisión de cotizaciones", 2)
-steps(["En Operaciones → Ventas crea la cotización. Válida hasta es opcional; sin fecha conserva vigencia ilimitada.",
+steps(["En Operaciones → Ventas crea la cotización. Válida hasta vacía hereda los días configurados en Mi empresa; con cero días resulta ilimitada. Marca Sin caducidad para esta oferta para ignorar esa regla solo en esta oferta.",
        "La fecha incluye todo el día en UTC. El servidor rechaza fechas inexistentes y nuevas fechas pasadas.",
        "En Cotizaciones y pedidos revisa Vigencia UTC. Una vencida sigue siendo borrador, pero ya no permite confirmar.",
        "Para renovarla abre Revisar vigencia de cotización, selecciona el borrador y revisa precios/condiciones.",
@@ -537,7 +560,8 @@ steps(["En Operaciones → Ventas crea la cotización. Válida hasta es opcional
        "Marca la revisión de condiciones y pulsa Guardar nueva vigencia. Se conserva auditoría de la fecha anterior.",
        "Si devuelve conflicto, actualiza: otra persona pudo confirmar o revisar la oferta. No sobrescribas una revisión más reciente.",
        "Confirma el pedido únicamente después de revisar la oferta vigente. La renovación no cambia precios ni recalcula impuestos."])
-p("API: validUntil opcional en POST /commerce/sales/quotations; GET devuelve valid_until, "
+p("API: omitir validUntil en POST /commerce/sales/quotations hereda la regla empresarial; null explícito "
+  "crea una oferta ilimitada y una fecha explícita tiene prioridad. GET devuelve valid_until, "
   "revision e is_expired. PATCH /commerce/sales/quotations/:id/validity recibe "
   "{validUntil, expectedRevision, reason}; null retira la fecha. Solo admin de la misma "
   "empresa puede revisar borradores. Confirmar vencidas produce 409 sin crear pedido. "
@@ -552,7 +576,7 @@ h("11. Compras: recepciones parciales y devoluciones")
 flow("11.1 Flujo de compra", "Aprovisionar productos y reconocer el impacto físico/contable en su orden.",
      "Proveedor/productos/impuesto creados y costos revisados.",
      [
-         ("1", "POST /commerce/purchases/requests: requestNumber, supplierId, taxRateCode?, lines[{productId,quantity,unitCost?}]", "Conservar id de solicitud y totales."),
+         ("1", "POST /commerce/purchases/requests: requestNumber, supplierId, taxRateCode?, destinationLocationCode?, expectedReceiptDate?, lines[{productId,quantity,unitCost?}]", "Conservar id de solicitud, plan opcional y totales."),
          ("2", "POST /commerce/purchases/requests/:id/approve: {orderNumber}", "Conservar purchaseOrderId."),
          ("3", "Recepciones → seleccionar compra aprobada", "Líneas pedidas, recibidas y pendientes con su costo."),
          ("4", "Referencia, ubicación y cantidades reales → Confirmar recepción e inventario", "Lote e ingreso físico atómicos; partially_received hasta completar."),
@@ -574,8 +598,8 @@ p("Antes de aprobar, el administrador puede rechazar una solicitud abierta en Op
 image("29-purchase-rejection.png", "Solicitud de compra rechazada con motivo auditado")
 steps(["Crea solicitud con proveedor/productos activos en Operaciones → Compras y apruébala con número de orden único.",
        "Abre Recepciones en el menú, o Recibir por cantidades desde el seguimiento de compras.",
-       "Selecciona la orden. Revisa producto, cantidad pedida, recibido acumulado, pendiente y costo unitario.",
-       "Escribe referencia única del comprobante de entrega y ubicación explícita (por ejemplo MAIN); los códigos se normalizan a mayúsculas.",
+       "Selecciona la orden. Revisa producto, cantidad pedida, recibido acumulado, pendiente, costo, destino previsto y fecha comprometida UTC.",
+       "Escribe referencia única del comprobante de entrega y confirma ubicación física real; al seleccionar se sugiere el destino previsto, o MAIN si no existe. Puedes cambiarlo: el aviso de diferencia no impide recibir y se conservan ambos datos en auditoría.",
        "Introduce cantidades SOLO de lo físicamente recibido. Deja cero las otras líneas. Se admiten hasta cuatro decimales y no más del pendiente.",
        "Marca la confirmación física y envía. Se crea lote, snapshot del costo de orden, kardex y saldo en una transacción.",
        "El estado es Recibida parcialmente mientras falte alguna línea. Repite con otra referencia para cada entrega real.",
@@ -611,12 +635,53 @@ bullets(["Las recepciones antiguas sin líneas muestran advertencia. No se inven
          "No mezclar lotes nuevos y recepción total antigua. El backend impide doble ingreso. Para devolver históricos se requiere conciliación autorizada.",
          "409: otro operador recibió/devolvió unidades, o referencia usada con otros datos. Actualiza y comprueba antes de reintentar.",
          "400 en devolución: revisa compra completa/contabilizada, disponible en ubicación original, motivo y período abierto.",
-         "Una recepción parcial no habilita pago proveedor; primero se completa y contabiliza. No existe cierre del remanente ni modificación de orden aprobada.",
+         "Una recepción parcial no habilita pago proveedor; primero se completa y contabiliza. No existe cierre del remanente ni edición de cantidades/costos aprobados; sí se puede reprogramar solo el destino y fecha de una orden abierta (11.6).",
          "No hay conversión multimoneda, integración bancaria ni comprobante fiscal de crédito proveedor."])
 image("18-receiving.png", "Recepciones parciales, lotes, devolución a proveedor e historial")
 
+h("11.5 Planificar destino y fecha de una compra", 2)
+steps(["En Operaciones → Compras completa proveedor, productos y cantidades como de costumbre.",
+       "Destino previsto de compra y Fecha comprometida de recepción (UTC) son opcionales; un campo vacío queda sin definir, no equivale a MAIN ni a una confirmación del proveedor.",
+       "Los códigos de destino se normalizan a mayúsculas y admiten hasta 32 caracteres sin controles. Son códigos lógicos: todavía no hay catálogo de almacenes ni validación de rutas.",
+       "La fecha debe existir y usar YYYY-MM-DD. Una fecha pasada se admite como compromiso registrado, no como caducidad.",
+       "Crea la solicitud, consulta Ver detalle y revisa el plan antes de aprobar. La orden copia ese plan en el momento de aprobación.",
+       "En Seguimiento de compras se muestra el plan de la orden cuando existe; el detalle y Plan e historial de solicitud conservan el de la solicitud original.",
+       "Una orden abierta con fecha anterior a hoy UTC muestra Fecha comprometida superada. El día actual no se considera superado; completar/cancelar quita el aviso, sin borrar la fecha.",
+       "En Recepciones verifica siempre el lugar físico real. Actualizar el detalle no reemplaza la ubicación que ya estabas introduciendo."])
+note("Planificar no crea stock, reservas, movimientos ni asientos. Los históricos permanecen sin destino/fecha "
+     "hasta una reprogramación explícita de un documento abierto. No se descuentan compras en tránsito de las sugerencias de reposición.")
+image("40-receiving-plan.png", "Recepción parcial real de demostración: plan previsto y ubicación física distinta")
+
+h("11.6 Reprogramar y consultar historial sin alterar recepciones", 2)
+steps(["Como administrador abre Operaciones → Compras y actualiza la lista.",
+       "Para una solicitud todavía borrador o enviada, abre Plan e historial de solicitud seguido de su número. Para una compra aprobada, abre Plan e historial de orden: no edites la solicitud original.",
+       "Comprueba número, estado, revisión del plan, destino y fecha actuales. Las revisiones de solicitud y orden son independientes; cada una inicia en cero.",
+       "Introduce Nuevo destino previsto y Nueva fecha comprometida (UTC). Dejar cualquiera vacío retira explícitamente ese valor anterior; puedes conservar uno y retirar el otro.",
+       "Escribe Motivo de reprogramación de 10 a 1000 caracteres. Marca la confirmación de revisión del compromiso, que advierte del efecto de los campos vacíos.",
+       "Pulsa Guardar reprogramación. Solo se permite en solicitudes draft/submitted u órdenes ordered/partially_received; no cambia estado, cantidades, costos ni condiciones de aprobación.",
+       "Tras el mensaje de éxito vuelve a abrir el plan para comprobar nueva revisión e historial: antes, después, motivo, fecha UTC e identificador del usuario.",
+       "Ante No se guardó (409), no repitas a ciegas: puede haber otra revisión, estado cerrado o ningún cambio efectivo. Recargar plan e historial reemplaza el formulario con datos actuales y descarta lo no guardado; vuelve a revisar antes de reenviar.",
+       "Órdenes recibidas/canceladas y solicitudes aprobadas/rechazadas conservan consulta de historial, pero no ofrecen guardar. El historial muestra hasta 50 revisiones recientes y avisa si hay anteriores; para estas, solicita a administración una revisión autorizada de auditoría."])
+p("Cada guardado registra antes/después, actor, motivo y revisión en una transacción. Aprobar conserva la revisión "
+  "del plan de solicitud usada y crea una revisión cero independiente para la orden. No se sincronizan después: "
+  "reprogramar la orden no reescribe la solicitud ni los lotes o auditorías de recepciones previas. "
+  "Las recepciones nuevas registran la revisión vigente y la ubicación física real; repetir idéntica referencia/datos "
+  "de un lote anterior sigue siendo idempotente aunque el plan haya cambiado.")
+p("API: GET/PATCH /commerce/purchases/requests/:id/delivery-plan y "
+  "/commerce/purchases/orders/:id/delivery-plan. GET permite admin/purchases de la empresa; PATCH solo admin. "
+  "PATCH exige los cuatro campos: destinationLocationCode, expectedReceiptDate, expectedRevision y reason. "
+  "Para retirar un valor envía null; omitirlo o enviar texto vacío no lo retira y devuelve 400. "
+  "GET devuelve delivery_plan_revision, history y history_has_more. El límite de 50 no elimina auditoría antigua.")
+code('PATCH /commerce/purchases/orders/<UUID orden>/delivery-plan\n'
+     '{"destinationLocationCode":"WH-B","expectedReceiptDate":null,'
+     '"expectedRevision":0,"reason":"Fecha pendiente de confirmar con proveedor"}')
+note("No equivale a fechas por línea, calendario laboral, aceptación por correo del proveedor ni automatización "
+     "de rutas de Odoo. No existe cierre automático del remanente ni revalorización al reprogramar.")
+image("39-purchase-rescheduling.png", "Plan de orden parcial: revisión 2 tras retirar destino/fecha e historial antes/después")
+
 h("12. Inventario, reservas y ubicación")
-p("Ubicación omitida se normaliza a MAIN; los códigos se convierten a mayúsculas. Usa la misma "
+p("En los movimientos de inventario que admiten omitir ubicación, esta se normaliza a MAIN; "
+  "no aplica al destino opcional de planificación de compras. Los códigos se convierten a mayúsculas. Usa la misma "
   "ubicación al reservar y despachar. Existencia disponible = on_hand − reserved. Las reservas "
   "reducen disponible, no físico; el despacho reduce ambos y marca la reserva fulfilled.")
 p("La pantalla Inventario presenta saldos por ubicación y un kardex paginado. Puedes filtrar por "
@@ -655,7 +720,8 @@ p("Disponible = físico menos reservado. Hay alerta solamente cuando disponible 
 p("Compra pendiente de empresa suma, por producto, cantidades de órdenes aprobadas aún no recibidas "
   "(ordenadas o parcialmente recibidas), restando recepciones por línea. Se actualiza tras recibir o cancelar "
   "y excluye órdenes completamente recibidas y canceladas. Se calcula en la misma consulta que el saldo de inventario. "
-  "No representa un destino ni fecha: las órdenes actuales no indican ubicación hasta recibir. El total se repite "
+  "Es un total empresarial: Ver órdenes desglosa ahora el pendiente por destino previsto y fecha declarados, "
+  "sin atribuirlo a la ubicación de origen de cada regla. El total se repite "
   "para las reglas del mismo producto y no debe sumarse entre ubicaciones. Una devolución a proveedor no reabre la orden.")
 note("Órdenes abiertas con recibo histórico sin líneas o cantidades recibidas inconsistentes se excluyen del total "
      "y se señalan para revisión. El cero mostrado puede ser incompleto si existe ese aviso. Revisar la orden antes "
@@ -668,23 +734,67 @@ p("La lectura agrega pending_purchase_quantity (cadena exacta), pending_purchase
   "purchase_orders_requiring_review (contadores por orden) en cada regla. Es informativa; no cambia estados "
   "ni asigna el pedido pendiente a la ubicación de la regla.")
 p("El detalle se consulta independientemente y puede cambiar entre lecturas: actualiza reposición y vuelve a abrir "
-  "Ver órdenes para obtener datos recientes. GET /inventory/replenishment/:productId/purchase-commitments "
-  "requiere administrador y producto de la empresa autenticada. En órdenes excluidas pending_quantity es null; "
+  "Ver órdenes para obtener datos recientes. La pantalla usa ahora GET /inventory/replenishment/:productId/purchase-planning; "
+  "purchase-commitments sigue disponible para integraciones anteriores. Ambas lecturas requieren administrador "
+  "y producto de la empresa autenticada. En órdenes excluidas pending_quantity es null; "
   "la recepción documentada puede estar incompleta cuando hay recibos históricos sin detalle.")
 image("27-replenishment.png", "Reglas de reposición y sugerencias exactas, sin compra automática")
 p("Para proponer, pulsa Preparar propuesta en una regla de producto activo. Revisa las compras pendientes "
   "y las solicitudes manuales de toda la empresa; indica número único, proveedor activo, cantidad, costo "
   "unitario y motivo. Confirma la revisión y crea la solicitud en borrador sin impuesto. La cantidad sugerida "
-  "es editable y no descuenta compromisos: puede haber cambiado desde la lectura. No se asigna un destino "
-  "a la orden ni se crea movimiento o asiento. En Compras consulta la solicitud y aprueba o rechaza por separado.")
+  "es editable y no descuenta compromisos: puede haber cambiado desde la lectura. Puedes indicar destino previsto "
+  "y fecha comprometida opcionales; la ubicación de origen de la regla NO se usa como destino por defecto. "
+  "No se crea movimiento o asiento. En Compras consulta la solicitud y aprueba o rechaza por separado.")
 note("Solo se permite una propuesta abierta generada para la misma regla. La protección no detecta solicitudes "
      "manuales ni propuestas de otras ubicaciones. Al aprobar o rechazar se libera la regla: antes de crear otra "
-     "revisa la orden pendiente. No existe aún segregación obligatoria de quien crea y aprueba.")
+     "revisa la orden pendiente. Si Mi empresa exige aprobación independiente, debe aprobar otro administrador.")
 p("El detalle de la solicitud conserva ubicación de origen, revisión de regla y motivo; la ubicación es informativa "
   "y no obliga a recibir allí. POST /inventory/replenishment/:productId/proposals exige administrador, "
   "locationCode, expectedRevision, supplierId, requestNumber, quantity y unitCost decimales como cadenas, "
-  "reason y reviewedCommitments=true. Una revisión obsoleta o propuesta abierta devuelve 409.")
+  "reason y reviewedCommitments=true; acepta destinationLocationCode y expectedReceiptDate opcionales. "
+  "Una revisión obsoleta o propuesta abierta devuelve 409. Para revisar el compromiso después de crear, usa 11.6.")
 image("30-replenishment-proposal.png", "Propuesta manual de reposición antes de crear el borrador")
+
+h("12.2 Planificación por destino y fecha", 2)
+steps(["En Inventario → Reposición pulsa Ver órdenes del producto.",
+       "Comprueba la fecha/hora de consulta UTC, total verificable de empresa y número de órdenes excluidas.",
+       "Revisa cada grupo de destino previsto y fecha UTC. No definido/No definida conserva la falta de datos; no se asigna MAIN ni una fecha ficticia.",
+       "Una fecha anterior a hoy UTC se marca superada; hoy todavía no. Confirma la entrega con el proveedor: no bloquea la recepción.",
+       "Cada orden del producto pertenece a un solo grupo aunque tenga varias líneas. No sumes el total empresarial otra vez al desglose ni entre reglas.",
+       "Pulsa Actualizar planificación para releer el detalle. Actualizar reposición renueva las reglas y cierra el detalle, que puedes volver a abrir."])
+p("Resumen, grupos, órdenes y solicitudes abiertas provienen de una sola instantánea SQL. La tabla de reglas "
+  "se consulta por separado y puede ser anterior. Cantidades exactas calculadas en PostgreSQL y devueltas como "
+  "cadenas decimales. Los grupos excluyen cantidades inciertas, pero conservan su contador de revisión y las órdenes "
+  "con su causa. Cero verificable con exclusiones no garantiza que no existan entregas pendientes.")
+note("Solo es planificación declarada por documento, no stock disponible, confirmación real del proveedor ni previsión "
+     "por línea/calendario. No descuenta tránsito de mínimo/objetivo ni modifica existencias, sugerencias o contabilidad. "
+     "No permite cancelar remanentes de una orden parcialmente recibida.")
+image("42-purchase-planning.png", "Consulta empresarial por destino/fecha, solicitudes separadas y exportación; datos de demostración")
+h("12.3 Solicitudes abiertas antes de volver a comprar", 2)
+steps(["Dentro de Ver órdenes revisa Solicitudes sin orden: borradores y enviadas que todavía no tienen orden.",
+       "Comprueba proveedor, cantidad total del producto, origen manual o reposición, ubicación de origen, destino y fecha.",
+       "Una propuesta de CENTRO con destino SUR sigue mostrando ambos datos separados. No uses el origen como almacén receptor.",
+       "Revisa solicitudes manuales y de otras reglas antes de crear una nueva. La consulta no detecta automáticamente duplicados ni reserva una necesidad.",
+       "Abre Revisar solicitudes y planes en Compras para decidir por separado. Tras aprobar o rechazar, vuelve a actualizar la planificación."])
+p("La cantidad solicitada no aprobada está separada del pendiente verificable de órdenes: no se suman ni se descuentan "
+  "de la sugerencia. Al aprobar una solicitud desaparece de esta lista y aparece su orden abierta; al rechazar deja de contarse. "
+  "No se incluyen solicitudes con una orden asociada, incluso ante un histórico de estado inconsistente. "
+  "Estas lecturas conservan permisos de administrador y empresa de la sesión; no amplían el rol purchases.")
+h("12.4 Exportación CSV de planificación", 2)
+steps(["Abre Ver órdenes del producto y pulsa Exportar planificación CSV.",
+       "Conserva el archivo en un lugar autorizado: contiene información comercial de tu empresa.",
+       "Al importarlo en una hoja de cálculo usa UTF-8, separador coma y cantidades como texto para conservar cuatro decimales.",
+       "Separa document_type=order de request. Suma únicamente verifiable_pending_quantity para órdenes verificables; no combines unapproved_request_quantity.",
+       "Una celda vacía de pendiente en una orden excluida no equivale a cero: revisa legacy_receipt, over_received y excluded_from_pending.",
+       "Si falla la consulta/exportación se muestra un error. Reintenta explícitamente; no se presenta un archivo vacío como éxito."])
+p("GET /inventory/replenishment/:productId/purchase-planning.csv requiere la misma identidad administradora y producto "
+  "de la empresa. Realiza una consulta nueva, por lo que puede diferir de la pantalla. Exporta una fila por orden o solicitud "
+  "del producto, no una fila por línea ni por regla, y no incluye filas de subtotales/totales. Si no existen documentos, "
+  "el CSV solo tiene encabezados. Columnas de fecha/hora de consulta y fecha UTC de referencia acompañan cada documento. "
+  "Origen vacío en una orden no significa una solicitud manual. Los planes ausentes se exportan vacíos.")
+p("Las celdas están entre comillas, las comillas internas se duplican y los saltos/tabuladores se convierten en espacios. "
+  "Los textos que podrían iniciar una fórmula se neutralizan con apóstrofo. Es una exportación informativa, "
+  "no un archivo de importación ni un documento fiscal.")
 
 h("13. Contabilidad, cobros y cierre")
 h("13.1 Preparación del plan base", 2)
@@ -1078,7 +1188,37 @@ p("No hay pantalla completa de auditoría o restauración. El equipo autorizado 
   "audit_log y registros con mínimo privilegio y redacción, no entregarlos directamente al usuario o a una IA.")
 
 h("20. Criterios de aceptación, límites y recomendaciones")
-p("Se ejecutaron builds de API/Angular, 36 pruebas unitarias API, 78 e2e API y 61 de frontend. "
+for evidence_file, block_label in [
+    ("quotation-default-evidence.json", "0032: vigencia empresarial"),
+    ("purchase-plan-evidence.json", "0033: planificación de compras"),
+    ("purchase-rescheduling-evidence.json", "0034: reprogramación auditada"),
+    ("operations-session-evidence.json", "Continuación UX: restauración de Operaciones"),
+    ("purchase-planning-evidence.json", "Tres bloques: planificación, solicitudes abiertas y CSV"),
+]:
+    block_evidence = json.loads((HERE / evidence_file).read_text(encoding="utf-8"))
+    if block_evidence["pageErrors"] or any(
+        check["scrollWidth"] > check["width"] + 1 for check in block_evidence["responsive"]
+    ):
+        raise ValueError(f"Evidencia con errores o desbordamiento: {evidence_file}")
+    p(f"{block_label}: navegador real {block_evidence['capturedAt']}; "
+      f"{len(block_evidence['flows'])} flujos y {len(block_evidence['responsive'])} "
+      "comprobaciones de estado/ruta/ancho sin errores. Se usaron datos ficticios en bases restauradas "
+      "aisladas y se redirigió /api del navegador a la API de validación. No prueba acciones sobre datos operativos.")
+p("Cierre 0034: builds API/Angular; 34 e2e en cuatro suites, 25 pruebas Angular y 9 unitarias API "
+  "en cuatro suites relevantes. Cubren revisiones simultáneas, aprobación/recepción concurrentes, "
+  "permisos/empresa, retirada explícita, historial de más de 50 cambios y replay de lote tras reprogramar. "
+  "No se ejecutó nuevamente toda la batería histórica ni se certificaron proveedores externos.")
+p("Continuación UX posterior a 0034: build Angular y 30 pruebas focalizadas en tres suites, "
+  "incluidas cinco regresiones de restauración, lecturas tardías y errores. El navegador comprobó "
+  "tres flujos y nueve combinaciones de ruta/ancho; una respuesta 503 de catálogo fue sintética "
+  "para probar recuperación, no una caída real del backend. La restauración de identidad y el reintento "
+  "consultaron la API real aislada. No se modificaron API, esquema ni datos operativos.")
+p("Cierre de los tres bloques de planificación: builds API/Angular, 42 pruebas e2e en tres suites "
+  "(recepciones parciales, decisiones de compra y SaaS para conservar el escape CSV compartido), "
+  "y 32 pruebas Angular en tres suites. Navegador real: tres flujos, tres anchos 375/768/1280, "
+  "descarga real y transición solicitud → orden sin doble conteo. Se interceptó un error 503 sintético "
+  "en planificación y otro en CSV; el reintento usó backend real aislado. No se reejecutó toda la batería histórica.")
+p("En el corte histórico previo se ejecutaron builds de API/Angular, 36 pruebas unitarias API, 78 e2e API y 61 de frontend. "
   "El navegador real comprobó login con Enter, dashboard de DB, carrito, checkout con aumento exacto "
   "de reserva, consentimiento, portal con revocación y diagnóstico sin tokens. También completó desde "
   "formularios dos recepciones parciales, contabilización, devolución a proveedor, retorno físico de venta posterior al crédito, "
@@ -1349,6 +1489,16 @@ bullets(["docs/DESPLIEGUE_LOCAL.md: arranque, entorno y operación segura.",
 p("Capturas: navegador Chrome con API y DB locales; solo el asistente usa respuestas mock explícitas. Se renovaron las imágenes "
   "antiguas; no se incluyen tokens visibles, contraseñas ni datos reales. Los conteos de demostración "
   "pueden variar tras repetir pruebas y no constituyen una plantilla de saldos iniciales.")
+p("Edición 3.19: tres bloques informativos de compras, capítulos 12.2–12.4: resumen exacto por destino/fecha, "
+  "solicitudes abiertas separadas de órdenes y CSV protegido. Captura nueva 42 sobre API/base aisladas, "
+  "sin migración ni descuento automático de tránsito. Conserva los procedimientos de la edición 3.18.")
+p("Edición 3.18: se documentan carga automática de Operaciones al restaurar sesión, indicador de carga "
+  "y recuperación mediante Actualizar. La figura 41 es nueva, con datos ficticios y backend aislado. "
+  "No se amplían roles, procesos comerciales ni permisos; las figuras de versiones anteriores conservan sus fechas.")
+p("Edición 3.17: se actualizaron vigencia predeterminada empresarial (0032), planificación opcional de compras "
+  "y reposición (0033) y reprogramación auditada (0034). Las figuras 39/40 son nuevas, con datos ficticios "
+  "y API/base aisladas, e ilustran un plan de orden parcial, su historial y recepción en ubicación distinta. "
+  "El detalle de límites y resultados de esta edición se conserva por separado de las pruebas históricas.")
 p("Edición 3.16: se actualizaron chat local de escritorio/móvil, configuración/consumo IA y agente "
   "con backend aislado y respuestas sintéticas: tres proveedores, cuatro consultas y 480 tokens. "
   "La figura del contador fue tomada tras las primeras tres; el diagnóstico del pedido fue real "

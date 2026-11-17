@@ -1,5 +1,81 @@
 # Estado del proyecto ERP360 modernizado
 
+## Corte verificado: 17 de noviembre de 2026
+
+El ERP sigue en desarrollo; los cierres de lotes de abajo describen el núcleo,
+no paridad completa con Odoo ni preparación para producción.
+
+- PostgreSQL `erp360-db` saludable, volumen existente conservado.
+- Tres bloques de planificación completados sin migración: resumen exacto de
+  compras por destino/fecha, solicitudes abiertas separadas de órdenes y CSV
+  autenticado. Disponible en Inventario → Reposición → Ver órdenes.
+  Total, grupos y documentos se leen en una misma instantánea; el CSV vuelve a
+  consultar. No se descuentan compromisos de la sugerencia ni se deduplican
+  automáticamente necesidades de distintas reglas/solicitudes.
+- Verificación nueva: builds API/Angular, 42 e2e en tres suites (incluida regresión
+  de CSV SaaS compartido), 32 Angular en tres suites; navegador real, tres flujos,
+  tres anchos, descarga real, errores 503 sintéticos y recuperación real.
+  Fixtures solo en copia restaurada aislada; copia/API temporales retiradas.
+- Manual vigente **3.19**, capítulos 12.2–12.4, captura nueva 42 y ayuda contextual.
+  Documentación consolidada al terminar los tres bloques. API ERP reiniciada;
+  huellas de seis conjuntos operativos preservadas (264/241/210 documentos,
+  1169 movimientos, 320 saldos, 893 asientos); otros proyectos sin cambios.
+- API `http://127.0.0.1:3001` y Angular `http://127.0.0.1:4201` iniciados
+  en segundo plano, restringidos a loopback. Readiness y proxy devuelven 200.
+  Bootstrap público deshabilitado. No se reiniciaron otros proyectos Docker.
+- Continuación UX: Operaciones carga catálogos y listados al restaurar la
+  sesión administradora, sin requerir Actualizar. Una generación de lectura
+  impide que cargas anteriores de listas/balance sobrescriban el estado local
+  o terminen la carga actual. Indicador y recuperación explícita ante error.
+  No modifica API, esquema, roles ni reglas de escritura.
+- Verificación UX: build Angular y 30 pruebas en tres suites, incluidas cinco
+  regresiones de sesión/balance; navegador real, tres flujos y nueve casos
+  responsive sin errores. Se reprodujo la restauración tardía y se comprobó
+  una consulta por endpoint/entrada. Fallo 503 sintético para probar el
+  reintento real. Fixtures solo en copia restaurada aislada.
+- Nueva migración `0032_quotation_default_validity.sql`: vigencia configurable
+  en Mi empresa, motivo/revisión/auditoría, 0 días inicialmente. Ventas permite
+  heredar la regla, elegir fecha o dejar una oferta explícitamente sin caducidad.
+  No se cambian ofertas existentes ni checkout.
+- Continuación `0033_purchase_delivery_plan.sql`: destino previsto y fecha
+  comprometida opcionales en solicitudes manuales y propuestas de reposición.
+  Se copian al aprobar, se muestran en compromisos y Recepciones, con aviso de
+  fecha superada para órdenes abiertas. La ubicación física real puede diferir
+  y se conserva junto con el plan en la auditoría del lote recibido.
+- Ya existían código y esquema de asistentes externos, tipos de cambio,
+  cuentas bancarias, reportes iniciales y pagos multimoneda hasta 0031.
+  No se consideran certificados ni completamente probados en este corte.
+- Continuación `0034_purchase_delivery_plan_revision.sql`: revisión independiente
+  del plan por solicitud/orden. Cambio explícito con motivo, antes/después y
+  actor, con historial de hasta 50 revisiones recientes y aviso de anteriores.
+  Solo documentos abiertos; coordina aprobación/recepción/cancelación sin
+  reescribir importes, existencias ni auditoría de lotes anteriores.
+- Verificación de 0034: builds, 34 e2e, 25 Angular y 9 unitarias API relevantes;
+  cuatro flujos reales y nueve combinaciones de estado/ruta/ancho sin errores.
+  Migración aplicada y health/proxy 200, bootstrap 403. Comparación de huellas
+  conserva 264 solicitudes, 241 órdenes, 210 recepciones, 1169 movimientos,
+  320 saldos y 893 asientos. Todas las revisiones históricas inician en cero.
+- Manual de usuario regenerado como edición 3.18: conserva procedimientos
+  0032–0034 y añade sección 4.1 sobre restauración, carga y errores, con
+  captura nueva de demostración. Ayuda contextual actualizada. DOCX verificado
+  en estructura, imágenes y contenido; sin revisión de toda la paginación en Word.
+- Verificación focalizada de 0033: builds API/Angular, 8 unitarias API, 28 e2e
+  en cuatro suites y 22 pruebas Angular. Navegador: tres flujos, nueve
+  combinaciones de ruta/ancho (375/768/1280), cero errores de página.
+  Las métricas anteriores de 0032 se conservan en la bitácora.
+- Respaldo custom previo a 0033 restaurado en una base separada; migración,
+  integración y UI probadas allí. La base temporal se retira al terminar.
+  No equivale a un simulacro productivo de recuperación con RPO/RTO.
+
+Continuidad vigente: [pendientes](PENDIENTES_DESARROLLO.md) y
+[bitácora](BITACORA_CONTINUIDAD.md). La visibilidad por destino/fecha y solicitudes
+ya está entregada; no confundirla con deduplicación transversal automática.
+Siguen pendientes definir esa política, almacenes autorizados y fechas por línea.
+La carga inicial de Operaciones ya se corrigió. Las políticas contables,
+monetarias y fiscales requieren definición antes de ampliar su efecto.
+
+## Registro histórico inicial (10 y 11 de noviembre)
+
 ## Fecha de inicio de ejecución
 
 - 2026-11-10
@@ -77,9 +153,10 @@
 - `docs/BACKLOG_COMPLEMENTARIO_ECOMMERCE.md`
 - `docs/ARQUITECTURA_ECOMMERCE_HEADLESS.md`
 
-## Próximo paso
+## Próximo paso propuesto en el cierre inicial (histórico)
 
-- Consolidar certificación oficial de conectores fiscales reales por país y preparar despliegue.
+- Se propuso certificar conectores fiscales. Sigue siendo una dependencia
+  externa; no sustituye los pendientes productivos del corte vigente.
 
 ## Validaciones ejecutadas
 

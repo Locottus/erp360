@@ -38,6 +38,8 @@ describe('Store checkout, fulfillment and self-service unsubscribe', () => {
   afterAll(async () => { await app.close(); });
 
   it('uses only MAIN and serializes repeated checkout without duplicate orders or reservations', async () => {
+    const db = app.get(DatabaseService);
+    await db.query('UPDATE companies SET quotation_validity_days=30 WHERE code=$1', [companyCode]);
     const catalog = await request(app.getHttpServer()).get(`/ecommerce/storefront/${companyCode}`).expect(200);
     expect(Number(catalog.body.products[0].available_stock)).toBe(20);
     const state = await cart();
@@ -47,6 +49,11 @@ describe('Store checkout, fulfillment and self-service unsubscribe', () => {
     expect(results[0].body.orderId).toBe(results[1].body.orderId);
     expect(results[0].body.orderNumber).toBe(results[1].body.orderNumber);
     expect(results[0].body.grandTotal).toBe(results[1].body.grandTotal);
+    const quote = await db.query(
+      `SELECT q.valid_until FROM sales_quotations q JOIN sales_orders o ON o.quotation_id=q.id WHERE o.id=$1`,
+      [results[0].body.orderId],
+    );
+    expect(quote.rows).toEqual([{ valid_until: null }]);
     await publicPost(`/carts/${state.cartId}/items`, { listingId, quantity: 3 }).set('x-cart-token', state.cartToken).expect(400);
     const balances = await request(app.getHttpServer()).get('/inventory/stock?locationCode=MAIN').auth(token, { type: 'bearer' }).expect(200);
     expect(Number(balances.body[0].reserved)).toBe(2);

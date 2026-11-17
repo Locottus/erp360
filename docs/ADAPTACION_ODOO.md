@@ -1,6 +1,6 @@
 # Adaptación de procesos Odoo a ERP360
 
-Fecha: 11 de noviembre de 2026.
+Fecha: 17 de noviembre de 2026.
 
 ## Alcance y método
 
@@ -13,7 +13,200 @@ implementaciones, recursos, interfaz ni marcas a ERP360.
 
 Las adaptaciones cubren vigencia/revisión de cotizaciones y visibilidad de
 compras pendientes para reposición, además de aprobación independiente
-configurable. No significa que todo Odoo se haya portado.
+configurable, planificación opcional de entrega y reprogramación auditada. No significa que todo Odoo
+se haya portado.
+
+## Tres bloques: planificación, solicitudes abiertas y CSV
+
+Evidencia estática adicional en el paquete suministrado:
+
+- `odoo/addons/purchase_stock/models/product.py:164`,
+  `_get_quantity_in_progress`, agrupa compras por producto, unidad, origen de
+  reposición y ubicación prevista. `:190`, `_get_lines_domain`, contempla
+  RFQ draft/sent/to approve y filtros de ubicación/almacén.
+- `odoo/addons/purchase_stock/models/stock.py:354`,
+  `_quantity_in_progress`, relaciona la cantidad en proceso con las reglas.
+
+Se observó la separación entre documentos abiertos, su origen y su destino;
+no se copió la implementación ni se ejecutó Odoo. ERP360 conserva una diferencia
+deliberada: no incorpora RFQ/solicitudes ni tránsito a la sugerencia de reposición.
+No se infiere que el origen sea destino ni se incorporan almacenes, unidades,
+previsiones o plazos que el modelo propio no implementa.
+
+Implementación propia:
+
+1. `purchase-planning` reutiliza los CTE de compromisos existentes. Total exacto,
+   grupos destino/fecha y documentos en una sola sentencia SQL. Cada orden/producto
+   se agrega una vez; anomalías conocidas se excluyen y se explican. Destino/fecha
+   nulos permanecen desconocidos. Fecha superada usa hoy UTC inclusivo.
+2. Solicitudes draft/submitted sin orden: cantidades agregadas por producto y
+   documento, manuales/propuestas de todas las reglas, origen independiente.
+   Cantidad no aprobada separada; no se suma a órdenes. Aprobación concurrente
+   ve una instantánea anterior o posterior, no ambas representaciones.
+3. CSV por producto autenticado, una fila por documento y columnas separadas.
+   Consulta nueva; no contiene filas de totales. Reutiliza el escape CSV extraído
+   del mecanismo ya existente de SaaS, sin cambiar su resultado. Exportación
+   propia de ERP360: no se atribuye a un comportamiento observado en Odoo.
+
+Sin migración o cambio contable. Permisos admin y empresa autenticada en JSON/CSV.
+42 e2e/32 Angular, builds y tres flujos reales en base aislada; evidencia
+[propia](manual/purchase-planning-evidence.json), captura y manual 3.19.
+Las dos respuestas 503 de recuperación fueron sintéticas, no fallos reales de Odoo
+ni del backend aislado. No se usaron fuentes de terceros.
+
+## Continuación UX: restauración de Operaciones
+
+Este bloque corrige el ciclo de carga del frontend propio; no añade una
+función de Odoo ni deriva requisitos nuevos de su código. La consulta en
+`ngOnInit` ocurría antes de recibir la identidad restaurada, por lo que faltaba
+una reacción posterior al cambio de sesión.
+
+Se reutilizó el patrón local de `effect`/`untracked` de Catálogos/Workspace,
+más generación de lectura e identidad para listas/balance. Referencias
+oficiales consultadas: [Angular effect](https://angular.dev/api/core/effect)
+y [Angular untracked](https://angular.dev/api/core/untracked).
+No se introdujo una biblioteca nueva ni se ejecutó Odoo/REA para este arreglo
+de código fuente completo.
+
+Prueba anterior al arreglo: cuatro regresiones fallaban. Validación final:
+30 pruebas Angular en tres suites, build y tres flujos de navegador aislado,
+incluyendo restauración retenida hasta montar la pantalla, ausencia de
+consultas duplicadas, error 503 sintético con reintento real y acceso denegado
+a rol no administrador. Manual Word 3.18 y ayuda contextual actualizados.
+Ver [evidencia propia](manual/operations-session-evidence.json).
+
+## Reprogramación auditada de compras (0034)
+
+Evidencia estática: en la fuente suministrada,
+`odoo/addons/purchase/models/purchase_order.py:1361`
+(`_update_date_planned_for_lines`) actualiza fechas por línea y crea/actualiza
+una actividad. En `:1377` (`_create_update_date_activity`) conserva una nota
+del cambio de fecha. Se observó el concepto, no se ejecutó ni copió el código.
+
+Como contraste oficial público se consultó la
+[documentación de Odoo 19.0 sobre solicitudes de cotización](https://www.odoo.com/documentation/19.0/applications/inventory_and_mrp/purchase/manage_deals/rfq.html)
+el 17 de noviembre de 2026: distingue llegada prevista, operación de recepción
+y comunicaciones/actividades de la compra. Esa página es de **19.0**, no prueba
+la procedencia del paquete local ni equivalencia con la versión suministrada.
+No se usaron blogs, fuentes de terceros ni recursos gráficos/textos de Odoo.
+
+Implementación propia, más acotada:
+
+- Migración `0034_purchase_delivery_plan_revision.sql`: revisión cero por
+  solicitud y orden; independiente de otras revisiones/políticas.
+- GET/PATCH `commerce/purchases/requests/:id/delivery-plan` y
+  `commerce/purchases/orders/:id/delivery-plan`. Lectura admin/purchases;
+  edición solo admin, siempre por empresa autenticada.
+- PATCH exige ambos campos del plan explícitos (null permite retirarlos),
+  `expectedRevision` y `reason` validado de 10 a 1000 caracteres.
+  Reutiliza normalización de 0033 y validadores comunes. Omisiones/invalidación
+  son 400; versión obsoleta, sin cambios o estado cerrado son 409.
+- Bloquea la misma fila que aprobación, cancelación y recepción. Solo solicitudes
+  draft/submitted y órdenes ordered/partially_received. Actualiza plan/revisión
+  y registra antes/después, actor y motivo en la misma transacción.
+- Aprobar copia el plan vigente y audita la revisión de solicitud usada;
+  la orden comienza su propia revisión cero. Editar luego la orden no cambia
+  solicitud ni condiciones económicas.
+- GET obtiene plan e historial en una instantánea SQL. Devuelve las últimas
+  50 reprogramaciones ordenadas por revisión, y `history_has_more` explícito.
+  El límite de pantalla no borra el registro completo.
+- La auditoría de recepciones nuevas conserva la revisión del plan usada.
+  No se cambió su payload idempotente `{orderId,locationCode,lines}` ni los
+  lotes/auditorías anteriores. El lugar real sigue siendo decisión física.
+- UI y manual 3.17 explican retiro explícito, aprobación separada, historial,
+  conflictos y estados de consulta.
+
+No implementa fecha por línea, actividades/correos al proveedor, calendario,
+rutas ni reprogramación automática de movimientos de Odoo. No certifica
+equivalencia. Builds y pruebas: 34 e2e, 25 Angular y 9 unitarias relevantes;
+cuatro flujos de navegador aislado, nueve comprobaciones responsive.
+Ver [evidencia propia](manual/purchase-rescheduling-evidence.json).
+
+## Planificación de entrega de compras (0033)
+
+Observación estática de la fuente suministrada:
+`odoo/addons/purchase/models/purchase_order.py:136` declara `date_planned`
+como llegada esperada y en `:259` deriva la fecha a partir de líneas.
+`odoo/addons/purchase_stock/models/purchase_order.py:23` vincula la entrega
+con un tipo de operación; en `:355` resuelve la ubicación destino desde esa
+operación o la dirección dropship. No se ejecutó Odoo ni se autenticó la
+procedencia del paquete local; no se copió su implementación.
+
+ERP360 incorpora un plan más acotado y propio:
+
+- Migración `0033_purchase_delivery_plan.sql` con campos opcionales en la
+  cabecera de solicitud y orden, sin modificar históricos.
+- `POST /commerce/purchases/requests` y
+  `POST /inventory/replenishment/:productId/proposals` aceptan
+  `destinationLocationCode` y `expectedReceiptDate`. Omitir o null permite
+  plan incompleto. Texto vacío/controles, destino normalizado superior a 32
+  caracteres y fecha inválida se rechazan con 400.
+- La fecha es DATE ISO, sin hora, referida a UTC para el indicador. Se admiten
+  fechas pasadas; no son caducidad ni impiden aprobar o recibir.
+- Aprobar copia el plan bajo bloqueo de la solicitud, junto con importes y
+  líneas, y registra los valores aprobados. No cambia roles ni segregación.
+- Las lecturas de solicitudes y el detalle de recepción exponen
+  `destination_location_code` y `expected_receipt_date` como texto/null.
+  La lista también distingue `order_destination_location_code` y
+  `order_expected_receipt_date` de la solicitud. `is_receipt_overdue` es
+  derivado: fecha anterior a hoy UTC y orden ordered/partially_received.
+- Compromisos por producto muestran destino, fecha y aviso por orden abierta,
+  sin cambiar las cantidades exactas ni los criterios de exclusión históricos.
+- La ubicación de la regla sigue siendo origen informativo, no destino.
+  Recepciones sugiere el destino declarado, admite otro lugar real con aviso,
+  y registra plan/real en la auditoría del lote; la orden no se reescribe.
+
+No hay equivalencia con rutas/almacenes, dropship, plazos del proveedor,
+fechas por línea, calendarios ni reprogramación Odoo. No se infiere confirmación
+del proveedor. Los códigos de ubicación son lógicos, no un catálogo validado.
+No se asignan existencias por escribir un plan ni se descuenta tránsito de
+reposición. No se amplía contabilidad.
+
+Verificación focalizada: fechas estrictas/inclusivas, normalización, null,
+rechazo sin escrituras, permisos/tenant, copia de propuestas y separación del
+origen, auditoría, replay concurrente de lote recibido en destino diferente,
+estados parcial/completo/cancelado, conservación histórica y formularios.
+Ver [bitácora](BITACORA_CONTINUIDAD.md) y
+[evidencia visual](manual/purchase-plan-evidence.json).
+
+## Vigencia predeterminada por empresa (0032)
+
+Observación estática de la fuente suministrada:
+`odoo/addons/sale/models/res_company.py:30` impide días negativos y en
+`:44` declara `quotation_validity_days`, con 30 por defecto y 0 para
+desactivar. `odoo/addons/sale/models/sale_order.py:551` calcula la fecha
+contextual actual más esos días si son positivos. No se ejecutó Odoo ni se
+verificó criptográficamente la procedencia de esta copia; no se copió código.
+
+Implementación independiente en ERP360:
+
+- Migración aditiva `0032_quotation_default_validity.sql` añade días enteros
+  0–3650. Se inicia en **0**, no en 30, para no imponer vigencia a clientes
+  existentes. El máximo es un límite propio, no una regla observada en Odoo.
+- `GET /companies/current` y la lectura por ID propio exponen
+  `quotation_validity_days`. `PATCH /companies/current` permite
+  `quotationValidityDays` opcional con los campos y permisos administrativos
+  existentes. Omitir conserva; null, texto, fracciones o fuera de rango
+  devuelven 400. Mantiene motivo, revisión y auditoría antes/después.
+- `POST /commerce/sales/quotations`: omitir `validUntil` aplica hoy **UTC**
+  más los días, o null con 0; null explícito siempre deja sin fecha.
+  Una fecha explícita conserva validación estricta y prioridad.
+  La fecha es inclusiva, como en la adaptación previa.
+- Mi empresa configura los días y Operaciones distingue heredar sin fecha,
+  fecha específica y casilla **Sin caducidad para esta oferta**.
+- La política se lee bajo bloqueo compartido en la transacción creadora.
+  Un cambio empresarial concurrente bloqueado se observa al confirmarse;
+  no se calcula el valor en el navegador ni mediante un reloj distinto.
+- El valor queda guardado en cada cotización y su auditoría. Cambiar la
+  política no reescribe ofertas ni precios; revisar una oferta sigue usando
+  su endpoint revisionado. Checkout tiene su flujo directo sin esta vigencia.
+
+Comprobaciones focalizadas: entradas inválidas y límites, omisión/null/fecha,
+tenant/rol, cambios concurrentes, auditoría, conservación de históricos,
+compatibilidad de edición empresarial sin el campo y checkout con 30 días
+activados. UI automatizada y navegador real contra copia aislada restaurada.
+REA captura solo el login público del ambiente, no el comportamiento de Odoo;
+ver [bitácora de este corte](BITACORA_CONTINUIDAD.md).
 
 ## Compras: aprobación independiente configurable
 
@@ -50,6 +243,9 @@ con auditoría: no equivale a una política inmutable ni a segregación completa
 de funciones para producción.
 
 ## Compras pendientes y reposición: segunda adaptación
+
+Descripción del corte 0026; 0033 incorpora posteriormente destino/fecha
+opcionales, sin cambiar el cálculo empresarial aquí descrito.
 
 Observación estática: `odoo/addons/stock/models/stock_orderpoint.py:409`
 calcula cantidad pronosticada con disponibilidad virtual y cantidad en progreso,

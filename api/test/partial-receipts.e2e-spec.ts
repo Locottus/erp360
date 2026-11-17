@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '../src/app.module';
 import { DatabaseService } from '../src/common/database.service';
+import type { PurchasePlanning } from '../src/inventory/inventory.types';
 
 type Details = {
   order: { status: string };
@@ -62,6 +63,56 @@ describe('Partial purchase receipts and supplier returns', () => {
   });
   afterAll(async () => { await app.close(); });
 
+  it('groups an exact planning snapshot without double counting repeated lines, unknown plans or anomalies', async () => {
+    const product = (await post('/masters/products', { sku: 'PLANNING', name: 'Planning product', unitPrice: 1 }).expect(201)).body.id;
+    const createOrder = async (number: string, quantity: number, destination?: string, date?: string) => {
+      const pr = await post('/commerce/purchases/requests', {
+        requestNumber: number, supplierId, destinationLocationCode: destination, expectedReceiptDate: date,
+        lines: [{ productId: product, quantity, unitCost: 1 }, { productId: product, quantity: 0.0001, unitCost: 1 }],
+      }).expect(201);
+      return (await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: number }).expect(201)).body.purchaseOrderId as string;
+    };
+    const dated = await createOrder('PLAN-GROUP-A', 2, 'WH-A', '2000-01-01');
+    const cancellable = await createOrder('PLAN-GROUP-B', 1, 'WH-A', '2000-01-01');
+    await createOrder('PLAN-GROUP-UNKNOWN', 3);
+    const legacy = await createOrder('PLAN-GROUP-LEGACY', 8, 'WH-B');
+    await db.query(`INSERT INTO purchase_receipts(company_id,purchase_order_id,receipt_number)
+      VALUES($1,$2,'PLAN-GROUP-LEGACY')`, [companyId, legacy]);
+    const currentLine = (await get(`/inventory/purchases/orders/${dated}/receipts`).expect(200)).body.lines
+      .find((line: { quantity: string }) => line.quantity === '2.0000').id;
+    await post(`/inventory/purchases/orders/${dated}/receipts`, {
+      reference: 'PLAN-GROUP-PARTIAL', locationCode: 'ACTUAL', lines: [{ lineId: currentLine, quantity: 0.5 }],
+    }).expect(201);
+    const url = `/inventory/replenishment/${product}/purchase-planning`;
+    const plan: PurchasePlanning = (await get(url).expect(200)).body;
+    expect(plan).toMatchObject({ pending_quantity: '5.5003', pending_orders: 3, review_orders: 1,
+      open_request_quantity: '0.0000', open_requests: 0 });
+    expect(plan.groups).toEqual([
+      { destination_location_code: 'WH-A', expected_receipt_date: '2000-01-01', is_receipt_overdue: true,
+        pending_quantity: '2.5002', pending_orders: 2, review_orders: 0 },
+      { destination_location_code: 'WH-B', expected_receipt_date: null, is_receipt_overdue: false,
+        pending_quantity: '0.0000', pending_orders: 0, review_orders: 1 },
+      { destination_location_code: null, expected_receipt_date: null, is_receipt_overdue: false,
+        pending_quantity: '3.0001', pending_orders: 1, review_orders: 0 },
+    ]);
+    expect(plan.orders).toHaveLength(4);
+    expect(plan.orders.find(row => row.order_id === legacy)?.pending_quantity).toBeNull();
+    const csv = await get(`${url}.csv`).expect(200);
+    const excludedRow = csv.text.split('\r\n').find((row: string) => row.includes('"PLAN-GROUP-LEGACY"'));
+    expect(excludedRow).toContain('"","",\"true\",\"false\",\"true\"');
+    await request(app.getHttpServer()).get(url).auth(otherToken, { type: 'bearer' }).expect(404);
+    await request(app.getHttpServer()).get(url).expect(401);
+    await get('/inventory/replenishment/not-a-uuid/purchase-planning').expect(400);
+    await request(app.getHttpServer()).patch(`/commerce/purchases/orders/${dated}/delivery-plan`).auth(token, { type: 'bearer' })
+      .send({ destinationLocationCode: 'WH-C', expectedReceiptDate: null, expectedRevision: 0,
+        reason: 'Reviewed planning destination change' }).expect(200);
+    const replanned: PurchasePlanning = (await get(url).expect(200)).body;
+    expect(replanned.pending_quantity).toBe(plan.pending_quantity);
+    expect(replanned.groups.find(row => row.destination_location_code === 'WH-C')).toMatchObject({ pending_quantity: '1.5001' });
+    await post(`/commerce/purchases/orders/${cancellable}/cancel`, { reason: 'Cancel unreceived planned order' }).expect(201);
+    expect((await get(url).expect(200)).body).toMatchObject({ pending_quantity: '4.5002', pending_orders: 2, review_orders: 1 });
+  });
+
   it('rejects invalid quantities, duplicate lines and cross-tenant access without writes', async () => {
     expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '5.0000', pending_purchase_orders: 1,
       purchase_orders_requiring_review: 0, on_hand: '0', suggested_quantity: '6.0000' });
@@ -89,7 +140,7 @@ describe('Partial purchase receipts and supplier returns', () => {
 
   it('counts multiple lines once per order and removes commitments on cancellation', async () => {
     const pr = await post('/commerce/purchases/requests', {
-      requestNumber: 'PR-CANCEL', supplierId, lines: [
+      requestNumber: 'PR-CANCEL', supplierId, destinationLocationCode: 'DOCK', expectedReceiptDate: '2000-01-01', lines: [
         { productId, quantity: 0.0001, unitCost: 1 },
         { productId, quantity: 1, unitCost: 1 },
       ],
@@ -99,6 +150,8 @@ describe('Partial purchase receipts and supplier returns', () => {
     expect((await get(commitmentPath(productId)).expect(200)).body).toHaveLength(2);
     await post(`/commerce/purchases/orders/${order.body.purchaseOrderId}/cancel`,
       { reason: 'Supplier order cancelled for fixture' }).expect(201);
+    expect((await get(`/inventory/purchases/orders/${order.body.purchaseOrderId}/receipts`).expect(200)).body.order)
+      .toMatchObject({ destination_location_code: 'DOCK', expected_receipt_date: '2000-01-01', is_receipt_overdue: false });
     expect(await replenishment()).toMatchObject({ pending_purchase_quantity: '5.0000', pending_purchase_orders: 1 });
     expect((await get(commitmentPath(productId)).expect(200)).body).toHaveLength(1);
   });
@@ -308,6 +361,150 @@ describe('Partial purchase receipts and supplier returns', () => {
     expect(payable.total_refunded).toBe('3.3333');
     await post(`/accounting/purchase-orders/${orderId}/payments`, { paymentReference: 'STILL-CREDIT', amount: 1 }).expect(400);
     expect(await stock()).toBe(1);
+  });
+
+  it('rejects invalid planning without writes and keeps missing planning explicitly unknown', async () => {
+    const path = '/commerce/purchases/requests';
+    const input = { requestNumber: 'PLAN-INVALID', supplierId, lines: [{ productId, quantity: 1, unitCost: 1 }] };
+    for (const extra of [
+      { destinationLocationCode: '' }, { destinationLocationCode: '   ' }, { destinationLocationCode: 123 },
+      { destinationLocationCode: 'a'.repeat(33) }, { destinationLocationCode: 'WH\u007fB' },
+      { expectedReceiptDate: '' }, { expectedReceiptDate: '2026-02-30' }, { expectedReceiptDate: 123 },
+      { expectedReceiptDate: '2026-1-01' }, { expectedReceiptDate: '0000-01-01' },
+    ]) await post(path, { ...input, ...extra }).expect(400);
+    expect((await db.query(`SELECT id FROM purchase_requests WHERE company_id=$1 AND request_number='PLAN-INVALID'`, [companyId])).rows).toEqual([]);
+    const unplanned = await post(path, { ...input, destinationLocationCode: null, expectedReceiptDate: null }).expect(201);
+    expect(unplanned.body).toMatchObject({ destinationLocationCode: null, expectedReceiptDate: null });
+    const original = (await get(`/inventory/purchases/orders/${orderId}/receipts`).expect(200)).body;
+    expect(original.order).toMatchObject({ destination_location_code: null, expected_receipt_date: null, is_receipt_overdue: false });
+  });
+
+  it('snapshots planning through approval and receipts, but always records actual location and open overdue status', async () => {
+    const product = (await post('/masters/products', { sku: 'PLAN', name: 'Planned receipt product', unitPrice: 1 }).expect(201)).body;
+    const dates = (await db.query<{ today: string; yesterday: string }>(
+      `SELECT (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date::text AS today,
+        ((CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date-1)::text AS yesterday`)).rows[0];
+    const pr = await post('/commerce/purchases/requests', {
+      requestNumber: 'PLAN-PR', supplierId, destinationLocationCode: ' wh-b ', expectedReceiptDate: dates.yesterday,
+      lines: [{ productId: product.id, quantity: 2, unitCost: 3.1234 }],
+    }).expect(201);
+    expect(pr.body).toMatchObject({ destinationLocationCode: 'WH-B', expectedReceiptDate: dates.yesterday });
+    const detailPath = `/commerce/purchases/requests/${pr.body.id}`;
+    expect((await get(detailPath).expect(200)).body).toMatchObject({
+      destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday,
+    });
+    await request(app.getHttpServer()).get(detailPath).auth(otherToken, { type: 'bearer' }).expect(404);
+    const email = `receipt-employee-${suffix}@example.test`;
+    const employee = await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'ReceiptsTest123!' }).expect(201);
+    await request(app.getHttpServer()).post('/commerce/purchases/requests').auth(employee.body.access_token, { type: 'bearer' })
+      .send({ requestNumber: 'FORBIDDEN-PLAN', supplierId, destinationLocationCode: 'OTHER', expectedReceiptDate: dates.today,
+        lines: [{ productId: product.id, quantity: 1, unitCost: 1 }] }).expect(403);
+    const ordered = await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: 'PLAN-PO' }).expect(201);
+    const id = ordered.body.purchaseOrderId;
+    const endpoint = `/inventory/purchases/orders/${id}/receipts`;
+    const before = (await get(endpoint).expect(200)).body;
+    expect(before.order).toMatchObject({ destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday, is_receipt_overdue: true });
+    const commitment = () => get(commitmentPath(product.id));
+    expect((await commitment().expect(200)).body).toMatchObject([{
+      order_id: id, destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday,
+      is_receipt_overdue: true, pending_quantity: '2.0000',
+    }]);
+    const batch = { reference: 'PLAN-RCV-1', locationCode: 'actual dock', lines: [{ lineId: before.lines[0].id, quantity: 1 }] };
+    const responses = await Promise.all([post(endpoint, batch), post(endpoint, batch)]);
+    expect(responses.map(r => r.status)).toEqual([201, 201]);
+    expect(responses.map(r => r.body.replayed).sort()).toEqual([false, true]);
+    const partial = (await get(endpoint).expect(200)).body;
+    expect(partial.order).toMatchObject({ destination_location_code: 'WH-B', is_receipt_overdue: true });
+    expect(partial.receipts).toMatchObject([{ location_code: 'ACTUAL DOCK', quantity: '1.0000', unit_cost: '3.1234' }]);
+    expect((await commitment().expect(200)).body).toMatchObject([{ pending_quantity: '1.0000', destination_location_code: 'WH-B' }]);
+    const audit = await db.query(`SELECT payload FROM audit_log
+      WHERE company_id=$1 AND entity_id=$2 AND event_name='inventory.purchase.partial.receive'`,
+      [companyId, responses[0].body.receiptId]);
+    expect(audit.rows).toHaveLength(1);
+    expect(audit.rows[0].payload).toMatchObject({ locationCode: 'ACTUAL DOCK', planned_destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday });
+    const creationAudit = await db.query(`SELECT event_name,payload FROM audit_log
+      WHERE company_id=$1 AND entity_id=$2 AND event_name IN ('commerce.purchase.request.create','commerce.purchase.request.approve')`,
+      [companyId, pr.body.id]);
+    expect(creationAudit.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event_name: 'commerce.purchase.request.create', payload: expect.objectContaining({ destinationLocationCode: 'WH-B', expectedReceiptDate: dates.yesterday }) }),
+      expect.objectContaining({ event_name: 'commerce.purchase.request.approve', payload: expect.objectContaining({ destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday }) }),
+    ]));
+    const currentDay = await post('/commerce/purchases/requests', {
+      requestNumber: 'PLAN-TODAY', supplierId, expectedReceiptDate: dates.today, lines: [{ productId: product.id, quantity: 1, unitCost: 1 }],
+    }).expect(201);
+    const currentOrder = await post(`/commerce/purchases/requests/${currentDay.body.id}/approve`, { orderNumber: 'PLAN-TODAY-PO' }).expect(201);
+    expect((await get(`/inventory/purchases/orders/${currentOrder.body.purchaseOrderId}/receipts`).expect(200)).body.order.is_receipt_overdue).toBe(false);
+    await post(endpoint, { ...batch, reference: 'PLAN-RCV-2' }).expect(201);
+    expect((await get(endpoint).expect(200)).body.order).toMatchObject({
+      status: 'received', destination_location_code: 'WH-B', expected_receipt_date: dates.yesterday, is_receipt_overdue: false,
+    });
+    const listed = (await get('/commerce/purchases/requests').expect(200)).body.find((row: { id: string }) => row.id === pr.body.id);
+    expect(listed).toMatchObject({ destination_location_code: 'WH-B', order_destination_location_code: 'WH-B',
+      order_expected_receipt_date: dates.yesterday, is_receipt_overdue: false });
+    expect((await commitment().expect(200)).body.some((row: { order_id: string }) => row.order_id === id)).toBe(false);
+    const stock = await db.query('SELECT location_code,on_hand::text FROM inventory_stock_balances WHERE company_id=$1 AND product_id=$2', [companyId, product.id]);
+    expect(stock.rows).toEqual([{ location_code: 'ACTUAL DOCK', on_hand: '2.0000' }]);
+  });
+
+  it('reschedules a partial order without changing receipt replay, historical audit or physical stock', async () => {
+    const product = (await post('/masters/products', { sku: 'REPLAN', name: 'Replanned product', unitPrice: 1 }).expect(201)).body;
+    const pr = await post('/commerce/purchases/requests', {
+      requestNumber: 'REPLAN-PR', supplierId, destinationLocationCode: 'PLAN-A', expectedReceiptDate: '2000-01-01',
+      lines: [{ productId: product.id, quantity: 2, unitCost: 3 }],
+    }).expect(201);
+    const order = (await post(`/commerce/purchases/requests/${pr.body.id}/approve`, { orderNumber: 'REPLAN-PO' }).expect(201)).body.purchaseOrderId;
+    const endpoint = `/inventory/purchases/orders/${order}/receipts`;
+    const initial = (await get(endpoint).expect(200)).body;
+    const batch = { reference: 'REPLAN-RCV-1', locationCode: 'ACTUAL-A', lines: [{ lineId: initial.lines[0].id, quantity: 1 }] };
+    const receipt = (await post(endpoint, batch).expect(201)).body;
+    const audit = async () => (await db.query(`SELECT payload FROM audit_log
+      WHERE entity_id=$1 AND event_name='inventory.purchase.partial.receive'`, [receipt.receiptId])).rows[0].payload;
+    const before = await audit();
+    expect(before).toMatchObject({ delivery_plan_revision: 0, planned_destination_location_code: 'PLAN-A' });
+    const revise = (expectedRevision: number) => request(app.getHttpServer()).patch(`/commerce/purchases/orders/${order}/delivery-plan`)
+      .auth(token, { type: 'bearer' }).send({ destinationLocationCode: 'PLAN-B', expectedReceiptDate: '2099-01-01',
+        expectedRevision, reason: 'New supplier delivery commitment' });
+    await revise(0).expect(200);
+    expect((await post(endpoint, batch).expect(201)).body).toEqual({ receiptId: receipt.receiptId, replayed: true });
+    expect(await audit()).toEqual(before);
+    const partial = (await get(endpoint).expect(200)).body;
+    expect(partial.order).toMatchObject({ status: 'partially_received', destination_location_code: 'PLAN-B',
+      expected_receipt_date: '2099-01-01', delivery_plan_revision: 1, is_receipt_overdue: false });
+    expect(partial.receipts).toHaveLength(1);
+    expect(partial.receipts[0]).toMatchObject({ quantity: '1.0000', location_code: 'ACTUAL-A' });
+    const next = (await post(endpoint, { ...batch, reference: 'REPLAN-RCV-2', locationCode: 'ACTUAL-B' }).expect(201)).body;
+    const nextAudit = await db.query(`SELECT payload FROM audit_log WHERE entity_id=$1
+      AND event_name='inventory.purchase.partial.receive'`, [next.receiptId]);
+    expect(nextAudit.rows[0].payload).toMatchObject({ delivery_plan_revision: 1,
+      planned_destination_location_code: 'PLAN-B', expected_receipt_date: '2099-01-01', locationCode: 'ACTUAL-B' });
+    await revise(1).expect(409);
+    expect((await db.query(`SELECT location_code,on_hand::text FROM inventory_stock_balances
+      WHERE company_id=$1 AND product_id=$2 ORDER BY location_code`, [companyId, product.id])).rows).toEqual([
+      { location_code: 'ACTUAL-A', on_hand: '1.0000' }, { location_code: 'ACTUAL-B', on_hand: '1.0000' },
+    ]);
+  });
+
+  it('serializes final receipt against rescheduling and audits the exact committed plan', async () => {
+    const pr = await post('/commerce/purchases/requests', { requestNumber: 'REPLAN-RACE-PR', supplierId,
+      destinationLocationCode: 'OLD', lines: [{ productId, quantity: 1, unitCost: 1 }] }).expect(201);
+    const order = (await post(`/commerce/purchases/requests/${pr.body.id}/approve`,
+      { orderNumber: 'REPLAN-RACE-PO' }).expect(201)).body.purchaseOrderId;
+    const endpoint = `/inventory/purchases/orders/${order}/receipts`;
+    const line = (await get(endpoint).expect(200)).body.lines[0].id;
+    const [revised, receipt] = await Promise.all([
+      request(app.getHttpServer()).patch(`/commerce/purchases/orders/${order}/delivery-plan`).auth(token, { type: 'bearer' })
+        .send({ destinationLocationCode: 'NEW', expectedReceiptDate: null, expectedRevision: 0, reason: 'Concurrent supplier plan update' }),
+      post(endpoint, { reference: 'REPLAN-RACE-RCV', locationCode: 'RACE-ACTUAL', lines: [{ lineId: line, quantity: 1 }] }),
+    ]);
+    expect(receipt.status).toBe(201);
+    expect([200, 409]).toContain(revised.status);
+    const audit = await db.query(`SELECT payload FROM audit_log WHERE entity_id=$1
+      AND event_name='inventory.purchase.partial.receive'`, [receipt.body.receiptId]);
+    expect(audit.rows[0].payload).toMatchObject({
+      planned_destination_location_code: revised.status === 200 ? 'NEW' : 'OLD',
+      delivery_plan_revision: revised.status === 200 ? 1 : 0, locationCode: 'RACE-ACTUAL',
+    });
+    expect((await get(endpoint).expect(200)).body.order.status).toBe('received');
   });
 
   it('serializes competing recoveries at the exact remaining credit and never alters original documents', async () => {

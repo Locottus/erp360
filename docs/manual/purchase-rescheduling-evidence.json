@@ -1,0 +1,70 @@
+{
+  "capturedAt": "2026-11-17T19:21:48.578Z",
+  "database": "erp360_validation_0034_71fe43ec",
+  "frontend": "http://127.0.0.1:4201",
+  "backend": "http://127.0.0.1:3011",
+  "isolation": "Browser /api redirected to isolated validation API; no operational records changed",
+  "flows": [
+    "Manual request created through UI, rescheduled with confirmation/reason/revision, then approved with latest plan snapshot",
+    "Approved order plan independently rescheduled; real partial receipt suggested plan but recorded different physical location and revision1 snapshot",
+    "Partial-order plan explicitly cleared with revision2; history preserves before/after; original receipt audit and identical replay remain unchanged",
+    "Stale UI revision rejected409 after concurrent API change; explicit reload restores current values; completed order retains readable history without edit controls"
+  ],
+  "responsive": [
+    {
+      "route": "/receiving",
+      "state": "partial-order-planning-and-actual-location",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/receiving",
+      "state": "partial-order-planning-and-actual-location",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/receiving",
+      "state": "partial-order-planning-and-actual-location",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "partial-order-rescheduling-history",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "partial-order-rescheduling-history",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "partial-order-rescheduling-history",
+      "width": 1280,
+      "scrollWidth": 1280
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "closed-order-history-read-only",
+      "width": 375,
+      "scrollWidth": 375
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "closed-order-history-read-only",
+      "width": 768,
+      "scrollWidth": 768
+    },
+    {
+      "route": "/operations?tab=purchases",
+      "state": "closed-order-history-read-only",
+      "width": 1280,
+      "scrollWidth": 1280
+    }
+  ],
+  "pageErrors": 0
+}

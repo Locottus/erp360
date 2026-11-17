@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SaasService = void 0;
 const common_1 = require("@nestjs/common");
 const database_service_1 = require("../common/database.service");
+const csv_1 = require("../common/csv");
 const saas_inputs_1 = require("./saas-inputs");
 const MODULE_NAMES = {
     base: 'Base por empresa',
@@ -522,16 +523,8 @@ let SaasService = class SaasService {
             'next_followup',
             'followup_overdue',
         ];
-        const csvCell = (value) => {
-            let text = value === null || value === undefined ? '' : String(value);
-            text = text.replace(/[\r\n\t]/g, ' ');
-            if (/^[\s]*[=+\-@]/.test(text)) {
-                text = `'${text}`;
-            }
-            return `"${text.replace(/"/g, '""')}"`;
-        };
         const lines = [
-            headers.map(csvCell).join(','),
+            headers.map(csv_1.csvCell).join(','),
             ...report.clients.map((client) => [
                 client.id,
                 client.name,
@@ -547,7 +540,7 @@ let SaasService = class SaasService {
                     : '',
                 client.followup_overdue,
             ]
-                .map(csvCell)
+                .map(csv_1.csvCell)
                 .join(',')),
         ];
         return `\uFEFF${lines.join('\r\n')}`;

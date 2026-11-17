@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { DatabaseService } from '../common/database.service';
+import { csvCell } from '../common/csv';
 import type { AuthTokenPayload } from '../auth/auth.types';
 import {
   objectInput,
@@ -649,14 +650,6 @@ export class SaasService {
       'next_followup',
       'followup_overdue',
     ];
-    const csvCell = (value: unknown) => {
-      let text = value === null || value === undefined ? '' : String(value);
-      text = text.replace(/[\r\n\t]/g, ' ');
-      if (/^[\s]*[=+\-@]/.test(text)) {
-        text = `'${text}`;
-      }
-      return `"${text.replace(/"/g, '""')}"`;
-    };
     const lines = [
       headers.map(csvCell).join(','),
       ...report.clients.map((client) =>

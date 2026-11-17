@@ -18,17 +18,34 @@ type PurchaseCommitment = {
   order_id: string; order_number: string; status: string; supplier_name: string;
   ordered_quantity: string; documented_received_quantity: string; pending_quantity: string | null;
   has_legacy: boolean; over_received: boolean;
+  destination_location_code: string | null; expected_receipt_date: string | null; is_receipt_overdue: boolean;
+};
+type PurchasePlanning = {
+  product_id: string; sku: string; product_name: string; as_of: string; as_of_date: string;
+  pending_quantity: string; pending_orders: number; review_orders: number; orders: PurchaseCommitment[];
+  groups: {
+    destination_location_code: string | null; expected_receipt_date: string | null; is_receipt_overdue: boolean;
+    pending_quantity: string; pending_orders: number; review_orders: number;
+  }[];
+  open_request_quantity: string; open_requests: number;
+  requests: {
+    request_id: string; request_number: string; status: string; supplier_name: string; quantity: string;
+    destination_location_code: string | null; expected_receipt_date: string | null;
+    origin: 'manual' | 'replenishment'; source_location_code: string | null;
+  }[];
 };
 
 @Component({
   selector: 'app-replenishment', standalone: true, imports: [CommonModule, FormsModule, RouterLink],
+  styles: [`.planning-table { min-width: 48rem; } .planning-table td { min-width: 7rem; }`],
   template: `
     @if (isAdmin) {
       <article class="surface-card">
         <div class="header-with-action"><h2>Reposición por ubicación</h2>
           <button type="button" class="btn btn-secondary" (click)="load()" [disabled]="busy">Actualizar reposición</button></div>
         <p>Alerta cuando disponible es menor al mínimo. La sugerencia no descuenta compras pendientes ni crea pedidos o asientos. Mínimo cero desactiva la alerta.</p>
-        <p>Las compras pendientes son el total por producto de toda la empresa, sin ubicación de destino ni fecha comprometida; se repiten en cada regla del producto y no deben sumarse entre ubicaciones. Revisa las órdenes antes de comprar.</p>
+        <p>Las compras pendientes son el total por producto de toda la empresa; se repiten en cada regla del producto y no deben sumarse entre ubicaciones.
+          Consulta el desglose por destino y fecha en Ver órdenes; los históricos pueden no tenerlos. El total empresarial no se filtra por destino ni fecha. Revisa también solicitudes abiertas antes de comprar.</p>
         @if (error) { <p class="status status-error" role="alert">{{ error }}</p> }
         @if (message) { <p class="status status-success" role="status">{{ message }}</p> }
         <form class="form-grid" #ruleForm="ngForm" (ngSubmit)="save()">
@@ -64,13 +81,16 @@ type PurchaseCommitment = {
         @if (proposalRule) {
           <section aria-label="Propuesta de compra">
             <h3>Propuesta: {{ proposalRule.product_name }} · {{ proposalRule.location_code }}</h3>
-            <p>Se crea una solicitud en borrador sin impuesto; no crea orden, movimiento ni asiento. El destino no se asigna a la orden. Revisa compras y solicitudes manuales de toda la empresa: la sugerencia no descuenta compromisos y puede haber cambiado.</p>
+            <p>Se crea una solicitud en borrador sin impuesto; no crea orden, movimiento ni asiento. El destino previsto y la fecha son opcionales y se copian al aprobar.
+              No se deduce destino de la regla. Revisa compras y solicitudes manuales de toda la empresa: la sugerencia no descuenta compromisos y puede haber cambiado.</p>
             <form class="form-grid" #proposalForm="ngForm" (ngSubmit)="createProposal()">
               <label>Número de solicitud<input name="proposalNumber" [(ngModel)]="proposal.requestNumber" maxlength="64" required [disabled]="busy" /></label>
               <label>Proveedor de propuesta<select name="proposalSupplier" [(ngModel)]="proposal.supplierId" required [disabled]="busy"><option value="">Selecciona proveedor</option>
                 @for (supplier of suppliers; track supplier.id) { <option [value]="supplier.id">{{ supplier.code }} · {{ supplier.name }}</option> }</select></label>
               <label>Cantidad propuesta<input name="proposalQuantity" [(ngModel)]="proposal.quantity" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,4})?" required [disabled]="busy" /></label>
               <label>Costo unitario propuesto<input name="proposalCost" [(ngModel)]="proposal.unitCost" inputmode="decimal" pattern="[0-9]+([.][0-9]{1,4})?" required [disabled]="busy" /></label>
+              <label>Destino previsto de propuesta (opcional)<input name="proposalDestination" [(ngModel)]="proposal.destinationLocationCode" maxlength="32" [disabled]="busy" /></label>
+              <label>Fecha comprometida de propuesta (UTC, opcional)<input type="date" name="proposalExpectedReceipt" [(ngModel)]="proposal.expectedReceiptDate" [disabled]="busy" /></label>
               <label>Motivo de propuesta<input name="proposalReason" [(ngModel)]="proposal.reason" minlength="10" maxlength="1000" required [disabled]="busy" /></label>
               <label><input type="checkbox" name="proposalReviewed" [(ngModel)]="proposal.reviewedCommitments" [disabled]="busy" /> Revisé compras pendientes y solicitudes existentes.</label>
               <button type="submit" class="btn btn-primary" [disabled]="busy || proposalForm.invalid || !proposal.reviewedCommitments">Crear solicitud en borrador</button>
@@ -82,12 +102,50 @@ type PurchaseCommitment = {
         @if (commitmentProduct) {
           <section aria-label="Detalle de compras pendientes">
             <h3>Órdenes abiertas: {{ commitmentProduct }}</h3>
-            <p>Consulta independiente de toda la empresa. Actualiza para consultar cambios recientes; no asigna destino ni descuenta compromisos de la sugerencia.</p>
+            <p>Consulta independiente de toda la empresa. Muestra planificación declarada, sin descontar compromisos de la sugerencia.
+              El resumen, sus grupos, órdenes y solicitudes corresponden a una misma consulta; la tabla de reglas puede ser anterior.</p>
+            @if (planning; as plan) {
+              <p>Consulta UTC: {{ plan.as_of }}. Fecha de referencia: {{ plan.as_of_date }}.</p>
+              <p><strong>Pendiente verificable de empresa: {{ plan.pending_quantity }}</strong> · {{ plan.pending_orders }} órdenes.
+                Excluidas por revisión: {{ plan.review_orders }}. No sumar este total otra vez al desglose.</p>
+              <button type="button" class="btn btn-secondary" [disabled]="busy" (click)="showCommitments({ product_id: plan.product_id, product_name: plan.product_name })">Actualizar planificación</button>
+              <button type="button" class="btn btn-secondary" [disabled]="busy" (click)="exportPlanning()">Exportar planificación CSV</button>
+              <p>El CSV consulta datos actuales: puede diferir de esta pantalla. Una fila por orden o solicitud del producto, sin filas de totales.
+                Las columnas de pendiente verificable y solicitud no aprobada están separadas; vacío no significa cero.
+                Importa cantidades como texto para conservar todos los decimales.</p>
+              <div class="table-scroll"><table class="table-list planning-table">
+                <caption>Pendiente por destino previsto y fecha UTC. Cada orden figura en un solo grupo; no es stock disponible.</caption>
+                <thead><tr><th>Destino previsto</th><th>Fecha UTC</th><th>Pendiente verificable</th><th>Órdenes verificables</th><th>Órdenes excluidas</th></tr></thead>
+                <tbody>@for (group of plan.groups; track $index) {
+                  <tr><th scope="row">{{ group.destination_location_code || 'No definido' }}</th>
+                    <td>{{ group.expected_receipt_date || 'No definida' }} @if (group.is_receipt_overdue) { · Fecha superada }</td>
+                    <td>{{ group.pending_quantity }}</td><td>{{ group.pending_orders }}</td><td>{{ group.review_orders }}</td></tr>
+                } @empty { <tr><td colspan="5">Sin órdenes abiertas pendientes ni anomalías.</td></tr> }</tbody>
+              </table></div>
+              <section aria-label="Solicitudes abiertas del producto">
+                <h4>Solicitudes sin orden: {{ plan.open_requests }} · Cantidad solicitada: {{ plan.open_request_quantity }}</h4>
+                <p>No son compras confirmadas y no se suman al pendiente de órdenes. Pueden duplicar una necesidad de otra regla o solicitud manual.
+                  El origen de reposición no implica destino. Revisa antes de proponer o aprobar; esta consulta no bloquea cambios.</p>
+                <div class="table-scroll"><table class="table-list planning-table">
+                  <thead><tr><th>Solicitud / proveedor</th><th>Estado</th><th>Cantidad solicitada</th><th>Origen</th><th>Destino / fecha UTC</th></tr></thead>
+                  <tbody>@for (item of plan.requests; track item.request_id) {
+                    <tr><th scope="row">{{ item.request_number }} · {{ item.supplier_name }}</th>
+                      <td>{{ item.status === 'draft' ? 'Borrador' : 'Enviada' }}</td><td>{{ item.quantity }}</td>
+                      <td>{{ item.origin === 'replenishment' ? 'Reposición · ' + item.source_location_code : 'Manual' }}</td>
+                      <td>{{ item.destination_location_code || 'No definido' }} · {{ item.expected_receipt_date || 'No definida' }}</td></tr>
+                  } @empty { <tr><td colspan="5">Sin solicitudes abiertas sin orden para este producto.</td></tr> }</tbody>
+                </table></div>
+                <a routerLink="/operations" [queryParams]="{tab:'purchases'}">Revisar solicitudes y planes en Compras</a>
+              </section>
+            }
             @if (commitments.length) {
               <div class="table-scroll"><table class="table-list">
-                <thead><tr><th>Orden</th><th>Proveedor</th><th>Estado</th><th>Pedido</th><th>Recepción documentada</th><th>Pendiente verificable</th></tr></thead>
+                <thead><tr><th>Orden / planificación</th><th>Proveedor</th><th>Estado</th><th>Pedido</th><th>Recepción documentada</th><th>Pendiente verificable</th></tr></thead>
                 <tbody>@for (order of commitments; track order.order_id) {
-                  <tr><th scope="row">{{ order.order_number }}</th><td>{{ order.supplier_name }}</td><td>{{ order.status === 'ordered' ? 'Ordenada' : order.status === 'partially_received' ? 'Parcialmente recibida' : order.status }}</td>
+                  <tr><th scope="row">{{ order.order_number }}<br>Destino: {{ order.destination_location_code || 'No definido' }}
+                    <br>Fecha UTC: {{ order.expected_receipt_date || 'No definida' }}
+                    @if (order.is_receipt_overdue) { <br>Fecha comprometida superada; confirmar con proveedor. }</th>
+                    <td>{{ order.supplier_name }}</td><td>{{ order.status === 'ordered' ? 'Ordenada' : order.status === 'partially_received' ? 'Parcialmente recibida' : order.status }}</td>
                     <td>{{ order.ordered_quantity }}</td><td>{{ order.documented_received_quantity }}</td>
                     <td>@if (order.pending_quantity !== null) { {{ order.pending_quantity }} } @else {
                       <strong>Excluida: revisar
@@ -111,9 +169,12 @@ export class ReplenishmentComponent {
   rules: Rule[] = [];
   products: { id: string; sku: string; name: string }[] = [];
   commitments: PurchaseCommitment[] = []; commitmentProduct = '';
+  planning: PurchasePlanning | null = null;
+  private sessionRevision = 0;
   suppliers: { id: string; code: string; name: string; is_active: boolean }[] = [];
   proposalRule: Rule | null = null;
-  proposal = { requestNumber: '', supplierId: '', quantity: '', unitCost: '', reason: '', reviewedCommitments: false };
+  proposal = { requestNumber: '', supplierId: '', quantity: '', unitCost: '', reason: '', reviewedCommitments: false,
+    destinationLocationCode: '', expectedReceiptDate: '' };
   productId = ''; location = 'MAIN'; minimum = '0'; target = '0'; revision = 0; reason = '';
   error = ''; message = ''; busy = false; loaded = false;
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
@@ -121,9 +182,11 @@ export class ReplenishmentComponent {
     effect(() => {
       const identity = this.session.user();
       untracked(() => {
+        this.sessionRevision++; this.planning = null;
         this.rules = []; this.products = []; this.commitments = []; this.commitmentProduct = ''; this.productId = ''; this.location = 'MAIN';
         this.suppliers = []; this.proposalRule = null;
-        this.proposal = { requestNumber: '', supplierId: '', quantity: '', unitCost: '', reason: '', reviewedCommitments: false };
+        this.proposal = { requestNumber: '', supplierId: '', quantity: '', unitCost: '', reason: '', reviewedCommitments: false,
+          destinationLocationCode: '', expectedReceiptDate: '' };
         this.prepare(); this.error = ''; this.message = ''; this.busy = false; this.loaded = false;
         if (identity?.roles.includes('admin')) void this.load();
       });
@@ -137,7 +200,7 @@ export class ReplenishmentComponent {
   async load() {
     if (this.busy || !this.isAdmin) return;
     const identity = this.session.user();
-    this.busy = true; this.error = ''; this.message = ''; this.loaded = false; this.commitments = []; this.commitmentProduct = ''; this.proposalRule = null;
+    this.busy = true; this.error = ''; this.message = ''; this.loaded = false; this.commitments = []; this.commitmentProduct = ''; this.planning = null; this.proposalRule = null;
     try {
       const [rules, products] = await Promise.all([
         firstValueFrom(this.http.get<Rule[]>(`${API_BASE_URL}/inventory/replenishment`)),
@@ -156,7 +219,8 @@ export class ReplenishmentComponent {
       const suppliers = await firstValueFrom(this.http.get<typeof this.suppliers>(`${API_BASE_URL}/masters/suppliers`));
       if (identity !== this.session.user()) return;
       this.suppliers = suppliers.filter(s => s.is_active);
-      this.proposal = { requestNumber: '', supplierId: '', quantity: row.suggested_quantity, unitCost: '', reason: '', reviewedCommitments: false };
+      this.proposal = { requestNumber: '', supplierId: '', quantity: row.suggested_quantity, unitCost: '', reason: '', reviewedCommitments: false,
+        destinationLocationCode: '', expectedReceiptDate: '' };
       this.proposalRule = row;
     } catch {
       if (identity === this.session.user()) this.error = 'No se pudieron cargar proveedores para la propuesta.';
@@ -171,6 +235,8 @@ export class ReplenishmentComponent {
       const result = await firstValueFrom(this.http.post<{ requestNumber: string }>(
         `${API_BASE_URL}/inventory/replenishment/${row.product_id}/proposals`, {
           ...this.proposal, locationCode: row.location_code, expectedRevision: row.revision,
+          destinationLocationCode: this.proposal.destinationLocationCode.trim() || null,
+          expectedReceiptDate: this.proposal.expectedReceiptDate || null,
         }));
       if (identity !== this.session.user()) return;
       this.busy = false; await this.load();
@@ -182,18 +248,37 @@ export class ReplenishmentComponent {
         : 'No se pudo crear la propuesta. Revisa proveedor, cantidades, costo y motivo antes de volver a intentar.';
     } finally { if (identity === this.session.user()) this.busy = false; }
   }
-  async showCommitments(row: Rule) {
+  async showCommitments(row: Pick<Rule, 'product_id' | 'product_name'>) {
     if (this.busy || !this.isAdmin) return;
     const identity = this.session.user();
-    this.busy = true; this.error = ''; this.message = ''; this.commitments = []; this.commitmentProduct = '';
+    const revision = this.sessionRevision;
+    this.busy = true; this.error = ''; this.message = ''; this.commitments = []; this.commitmentProduct = ''; this.planning = null;
     try {
-      const orders = await firstValueFrom(this.http.get<PurchaseCommitment[]>(
-        `${API_BASE_URL}/inventory/replenishment/${row.product_id}/purchase-commitments`));
-      if (identity !== this.session.user()) return;
-      this.commitments = orders; this.commitmentProduct = row.product_name;
+      const plan = await firstValueFrom(this.http.get<PurchasePlanning>(
+        `${API_BASE_URL}/inventory/replenishment/${row.product_id}/purchase-planning`));
+      if (identity !== this.session.user() || revision !== this.sessionRevision) return;
+      this.planning = plan; this.commitments = plan.orders; this.commitmentProduct = plan.product_name;
     } catch {
-      if (identity === this.session.user()) this.error = 'No se pudieron cargar las órdenes pendientes. Intenta nuevamente.';
-    } finally { if (identity === this.session.user()) this.busy = false; }
+      if (identity === this.session.user() && revision === this.sessionRevision) this.error = 'No se pudieron cargar las órdenes pendientes. Intenta nuevamente.';
+    } finally { if (identity === this.session.user() && revision === this.sessionRevision) this.busy = false; }
+  }
+  async exportPlanning() {
+    if (this.busy || !this.isAdmin || !this.planning) return;
+    const identity = this.session.user(); const revision = this.sessionRevision;
+    const productId = this.planning.product_id;
+    this.busy = true; this.error = ''; this.message = '';
+    try {
+      const blob = await firstValueFrom(this.http.get(
+        `${API_BASE_URL}/inventory/replenishment/${productId}/purchase-planning.csv`, { responseType: 'blob' }));
+      if (identity !== this.session.user() || revision !== this.sessionRevision) return;
+      const url = URL.createObjectURL(blob); const link = document.createElement('a');
+      try {
+        link.href = url; link.download = `erp360-plan-compras-${productId}.csv`; link.click();
+      } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
+      this.message = 'CSV generado con una nueva consulta. Conserva solicitudes y órdenes en columnas separadas.';
+    } catch {
+      if (identity === this.session.user() && revision === this.sessionRevision) this.error = 'No se pudo exportar la planificación. Intenta nuevamente.';
+    } finally { if (identity === this.session.user() && revision === this.sessionRevision) this.busy = false; }
   }
   async save() {
     if (this.busy || !this.isAdmin || !this.loaded || !this.productId) return;

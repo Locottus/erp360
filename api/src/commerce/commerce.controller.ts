@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuard
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
-import type { CreatePurchaseRequestInput, CreateQuotationInput } from './commerce.types';
+import type { CreatePurchaseRequestInput, CreateQuotationInput, RevisePurchaseDeliveryPlanInput } from './commerce.types';
 import { CommerceService } from './commerce.service';
 
 @Controller('commerce')
@@ -99,6 +99,32 @@ export class CommerceController {
   @Roles('admin', 'purchases')
   purchaseRequestDetails(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
     return this.commerceService.purchaseRequestDetails(request.user, id);
+  }
+
+  @Get('purchases/requests/:id/delivery-plan')
+  @Roles('admin', 'purchases')
+  purchaseRequestDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.commerceService.purchaseDeliveryPlan(request.user, id, 'request');
+  }
+
+  @Get('purchases/orders/:id/delivery-plan')
+  @Roles('admin', 'purchases')
+  purchaseOrderDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.commerceService.purchaseDeliveryPlan(request.user, id, 'order');
+  }
+
+  @Patch('purchases/requests/:id/delivery-plan')
+  @Roles('admin')
+  revisePurchaseRequestDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: RevisePurchaseDeliveryPlanInput) {
+    return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'request', input);
+  }
+
+  @Patch('purchases/orders/:id/delivery-plan')
+  @Roles('admin')
+  revisePurchaseOrderDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: RevisePurchaseDeliveryPlanInput) {
+    return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'order', input);
   }
 
   @Post('purchases/requests/:id/reject')

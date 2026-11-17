@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, OnInit, effect, inject } from '@angular/core';
+import { Component, effect, inject, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink, ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -21,12 +21,25 @@ type PurchaseRequest = {
   purchase_order_status: string | null; inventory_received: boolean; is_posted: boolean;
   rejection_reason: string | null;
   approval_block_reason: 'self_approval' | 'unknown_creator' | null;
+  destination_location_code: string | null; expected_receipt_date: string | null;
+  order_destination_location_code: string | null; order_expected_receipt_date: string | null;
+  is_receipt_overdue: boolean;
 };
 type PurchaseRequestDetails = {
   id: string; request_number: string; status: string; currency_code: string | null;
   supplier_name: string; subtotal: string; tax_total: string; grand_total: string;
   replenishment_location: string | null; replenishment_rule_revision: number | null; replenishment_reason: string | null;
+  destination_location_code: string | null; expected_receipt_date: string | null;
   lines: Array<{ id: string; sku: string | null; product_name: string | null; quantity: string; unit_cost: string; line_total: string }>;
+};
+type DeliveryPlanSnapshot = {
+  destination_location_code: string | null; expected_receipt_date: string | null; revision: number;
+};
+type PurchaseDeliveryPlan = {
+  id: string; document_number: string; status: string; delivery_plan_revision: number;
+  destination_location_code: string | null; expected_receipt_date: string | null;
+  history_has_more: boolean;
+  history: Array<{ created_at: string; actor_user_id: string; reason: string; before: DeliveryPlanSnapshot; after: DeliveryPlanSnapshot }>;
 };
 type Employee = { id: string; employee_code: string; full_name: string; email: string | null; job_title: string | null; status: string };
 type Attendance = { id: string; employee_id: string; employee_code: string; full_name: string; check_in_at: string; check_out_at: string | null; status: string; total_minutes: number | null };
@@ -50,6 +63,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
       </header>
       @if (error) { <p class="status status-error" role="alert">{{ error }}</p> }
       @if (message) { <p class="status status-success" role="status">{{ message }}</p> }
+      @if (loading) { <p class="status status-info" role="status">Cargando datos de Operaciones...</p> }
       @if (issuedPortalToken) {
         <article class="surface-card token-notice" role="alert">
           <h2>Token de portal · se muestra una sola vez</h2>
@@ -127,9 +141,11 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
                 <label>Número<input name="quotationNumber" [(ngModel)]="quotation.quotationNumber" maxlength="64" required /></label>
                 <label>Cliente<select name="customerId" [(ngModel)]="quotation.customerId" required><option value="">Selecciona</option>@for (item of customers; track item.id) { <option [value]="item.id">{{ item.code }} · {{ item.name }}</option> }</select></label>
                 <label>Impuesto<select name="quotationTax" [(ngModel)]="quotation.taxRateCode"><option value="">Sin impuesto</option>@for (item of taxes; track item.id) { <option [value]="item.code">{{ item.code }} · {{ item.rate }}%</option> }</select></label>
-                <label>Válida hasta (UTC, opcional)<input name="quotationValidity" type="date" [(ngModel)]="quotation.validUntil" /></label>
+                <label>Válida hasta (UTC, opcional)<input name="quotationValidity" type="date" [(ngModel)]="quotation.validUntil" [disabled]="quotationUnlimited" /></label>
+                <label><input name="quotationUnlimited" type="checkbox" [(ngModel)]="quotationUnlimited" /> Sin caducidad para esta oferta</label>
               </div>
-              <p>La vigencia incluye todo el día indicado en UTC. Sin fecha no caduca automáticamente. Revisa precios antes de renovar una oferta.</p>
+              <p>Sin fecha se aplica la vigencia configurada en Mi empresa; con 0 días no caduca. Marca sin caducidad para omitirla explícitamente.
+                La fecha incluye todo el día UTC. Revisa precios antes de renovar una oferta.</p>
               @for (line of salesLines; track $index; let i = $index) {
                 <div class="toolbar-grid line-editor">
                   <label>Producto<select [name]="'sale-product-' + i" [(ngModel)]="line.productId" required><option value="">Selecciona</option>@for (item of products; track item.id) { <option [value]="item.id">{{ item.sku }} · {{ item.name }}</option> }</select></label>
@@ -173,7 +189,11 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               <div class="toolbar-grid"><label>Número<input name="requestNumber" [(ngModel)]="purchase.requestNumber" required /></label>
                 <label>Proveedor<select name="supplierId" [(ngModel)]="purchase.supplierId" required><option value="">Selecciona</option>@for (item of suppliers; track item.id) { <option [value]="item.id">{{ item.code }} · {{ item.name }}</option> }</select></label>
                 <label>Impuesto<select name="purchaseTax" [(ngModel)]="purchase.taxRateCode"><option value="">Sin impuesto</option>@for (item of taxes; track item.id) { <option [value]="item.code">{{ item.code }} · {{ item.rate }}%</option> }</select></label>
+                <label>Destino previsto de compra (opcional)<input name="purchaseDestination" [(ngModel)]="purchase.destinationLocationCode" maxlength="32" /></label>
+                <label>Fecha comprometida de recepción (UTC, opcional)<input type="date" name="purchaseExpectedReceipt" [(ngModel)]="purchase.expectedReceiptDate" /></label>
               </div>
+              <p>Destino y fecha se conservan al aprobar. Son planificación, no una reserva de inventario ni una confirmación del proveedor.
+                Una fecha pasada se admite y se señala al quedar la orden abierta; no impide recibir. La ubicación física real se confirma en Recepciones.</p>
               @for (line of purchaseLines; track $index; let i = $index) {
                 <div class="toolbar-grid line-editor"><label>Producto<select [name]="'purchase-product-' + i" [(ngModel)]="line.productId" required><option value="">Selecciona</option>@for (item of products; track item.id) { <option [value]="item.id">{{ item.sku }} · {{ item.name }}</option> }</select></label>
                   <label>Cantidad<input [name]="'purchase-qty-' + i" type="number" min="0.0001" step="0.0001" [(ngModel)]="line.quantity" required /></label>
@@ -187,8 +207,15 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
             @if (purchaseRequests.length) { <div class="table-scroll"><table class="table-list"><caption>Solicitudes, órdenes, recepción física y contabilidad</caption>
               <thead><tr><th scope="col">Solicitud / proveedor</th><th scope="col">Total</th><th scope="col">Estado solicitud</th><th scope="col">Orden</th><th scope="col">Acciones</th></tr></thead>
               <tbody>@for (item of purchaseRequests; track item.id) { <tr><th scope="row">{{ item.request_number }}<br><small>{{ item.supplier_name }}</small></th><td>{{ item.grand_total | number:'1.2-4' }}</td><td>{{ item.status }} @if (item.status === 'rejected' && item.rejection_reason) { <br><small>Motivo: {{ item.rejection_reason }}</small> }</td>
-                <td>{{ item.purchase_order_number || '—' }}<br><small>{{ item.purchase_order_status || '' }}</small></td>
+                <td>{{ item.purchase_order_number || '—' }}<br><small>{{ item.purchase_order_status || '' }}</small>
+                  <br>Destino: {{ (item.purchase_order_id ? item.order_destination_location_code : item.destination_location_code) || 'No definido' }}
+                  <br>Fecha UTC: {{ (item.purchase_order_id ? item.order_expected_receipt_date : item.expected_receipt_date) || 'No definida' }}
+                  @if (item.is_receipt_overdue) { <br><strong>Fecha comprometida superada; revisar recepción pendiente.</strong> }</td>
                 <td><button class="btn btn-secondary" type="button" (click)="showPurchaseDetails(item)" [disabled]="busy || loading">Ver detalle de {{ item.request_number }}</button>
+                  <button class="btn btn-secondary" type="button" (click)="showDeliveryPlan(item.id, 'request')" [disabled]="busy || loading">Plan e historial de solicitud {{ item.request_number }}</button>
+                  @if (item.purchase_order_id) {
+                    <button class="btn btn-secondary" type="button" (click)="showDeliveryPlan(item.purchase_order_id, 'order')" [disabled]="busy || loading">Plan e historial de orden {{ item.purchase_order_number }}</button>
+                  }
                   <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'purchase-request', id: item.id}, '/operations?tab=purchases')">Analizar solicitud</button>
                   @if (!item.purchase_order_id && (item.status === 'draft' || item.status === 'submitted')) {
                     @if (item.approval_block_reason) {
@@ -205,11 +232,52 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
                   @else if (item.purchase_order_status === 'received' && !item.is_posted) { <button class="btn btn-secondary" type="button" (click)="postPurchase(item)" [disabled]="busy">Contabilizar</button> }
                   @else { <span>Proceso completado</span> }</td></tr> }</tbody>
             </table></div> } @else { <p class="muted">Sin solicitudes de compra.</p> }
+            @if (deliveryPlan; as plan) {
+              <section aria-label="Plan e historial de entrega">
+                <h3>Plan de {{ deliveryPlanKind === 'request' ? 'solicitud' : 'orden' }} {{ plan.document_number }}</h3>
+                <p>Estado al consultar: {{ plan.status }} · Revisión del plan: {{ plan.delivery_plan_revision }}.
+                  Destino: {{ plan.destination_location_code || 'No definido' }} · Fecha UTC: {{ plan.expected_receipt_date || 'No definida' }}.</p>
+                <p>La solicitud conserva su plan al aprobar. Para cambiar el compromiso de una compra aprobada, abre el plan de la orden.
+                  Reprogramar no cambia cantidades, costos, movimientos ni recepciones anteriores.</p>
+                @if (canReviseDeliveryPlan) {
+                  <form class="form-grid" #deliveryPlanForm="ngForm" (ngSubmit)="reviseDeliveryPlan()">
+                    <div class="toolbar-grid">
+                      <label>Nuevo destino previsto<input name="revisedDestination" [(ngModel)]="deliveryPlanInput.destination" maxlength="32" [disabled]="busy || loading" /></label>
+                      <label>Nueva fecha comprometida (UTC)<input type="date" name="revisedReceiptDate" [(ngModel)]="deliveryPlanInput.date" [disabled]="busy || loading" /></label>
+                    </div>
+                    <label>Motivo de reprogramación<input name="deliveryPlanReason" [(ngModel)]="deliveryPlanInput.reason" required minlength="10" maxlength="1000" [disabled]="busy || loading" /></label>
+                    <label><input type="checkbox" name="reviewedDeliveryPlan" [(ngModel)]="deliveryPlanInput.reviewed" [disabled]="busy || loading" />
+                      Revisé el compromiso con el proveedor. Los campos vacíos retirarán el destino o la fecha anteriores.</label>
+                    <button class="btn btn-primary" type="submit" [disabled]="busy || loading || deliveryPlanForm.invalid || !deliveryPlanInput.reviewed || deliveryPlanInput.reason.trim().length < 10">Guardar reprogramación</button>
+                  </form>
+                } @else {
+                  <p>Solo se reprograman solicitudes borrador/enviadas y órdenes abiertas o parcialmente recibidas. Este documento es de consulta.</p>
+                }
+                <h4>Historial de reprogramaciones (hasta 50 más recientes)</h4>
+                @if (plan.history_has_more) { <p>Hay revisiones anteriores fuera de esta vista; solicita la auditoría completa a administración.</p> }
+                @if (plan.history.length) {
+                  <div class="table-scroll"><table class="table-list"><caption>Cambios de plan, no de ubicación física</caption>
+                    <thead><tr><th>Revisión / fecha UTC</th><th>Antes</th><th>Después</th><th>Motivo / usuario</th></tr></thead>
+                    <tbody>@for (entry of plan.history; track entry.after.revision) {
+                      <tr><th scope="row">{{ entry.after.revision }} · {{ entry.created_at | date:'yyyy-MM-dd HH:mm:ss':'UTC' }}</th>
+                        <td>{{ entry.before.destination_location_code || 'No definido' }} · {{ entry.before.expected_receipt_date || 'No definida' }}</td>
+                        <td>{{ entry.after.destination_location_code || 'No definido' }} · {{ entry.after.expected_receipt_date || 'No definida' }}</td>
+                        <td>{{ entry.reason }}<br>Usuario: {{ entry.actor_user_id }}</td></tr>
+                    }</tbody>
+                  </table></div>
+                } @else { <p>Sin reprogramaciones registradas. El plan inicial se conserva en la creación o aprobación del documento.</p> }
+                <button class="btn btn-secondary" type="button" (click)="showDeliveryPlan(plan.id, deliveryPlanKind)" [disabled]="busy || loading">Recargar plan e historial</button>
+                <button class="btn btn-secondary" type="button" (click)="deliveryPlan = null" [disabled]="busy || loading">Cerrar plan</button>
+              </section>
+            }
             @if (purchaseDetails) {
               <section aria-label="Detalle de solicitud de compra">
                 <h3>Solicitud {{ purchaseDetails.request_number }} · {{ purchaseDetails.supplier_name }}</h3>
                 <p>Estado al consultar: {{ purchaseDetails.status }}. Moneda: {{ purchaseDetails.currency_code || 'No registrada' }}.
                   Actualiza y vuelve a consultar antes de decidir; el estado puede cambiar.</p>
+                <p>Destino previsto: {{ purchaseDetails.destination_location_code || 'No definido' }}.
+                  Fecha comprometida UTC: {{ purchaseDetails.expected_receipt_date || 'No definida' }}.
+                  No obliga la ubicación física de recepción.</p>
                 @if (purchaseDetails.replenishment_location) {
                   <p>Origen: reposición {{ purchaseDetails.replenishment_location }}, revisión {{ purchaseDetails.replenishment_rule_revision }}.
                     Motivo: {{ purchaseDetails.replenishment_reason }}. La ubicación es informativa, no destino de la orden.</p>
@@ -322,7 +390,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
     </section>
   `,
 })
-export class OperationsComponent implements OnInit {
+export class OperationsComponent {
   readonly assistant = inject(AssistantContextService);
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
@@ -344,6 +412,9 @@ export class OperationsComponent implements OnInit {
   salesOrders: SalesOrder[] = [];
   purchaseRequests: PurchaseRequest[] = [];
   purchaseDetails: PurchaseRequestDetails | null = null;
+  deliveryPlan: PurchaseDeliveryPlan | null = null;
+  deliveryPlanKind: 'request' | 'order' = 'request';
+  deliveryPlanInput = { destination: '', date: '', reason: '', reviewed: false };
   employees: Employee[] = [];
   attendance: Attendance[] = [];
   leaveRequests: LeaveRequest[] = [];
@@ -361,13 +432,14 @@ export class OperationsComponent implements OnInit {
   supplier = { code: '', name: '', email: '', taxId: '' };
   tax = { code: '', name: '', rate: 0, taxType: 'vat' as 'vat' | 'withholding' | 'other' };
   quotation = { quotationNumber: '', customerId: '', taxRateCode: '', validUntil: '' };
+  quotationUnlimited = false;
   validityQuotation: Quotation | null = null;
   validityBusy = false;
   validity = { date: '', unlimited: false, reason: '', reviewed: false };
   get draftQuotations() { return this.quotations.filter(row => row.status === 'draft'); }
   prepareValidity() { this.validity = { date: this.validityQuotation?.valid_until ?? '', unlimited: false, reason: '', reviewed: false }; }
   salesLines: CommerceLine[] = [{ productId: '', quantity: 1, unitPrice: null }];
-  purchase = { requestNumber: '', supplierId: '', taxRateCode: '' };
+  purchase = { requestNumber: '', supplierId: '', taxRateCode: '', destinationLocationCode: '', expectedReceiptDate: '' };
   purchaseLines: Array<{ productId: string; quantity: number; unitCost: number | null }> = [{ productId: '', quantity: 1, unitCost: null }];
   employee = { employeeCode: '', fullName: '', email: '', jobTitle: '', hireDate: '' };
   attendanceEmployeeId = '';
@@ -379,6 +451,7 @@ export class OperationsComponent implements OnInit {
   busy = false;
   error = '';
   message = '';
+  private refreshRevision = 0;
 
   constructor() {
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(params => {
@@ -386,20 +459,26 @@ export class OperationsComponent implements OnInit {
       if (tab) this.activeTab = tab.id;
     });
     effect(() => {
-      this.session.user();
-      this.validityQuotation = null;
-      this.prepareValidity();
-      this.validityBusy = false;
-      this.quotations = [];
-      this.purchaseRequests = [];
-      this.purchaseDetails = null;
-      this.rejectionReasons = {};
-      this.busy = false;
+      const identity = this.session.user();
+      untracked(() => {
+        this.refreshRevision++;
+        this.loading = false; this.busy = false; this.error = ''; this.message = '';
+        this.customers = []; this.products = []; this.suppliers = []; this.taxes = [];
+        this.quotations = []; this.salesOrders = []; this.purchaseRequests = [];
+        this.employees = []; this.attendance = []; this.leaveRequests = [];
+        this.invoices = []; this.fiscalDocuments = []; this.portalTokens = [];
+        this.trialBalance = null; this.issuedPortalToken = '';
+        this.validityQuotation = null;
+        this.quotationUnlimited = false;
+        this.prepareValidity();
+        this.validityBusy = false;
+        this.purchaseDetails = null;
+        this.deliveryPlan = null;
+        this.deliveryPlanInput = { destination: '', date: '', reason: '', reviewed: false };
+        this.rejectionReasons = {};
+        if (identity?.roles.includes('admin')) void this.refresh();
+      });
     });
-  }
-
-  ngOnInit() {
-    if (this.isAdmin) void this.refresh();
   }
 
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
@@ -407,8 +486,9 @@ export class OperationsComponent implements OnInit {
 
   async refresh() {
     if (this.loading || !this.isAdmin) return;
-    this.loading = true; this.error = ''; this.purchaseDetails = null;
+    this.loading = true; this.error = ''; this.purchaseDetails = null; this.deliveryPlan = null;
     const identity = this.session.user();
+    const revision = ++this.refreshRevision;
     try {
       const [customers, products, suppliers, taxes, quotations, salesOrders, purchaseRequests,
         employees, attendance, leaveRequests, invoices, fiscalDocuments, portalTokens] = await Promise.all([
@@ -420,15 +500,17 @@ export class OperationsComponent implements OnInit {
         this.get<Invoice[]>('/commerce/sales/invoices'), this.get<FiscalDocument[]>('/fiscal/documents'),
         this.get<PortalToken[]>('/portal/access-tokens'),
       ]);
-      if (this.session.user() !== identity) return;
+      if (this.session.user() !== identity || revision !== this.refreshRevision) return;
       this.customers = customers; this.products = products; this.suppliers = suppliers; this.taxes = taxes;
       this.quotations = quotations; this.salesOrders = salesOrders; this.purchaseRequests = purchaseRequests;
       this.employees = employees; this.attendance = attendance; this.leaveRequests = leaveRequests;
       this.invoices = invoices; this.fiscalDocuments = fiscalDocuments; this.portalTokens = portalTokens;
     } catch (error) {
-      if (this.session.user() === identity) this.error = this.errorMessage(error, 'No se pudieron cargar los módulos de operación.');
+      if (this.session.user() === identity && revision === this.refreshRevision) {
+        this.error = this.errorMessage(error, 'No se pudieron cargar los módulos de operación.');
+      }
     }
-    finally { this.loading = false; }
+    finally { if (this.session.user() === identity && revision === this.refreshRevision) this.loading = false; }
   }
 
   addLine<T extends { productId: string }>(lines: T[]) {
@@ -460,11 +542,12 @@ export class OperationsComponent implements OnInit {
     await this.perform(async () => {
       const result = await firstValueFrom(this.http.post<{ id: string }>(`${this.api}/commerce/sales/quotations`, {
         ...this.quotation, taxRateCode: this.quotation.taxRateCode || undefined,
-        validUntil: this.quotation.validUntil || undefined,
+        validUntil: this.quotationUnlimited ? null : this.quotation.validUntil || undefined,
         lines: this.salesLines.map(line => ({ ...line, unitPrice: line.unitPrice ?? undefined })),
       }));
       this.orderNumbers[result.id] = this.autoNumber('SO');
       this.quotation = { quotationNumber: this.autoNumber('Q'), customerId: '', taxRateCode: '', validUntil: '' };
+      this.quotationUnlimited = false;
       this.salesLines = [{ productId: '', quantity: 1, unitPrice: null }];
       this.message = 'Cotización creada. Revísala antes de confirmarla.';
       await this.refresh();
@@ -513,10 +596,12 @@ export class OperationsComponent implements OnInit {
     await this.perform(async () => {
       const result = await firstValueFrom(this.http.post<{ id: string }>(`${this.api}/commerce/purchases/requests`, {
         ...this.purchase, taxRateCode: this.purchase.taxRateCode || undefined,
+        destinationLocationCode: this.purchase.destinationLocationCode.trim() || null,
+        expectedReceiptDate: this.purchase.expectedReceiptDate || null,
         lines: this.purchaseLines.map(line => ({ ...line, unitCost: line.unitCost ?? undefined })),
       }));
       this.orderNumbers[result.id] = this.autoNumber('PO');
-      this.purchase = { requestNumber: this.autoNumber('PR'), supplierId: '', taxRateCode: '' };
+      this.purchase = { requestNumber: this.autoNumber('PR'), supplierId: '', taxRateCode: '', destinationLocationCode: '', expectedReceiptDate: '' };
       this.purchaseLines = [{ productId: '', quantity: 1, unitCost: null }];
       this.message = 'Solicitud de compra creada.';
       await this.refresh();
@@ -589,6 +674,57 @@ export class OperationsComponent implements OnInit {
       if (this.session.user() === identity) this.purchaseDetails = details;
     } catch (error) {
       if (this.session.user() === identity) this.error = this.errorMessage(error, 'No se pudo cargar el detalle de la solicitud.');
+    } finally { if (this.session.user() === identity) this.busy = false; }
+  }
+
+  get canReviseDeliveryPlan() {
+    return this.isAdmin && !!this.deliveryPlan && (this.deliveryPlanKind === 'request'
+      ? ['draft', 'submitted'].includes(this.deliveryPlan.status)
+      : ['ordered', 'partially_received'].includes(this.deliveryPlan.status));
+  }
+
+  async showDeliveryPlan(id: string, kind: 'request' | 'order') {
+    if (this.busy || this.loading || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = ''; this.deliveryPlan = null;
+    this.deliveryPlanInput = { destination: '', date: '', reason: '', reviewed: false };
+    try {
+      const plan = await firstValueFrom(this.http.get<PurchaseDeliveryPlan>(
+        `${this.api}/commerce/purchases/${kind === 'request' ? 'requests' : 'orders'}/${id}/delivery-plan`));
+      if (this.session.user() !== identity) return;
+      this.deliveryPlan = plan; this.deliveryPlanKind = kind;
+      this.deliveryPlanInput = { destination: plan.destination_location_code ?? '',
+        date: plan.expected_receipt_date ?? '', reason: '', reviewed: false };
+    } catch (error) {
+      if (this.session.user() === identity) this.error = this.errorMessage(error, 'No se pudo cargar el plan de entrega.');
+    } finally { if (this.session.user() === identity) this.busy = false; }
+  }
+
+  async reviseDeliveryPlan() {
+    const plan = this.deliveryPlan;
+    if (this.busy || this.loading || !plan || !this.canReviseDeliveryPlan) return;
+    if (!this.deliveryPlanInput.reviewed || this.deliveryPlanInput.reason.trim().length < 10) {
+      this.error = 'Revisa el compromiso e indica un motivo de al menos 10 caracteres.';
+      return;
+    }
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = '';
+    try {
+      await firstValueFrom(this.http.patch(
+        `${this.api}/commerce/purchases/${this.deliveryPlanKind === 'request' ? 'requests' : 'orders'}/${plan.id}/delivery-plan`, {
+          destinationLocationCode: this.deliveryPlanInput.destination.trim() || null,
+          expectedReceiptDate: this.deliveryPlanInput.date || null,
+          expectedRevision: plan.delivery_plan_revision, reason: this.deliveryPlanInput.reason.trim(),
+        }));
+      if (this.session.user() !== identity) return;
+      await this.refresh();
+      if (this.session.user() === identity && !this.error) {
+        this.message = 'Reprogramación guardada con auditoría. Vuelve a abrir el plan para consultar su revisión e historial.';
+      }
+    } catch (error) {
+      if (this.session.user() === identity) this.error = error instanceof HttpErrorResponse && error.status === 409
+        ? 'No se guardó: el plan no cambió, tiene otra revisión o el documento ya no está abierto. Recarga el plan e historial y revisa antes de reenviar.'
+        : this.errorMessage(error, 'No se pudo reprogramar la entrega.');
     } finally { if (this.session.user() === identity) this.busy = false; }
   }
 
@@ -676,14 +812,22 @@ export class OperationsComponent implements OnInit {
   }
 
   async loadTrialBalance() {
+    if (this.loading || !this.isAdmin) return;
+    const identity = this.session.user();
+    const revision = ++this.refreshRevision;
     this.loading = true; this.error = '';
     try {
-      this.trialBalance = await this.get<TrialBalance>('/accounting/reports/trial-balance', {
+      const balance = await this.get<TrialBalance>('/accounting/reports/trial-balance', {
         ...(this.accounting.fromDate ? { fromDate: this.accounting.fromDate } : {}),
         ...(this.accounting.toDate ? { toDate: this.accounting.toDate } : {}),
       });
-    } catch (error) { this.error = this.errorMessage(error, 'No se pudo consultar el balance.'); }
-    finally { this.loading = false; }
+      if (this.session.user() === identity && revision === this.refreshRevision) this.trialBalance = balance;
+    } catch (error) {
+      if (this.session.user() === identity && revision === this.refreshRevision) {
+        this.error = this.errorMessage(error, 'No se pudo consultar el balance.');
+      }
+    }
+    finally { if (this.session.user() === identity && revision === this.refreshRevision) this.loading = false; }
   }
 
   async closePeriod() {

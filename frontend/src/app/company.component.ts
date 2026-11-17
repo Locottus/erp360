@@ -9,6 +9,7 @@ import { CurrentCompany, SessionService } from './core/session.service';
 type CompanyProfile = CurrentCompany & {
   profile_revision: number;
   require_independent_purchase_approver: boolean;
+  quotation_validity_days: number;
 };
 
 @Component({
@@ -29,6 +30,9 @@ type CompanyProfile = CurrentCompany & {
             <form class="form-grid" #companyForm="ngForm" (ngSubmit)="save()">
               <label>Nombre de la empresa<input name="companyName" [(ngModel)]="form.name" maxlength="160" required [disabled]="busy" /></label>
               <label>Identificación tributaria (vacío = sin registrar)<input name="taxId" [(ngModel)]="form.taxId" maxlength="64" [disabled]="busy" /></label>
+              <label>Vigencia predeterminada de cotizaciones (días UTC)<input type="number" name="quotationValidityDays" [(ngModel)]="form.quotationValidityDays" min="0" max="3650" step="1" required [disabled]="busy" /></label>
+              <p class="muted">De 0 a 3650 días enteros; 0 desactiva la caducidad predeterminada. Solo aplica a cotizaciones nuevas sin fecha explícita.
+                No modifica cotizaciones anteriores ni pedidos de tienda. La fecha límite incluye todo el día UTC.</p>
               <label><input type="checkbox" name="independentPurchaseApprover" [(ngModel)]="form.requireIndependentPurchaseApprover" [disabled]="busy" />
                 Exigir otro administrador para aprobar compras</label>
               <p class="muted">Al activar la política, el creador no puede aprobar sus solicitudes, incluidas las propuestas de reposición.
@@ -49,14 +53,14 @@ export class CompanyComponent {
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
   profile: CompanyProfile | null = null;
-  form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false };
+  form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false, quotationValidityDays: 0 };
   error = ''; message = ''; busy = false;
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   constructor() {
     effect(() => {
       const user = this.session.user();
       untracked(() => {
-        this.profile = null; this.form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false };
+        this.profile = null; this.form = { name: '', taxId: '', reason: '', requireIndependentPurchaseApprover: false, quotationValidityDays: 0 };
         this.error = ''; this.message = ''; this.busy = false;
         if (user?.roles.includes('admin')) void this.load();
       });
@@ -70,12 +74,18 @@ export class CompanyComponent {
       const result = await firstValueFrom(this.http.get<CompanyProfile>(`${API_BASE_URL}/companies/current`));
       if (identity !== this.session.user()) return;
       this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '',
-        requireIndependentPurchaseApprover: result.require_independent_purchase_approver };
+        requireIndependentPurchaseApprover: result.require_independent_purchase_approver, quotationValidityDays: result.quotation_validity_days };
     } catch { if (identity === this.session.user()) this.error = 'No se pudo cargar el perfil de empresa.'; }
     finally { if (identity === this.session.user()) this.busy = false; }
   }
   async save() {
     if (this.busy || !this.isAdmin || !this.profile) return;
+    if (!Number.isInteger(this.form.quotationValidityDays) ||
+        this.form.quotationValidityDays < 0 || this.form.quotationValidityDays > 3650) {
+      this.error = 'La vigencia debe ser un número entero entre 0 y 3650 días.';
+      this.message = '';
+      return;
+    }
     const identity = this.session.user();
     this.busy = true; this.error = ''; this.message = '';
     try {
@@ -83,10 +93,11 @@ export class CompanyComponent {
         name: this.form.name, taxId: this.form.taxId.trim() || null,
         expectedRevision: this.profile.profile_revision, reason: this.form.reason,
         requireIndependentPurchaseApprover: this.form.requireIndependentPurchaseApprover,
+        quotationValidityDays: this.form.quotationValidityDays,
       }));
       if (identity !== this.session.user()) return;
       this.profile = result; this.form = { name: result.name, taxId: result.tax_id ?? '', reason: '',
-        requireIndependentPurchaseApprover: result.require_independent_purchase_approver };
+        requireIndependentPurchaseApprover: result.require_independent_purchase_approver, quotationValidityDays: result.quotation_validity_days };
       this.session.company.set(result);
       this.message = 'Perfil actualizado con auditoría. No se reescribieron documentos.';
     } catch (error) {
