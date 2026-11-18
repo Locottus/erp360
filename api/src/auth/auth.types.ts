@@ -17,4 +17,5 @@ export type BootstrapAdminInput = {
 export type LoginInput = {
   email: string;
   password: string;
+  mfaCode?: string;
 };

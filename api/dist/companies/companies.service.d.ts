@@ -19,6 +19,18 @@ export declare class CompaniesService {
         require_independent_purchase_approver: boolean;
         quotation_validity_days: number;
     }>;
+    getCostPolicy(user: AuthenticatedUser): Promise<{
+        policy: "weighted_average" | "fifo";
+        revision: number;
+    }>;
+    updateCostPolicy(user: AuthenticatedUser, input: {
+        policy: 'weighted_average' | 'fifo';
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        policy: "weighted_average" | "fifo";
+        revision: number;
+    }>;
     updateCurrentCompany(user: AuthenticatedUser, input: {
         name: string;
         taxId: string | null;

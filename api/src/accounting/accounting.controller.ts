@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { DatabaseService } from '../common/database.service';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -34,6 +36,19 @@ export class AccountingController {
   @Roles('admin')
   bankAccounts(@Req() request: AuthenticatedRequest) {
     return this.accountingService.listBankAccounts(request.user);
+  }
+
+  @Get('bank-reconciliation-lines')
+  @Roles('admin','accountant')
+  bankReconciliationLines(@Req() request: AuthenticatedRequest) {
+    return this.accountingService.listBankReconciliationLines(request.user);
+  }
+
+  @Post('bank-reconciliation-lines/:id/reconcile')
+  @Roles('admin','accountant')
+  reconcileBankLine(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { matchedPaymentId?: string; status: 'matched' | 'reconciled' | 'difference'; reason: string; differenceAmount?: number }) {
+    return this.accountingService.reconcileBankLine(request.user, id, input);
   }
 
   @Post('bank-accounts')
@@ -144,5 +159,71 @@ export class AccountingController {
   @Roles('admin')
   closePeriod(@Req() request: AuthenticatedRequest, @Body() body: ClosePeriodInput) {
     return this.accountingService.closePeriod(request.user, body);
+  }
+}
+
+@Controller('payments/webhooks')
+export class PaymentWebhookController {
+  constructor(private readonly db: DatabaseService) {}
+
+  @Post(':provider')
+  async receive(
+    @Param('provider') provider: string,
+    @Headers('x-company-code') companyCodeHeader: string | undefined,
+    @Headers('x-signature') signature: string | undefined,
+    @Body() body: Record<string, unknown>,
+  ) {
+    const providerCode = provider.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{1,64}$/.test(providerCode)) {
+      throw new BadRequestException('Invalid payment provider.');
+    }
+    const companyCode = (companyCodeHeader ?? (typeof body.companyCode === 'string' ? body.companyCode : '')).trim();
+    if (!companyCode) throw new BadRequestException('x-company-code is required.');
+    const company = await this.db.query<{ id: string }>(
+      'SELECT id FROM companies WHERE code=$1 AND is_active=TRUE',
+      [companyCode],
+    );
+    if (!company.rows[0]) throw new BadRequestException('Active company not found.');
+    const eventId = typeof body.eventId === 'string'
+      ? body.eventId
+      : typeof body.id === 'string' ? body.id : '';
+    const eventType = typeof body.eventType === 'string'
+      ? body.eventType
+      : typeof body.type === 'string' ? body.type : 'unknown';
+    if (!eventId || eventId.length > 128) throw new BadRequestException('eventId is required.');
+
+    let signatureValid = false;
+    const secretMap = this.readSecretMap();
+    const secret = secretMap[providerCode];
+    if (secret && signature) {
+      const payload = JSON.stringify(body);
+      const expected = createHmac('sha256', secret).update(payload, 'utf8').digest();
+      const supplied = Buffer.from(signature.replace(/^sha256=/i, '').trim(), 'hex');
+      signatureValid = supplied.length === expected.length &&
+        timingSafeEqual(supplied, expected);
+    }
+
+    const insert = await this.db.query<{ id: string }>(
+      `INSERT INTO payment_gateway_events
+         (company_id,provider,event_id,event_type,signature_valid,payload,processed)
+       VALUES($1,$2,$3,$4,$5,$6,FALSE)
+       ON CONFLICT(provider,event_id) DO NOTHING
+       RETURNING id`,
+      [company.rows[0].id, providerCode, eventId, eventType, signatureValid, JSON.stringify(body)],
+    );
+    if (!insert.rows[0]) return { received: true, duplicate: true, signatureValid };
+    if (!signatureValid) {
+      return { received: true, duplicate: false, signatureValid: false, message: 'Evento retenido para revisión; no se aplicó ningún pago.' };
+    }
+    return { received: true, duplicate: false, signatureValid: true, message: 'Evento recibido. El procesamiento contable automático requiere una conciliación autorizada.' };
+  }
+
+  private readSecretMap(): Record<string, string> {
+    try {
+      const parsed = JSON.parse(process.env.PAYMENT_WEBHOOK_SECRETS_JSON || '{}') as Record<string, string>;
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
   }
 }

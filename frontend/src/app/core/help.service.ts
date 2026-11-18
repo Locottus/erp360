@@ -39,6 +39,9 @@ export class HelpService {
     if (/stock|reserv|inventario/.test(text)) return prefix + 'Revisa ubicación y disponible (físico menos reservado). La tienda utiliza MAIN. No ajustes existencias para ocultar un error; concilia reservas y kardex.';
     if (/saas|suscrip|cartera/.test(text) || route.split('?')[0] === '/platform/billing' || route.split('?')[0] === '/subscription') return prefix + 'SaaS administra el contrato de ERP360, no tus facturas de venta operativas. La cartera es al corte y el detalle es actual. Los precios revisados aplican a futuras facturas. Registra dinero realmente recibido; no hay pasarela, envío de correo ni bloqueo automático. Solo operadores de plataforma pueden modificarlo.';
     if (/factur|pago|reembolso|crédito|credito/.test(text)) return prefix + 'Revisa pedido, contabilización y período abierto. Usa Control operativo para crédito total o reembolso ya realizado; el sistema no envía dinero ni certifica documentos fiscales.';
+    if (/mfa|factor|totp|doble factor/.test(text)) return prefix + 'MFA protege el inicio de sesión. Configura el secreto una sola vez con tu autenticador y verifica el código de seis dígitos. Si pierdes el factor, un administrador autorizado debe restablecerlo mediante el procedimiento seguro del servidor.';
+    if (/banco|concili|extracto/.test(text)) return prefix + 'Las líneas bancarias permanecen pendientes hasta emparejarlas con un pago real o registrar una diferencia. La conciliación requiere monto, referencia y motivo; no ajusta saldos automáticamente.';
+    if (/fiscal|sat|dte|fel|e-cf/.test(text)) return prefix + 'El entorno fiscal real requiere proveedor homologado y estado de certificación. Sandbox acepta pruebas; no equivalen a documentos fiscales legales. No reenvíes sin revisar referencia y estado externo.';
     if (/error|409|fall/.test(text)) return prefix + 'Actualiza y verifica el documento original antes de reintentar. Una referencia existente no debe repetirse con otros datos. Comparte solo el diagnóstico seguro, sin datos personales.';
     const page = helpPages.find(item => item.route === route.split('?')[0]) ?? helpPages[0];
     return prefix + page.steps.join(' ');
@@ -55,6 +58,8 @@ export class HelpService {
       tienda: '/store', 'portal cliente': '/portal', acceso: '/login', inicio: '/',
       dashboard: '/workspace', procesos: '/processes', 'mi suscripcion': '/subscription',
       'administracion saas': '/platform/billing', 'disenar tienda': '/ecommerce/admin',
+      bancos: '/accounting', conciliacion: '/accounting', fiscal: '/operations',
+      seguridad: '/users', mfa: '/users',
     };
     const command = /^(?:abre|abrir|ve a|ir a|llevame a|navega a)\s+(.+?)[.!]?$/.exec(text);
     if (command) {
@@ -81,6 +86,9 @@ export class HelpService {
         requestedRoute: undefined };
     }
     const routes = /stock|reserv|inventario/.test(text) ? ['/inventory']
+      : /banco|concili/.test(text) ? ['/accounting', '/controls']
+      : /fiscal|sat|dte|fel|e-cf/.test(text) ? ['/operations?tab=fiscal', '/accounting']
+      : /mfa|factor|totp|seguridad/.test(text) ? ['/users', '/company']
       : /compra|aproba/.test(text) ? ['/operations?tab=purchases', '/receiving']
       : /factur|pago|credito|reembolso/.test(text) ? ['/invoicing', '/controls', '/accounting']
       : /permiso|usuario|403/.test(text) ? ['/users', '/processes']
@@ -90,6 +98,12 @@ export class HelpService {
       : [route.split('?')[0], '/processes'];
     const reply = /compra|aproba/.test(text)
       ? 'MOCK local: revisa las líneas y el estado de la solicitud antes de decidir. Si la empresa exige aprobación independiente, debe aprobar otro administrador. Los históricos sin creador conocido requieren revisión. No recibas ni contabilices sin comprobar las cantidades reales.'
+      : /banco|concili/.test(text)
+        ? 'MOCK local: en Contabilidad, abre conciliación bancaria y compara referencia, importe y fecha. Empareja solo contra un pago registrado y conserva una diferencia explícita con motivo. Nunca inventes movimiento bancario ni ajustes el saldo para cerrar la diferencia.'
+      : /fiscal|sat|dte|fel|e-cf/.test(text)
+        ? 'MOCK local: fiscal sandbox permite probar la trazabilidad, pero no acredita validez legal. Para producción exige proveedor homologado, certificado externo, ambiente y respuesta firmada. Conserva control, UUID, reintentos y estado del proveedor.'
+      : /mfa|factor|totp|seguridad/.test(text)
+        ? 'MOCK local: activa MFA desde Acceso o el perfil autorizado, verifica el primer código y conserva el autenticador. No compartas el secreto con el chat. Si necesitas desactivarlo, hazlo solo con código válido y auditoría.'
       : this.mockReply(question, route);
     return { text: reply + ' Esta es una orientación, no una comprobación de tus datos.', routes, requestedRoute: undefined };
   }

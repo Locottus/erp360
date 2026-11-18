@@ -10,6 +10,20 @@ import { HrService } from './hr.service';
 export class HrController {
   constructor(private readonly hrService: HrService) {}
 
+  @Post('employees/:id/account-binding')
+  @Roles('admin')
+  bindEmployeeAccount(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { userId: string; reason: string }) {
+    return this.hrService.bindEmployeeAccount(request.user, id, input);
+  }
+
+  @Post('employees/:id/account-binding/disable')
+  @Roles('admin')
+  disableEmployeeAccount(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string }) {
+    return this.hrService.disableEmployeeAccount(request.user, id, input);
+  }
+
   @Patch('employees/:id')
   @Roles('admin')
   updateEmployee(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
@@ -32,14 +46,15 @@ export class HrController {
 
   @Get('employees')
   @Roles('admin')
-  listEmployees(@Req() request: AuthenticatedRequest) {
-    return this.hrService.listEmployees(request.user);
+  listEmployees(@Req() request: AuthenticatedRequest, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.hrService.listEmployees(request.user, { page, pageSize });
   }
 
   @Get('attendance')
   @Roles('admin')
-  listAttendance(@Req() request: AuthenticatedRequest, @Query('status') status?: string) {
-    return this.hrService.listAttendance(request.user, status);
+  listAttendance(@Req() request: AuthenticatedRequest, @Query('status') status?: string,
+    @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.hrService.listAttendance(request.user, status, { page, pageSize });
   }
 
   @Post('attendance/check-in')
@@ -82,8 +97,8 @@ export class HrController {
 
   @Get('leave-requests')
   @Roles('admin')
-  listLeaveRequests(@Req() request: AuthenticatedRequest) {
-    return this.hrService.listLeaveRequests(request.user);
+  listLeaveRequests(@Req() request: AuthenticatedRequest, @Query('page') page?: string, @Query('pageSize') pageSize?: string) {
+    return this.hrService.listLeaveRequests(request.user, { page, pageSize });
   }
 
   @Post('leave-requests/:id/cancel')

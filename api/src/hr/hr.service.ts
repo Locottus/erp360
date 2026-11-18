@@ -14,6 +14,87 @@ type DbClient = Awaited<ReturnType<DatabaseService['connect']>>;
 export class HrService {
   constructor(private readonly db: DatabaseService) {}
 
+  async bindEmployeeAccount(
+    user: AuthUser,
+    employeeId: string,
+    input: { userId: string; reason: string },
+  ) {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input?.userId ?? '') ||
+        typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) {
+      throw new BadRequestException('userId and reason (10 to 1000 characters) are required.');
+    }
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const employee = await client.query<{ id: string }>(
+        'SELECT id FROM hr_employees WHERE id=$1 AND company_id=$2 FOR UPDATE',
+        [employeeId, user.companyId],
+      );
+      if (!employee.rows[0]) throw new NotFoundException('Employee not found.');
+      const target = await client.query<{ id: string }>(
+        'SELECT id FROM users WHERE id=$1 AND company_id=$2 AND is_active=TRUE',
+        [input.userId, user.companyId],
+      );
+      if (!target.rows[0]) throw new BadRequestException('Active user not found in this company.');
+      await client.query(
+        `INSERT INTO hr_employee_accounts
+           (company_id,employee_id,user_id,binding_status,bound_by,reason)
+         VALUES($1,$2,$3,'active',$4,$5)
+         ON CONFLICT(company_id,employee_id) DO UPDATE SET
+           user_id=EXCLUDED.user_id,binding_status='active',bound_by=EXCLUDED.bound_by,
+           bound_at=NOW(),disabled_at=NULL,reason=EXCLUDED.reason`,
+        [user.companyId, employeeId, input.userId, user.sub, input.reason.trim()],
+      );
+      await this.insertAuditTx(client, user, 'hr.employee.account.bind', employeeId, {
+        user_id: input.userId,
+        reason: input.reason.trim(),
+      });
+      await client.query('COMMIT');
+      return { employeeId, userId: input.userId, bindingStatus: 'active' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException('The employee or user is already bound to another HR account.');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async disableEmployeeAccount(user: AuthUser, employeeId: string, input: { reason: string }) {
+    if (typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) {
+      throw new BadRequestException('reason must contain 10 to 1000 characters.');
+    }
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const binding = await client.query<{ id: string }>(
+        `SELECT id FROM hr_employee_accounts
+         WHERE company_id=$1 AND employee_id=$2 AND binding_status='active'
+         FOR UPDATE`,
+        [user.companyId, employeeId],
+      );
+      if (!binding.rows[0]) throw new NotFoundException('Active employee account binding not found.');
+      await client.query(
+        `UPDATE hr_employee_accounts
+         SET binding_status='disabled',disabled_at=NOW(),reason=$3
+         WHERE company_id=$1 AND employee_id=$2`,
+        [user.companyId, employeeId, input.reason.trim()],
+      );
+      await this.insertAuditTx(client, user, 'hr.employee.account.disable', employeeId, {
+        reason: input.reason.trim(),
+      });
+      await client.query('COMMIT');
+      return { employeeId, bindingStatus: 'disabled' };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async updateEmployee(user: AuthUser, id: string, input: {
     fullName: string; email?: string; jobTitle?: string; hireDate: string; status: string; expectedRevision: number; reason: string;
   }) {
@@ -150,34 +231,71 @@ export class HrService {
     }
   }
 
-  async listEmployees(user: AuthUser) {
+  async listEmployees(user: AuthUser, options: { page?: string; pageSize?: string } = {}) {
+    const paginated = options.page !== undefined || options.pageSize !== undefined;
+    const page = options.page === undefined ? 1 : Number(options.page);
+    const pageSize = options.pageSize === undefined ? 100 : Number(options.pageSize);
+    if (paginated && (!Number.isSafeInteger(page) || page < 1 || page > 1000000 ||
+        !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500)) {
+      throw new BadRequestException('page must be 1 to 1000000 and pageSize 1 to 500.');
+    }
+    const count = paginated ? await this.db.query<{ total: string }>(
+      'SELECT COUNT(*)::text AS total FROM hr_employees WHERE company_id=$1',
+      [user.companyId],
+    ) : null;
     const result = await this.db.query(
       `SELECT id, employee_code, full_name, email, job_title, hire_date, status, revision, created_at
        FROM hr_employees
        WHERE company_id = $1
-       ORDER BY full_name ASC`,
-      [user.companyId],
+       ORDER BY full_name ASC${paginated ? ' LIMIT $2 OFFSET $3' : ''}`,
+      paginated ? [user.companyId, pageSize, (page - 1) * pageSize] : [user.companyId],
     );
-    await this.insertAuditDirect(user, 'hr.employee.list', user.companyId, { total: result.rows.length });
-    return result.rows;
+    await this.insertAuditDirect(user, 'hr.employee.list', user.companyId, {
+      total: paginated ? Number(count?.rows[0].total ?? 0) : result.rows.length,
+      page: paginated ? page : null,
+      pageSize: paginated ? pageSize : null,
+    });
+    return paginated
+      ? { items: result.rows, total: Number(count?.rows[0].total ?? 0), page, pageSize }
+      : result.rows;
   }
 
-  async listAttendance(user: AuthUser, status?: string) {
+  async listAttendance(user: AuthUser, status?: string, options: { page?: string; pageSize?: string } = {}) {
     if (status !== undefined && status !== 'open') {
       throw new BadRequestException('Only the open attendance status can be filtered.');
     }
+    const paginated = options.page !== undefined || options.pageSize !== undefined;
+    const page = options.page === undefined ? 1 : Number(options.page);
+    const pageSize = options.pageSize === undefined ? 100 : Number(options.pageSize);
+    if (paginated && (!Number.isSafeInteger(page) || page < 1 || page > 1000000 ||
+        !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500)) {
+      throw new BadRequestException('page must be 1 to 1000000 and pageSize 1 to 500.');
+    }
+    const count = paginated ? await this.db.query<{ total: string }>(
+      `SELECT COUNT(*)::text AS total FROM hr_attendance
+       WHERE company_id=$1 AND ($2::text IS NULL OR status=$2)`,
+      [user.companyId, status ?? null],
+    ) : null;
     const result = await this.db.query(
       `SELECT a.id, a.employee_id, e.employee_code, e.full_name, e.job_title,
               a.check_in_at, a.check_out_at, a.total_minutes, a.status, a.revision
        FROM hr_attendance a
        JOIN hr_employees e ON e.id = a.employee_id AND e.company_id = a.company_id
        WHERE a.company_id = $1 AND ($2::text IS NULL OR a.status = $2)
-       ORDER BY a.check_in_at DESC, a.id DESC
-       LIMIT CASE WHEN $2::text IS NULL THEN 500 ELSE NULL END`,
-      [user.companyId, status ?? null],
+       ORDER BY a.check_in_at DESC, a.id DESC${paginated ? ' LIMIT $3 OFFSET $4' : ' LIMIT 500'}`,
+      paginated
+        ? [user.companyId, status ?? null, pageSize, (page - 1) * pageSize]
+        : [user.companyId, status ?? null],
     );
-    await this.insertAuditDirect(user, 'hr.attendance.list', user.companyId, { total: result.rows.length, status: status ?? null });
-    return result.rows;
+    await this.insertAuditDirect(user, 'hr.attendance.list', user.companyId, {
+      total: paginated ? Number(count?.rows[0].total ?? 0) : result.rows.length,
+      status: status ?? null,
+      page: paginated ? page : null,
+      pageSize: paginated ? pageSize : null,
+    });
+    return paginated
+      ? { items: result.rows, total: Number(count?.rows[0].total ?? 0), page, pageSize }
+      : result.rows;
   }
 
   async checkIn(user: AuthUser, input: CheckInInput) {
@@ -374,7 +492,18 @@ export class HrService {
     finally { client.release(); }
   }
 
-  async listLeaveRequests(user: AuthUser) {
+  async listLeaveRequests(user: AuthUser, options: { page?: string; pageSize?: string } = {}) {
+    const paginated = options.page !== undefined || options.pageSize !== undefined;
+    const page = options.page === undefined ? 1 : Number(options.page);
+    const pageSize = options.pageSize === undefined ? 100 : Number(options.pageSize);
+    if (paginated && (!Number.isSafeInteger(page) || page < 1 || page > 1000000 ||
+        !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 500)) {
+      throw new BadRequestException('page must be 1 to 1000000 and pageSize 1 to 500.');
+    }
+    const count = paginated ? await this.db.query<{ total: string }>(
+      'SELECT COUNT(*)::text AS total FROM hr_leave_requests WHERE company_id=$1',
+      [user.companyId],
+    ) : null;
     const result = await this.db.query(
       `SELECT lr.id,
               lr.employee_id,
@@ -393,11 +522,17 @@ export class HrService {
        FROM hr_leave_requests lr
        JOIN hr_employees he ON he.id = lr.employee_id
        WHERE lr.company_id = $1
-       ORDER BY lr.created_at DESC`,
-      [user.companyId],
+       ORDER BY lr.created_at DESC${paginated ? ' LIMIT $2 OFFSET $3' : ''}`,
+      paginated ? [user.companyId, pageSize, (page - 1) * pageSize] : [user.companyId],
     );
-    await this.insertAuditDirect(user, 'hr.leave.request.list', user.companyId, { total: result.rows.length });
-    return result.rows;
+    await this.insertAuditDirect(user, 'hr.leave.request.list', user.companyId, {
+      total: paginated ? Number(count?.rows[0].total ?? 0) : result.rows.length,
+      page: paginated ? page : null,
+      pageSize: paginated ? pageSize : null,
+    });
+    return paginated
+      ? { items: result.rows, total: Number(count?.rows[0].total ?? 0), page, pageSize }
+      : result.rows;
   }
 
   private async assertEmployeeOwnership(client: DbClient, companyId: string, employeeId: string) {

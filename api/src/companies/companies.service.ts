@@ -53,6 +53,74 @@ export class CompaniesService {
     return company;
   }
 
+  async getCostPolicy(user: AuthenticatedUser) {
+    const result = await this.db.query<{
+      inventory_cost_policy: 'weighted_average' | 'fifo';
+      inventory_cost_policy_revision: number;
+    }>(
+      `SELECT inventory_cost_policy,inventory_cost_policy_revision
+       FROM companies WHERE id=$1`,
+      [user.companyId],
+    );
+    if (!result.rows[0]) throw new NotFoundException('Company not found.');
+    return {
+      policy: result.rows[0].inventory_cost_policy,
+      revision: result.rows[0].inventory_cost_policy_revision,
+    };
+  }
+
+  async updateCostPolicy(
+    user: AuthenticatedUser,
+    input: { policy: 'weighted_average' | 'fifo'; expectedRevision: number; reason: string },
+  ) {
+    if (!['weighted_average', 'fifo'].includes(input.policy)) {
+      throw new BadRequestException('policy must be weighted_average or fifo.');
+    }
+    const revision = expectedRevision(input.expectedRevision);
+    const reason = changeReason(input.reason);
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const before = await client.query<{
+        inventory_cost_policy: 'weighted_average' | 'fifo';
+        inventory_cost_policy_revision: number;
+      }>(
+        'SELECT inventory_cost_policy,inventory_cost_policy_revision FROM companies WHERE id=$1 FOR UPDATE',
+        [user.companyId],
+      );
+      if (!before.rows[0]) throw new NotFoundException('Company not found.');
+      if (before.rows[0].inventory_cost_policy_revision !== revision) {
+        throw new ConflictException('Cost policy changed. Reload before editing.');
+      }
+      if (before.rows[0].inventory_cost_policy === input.policy) {
+        throw new ConflictException('No cost policy changes.');
+      }
+      const updated = await client.query<{ inventory_cost_policy: 'weighted_average' | 'fifo'; inventory_cost_policy_revision: number }>(
+        `UPDATE companies
+         SET inventory_cost_policy=$2,inventory_cost_policy_revision=inventory_cost_policy_revision+1,updated_at=NOW()
+         WHERE id=$1
+         RETURNING inventory_cost_policy,inventory_cost_policy_revision`,
+        [user.companyId, input.policy],
+      );
+      await client.query(
+        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'company.inventory_cost_policy.update','companies',$1,$3)`,
+        [user.companyId, user.sub, JSON.stringify({
+          before: before.rows[0],
+          after: updated.rows[0],
+          reason,
+        })],
+      );
+      await client.query('COMMIT');
+      return { policy: updated.rows[0].inventory_cost_policy, revision: updated.rows[0].inventory_cost_policy_revision };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async updateCurrentCompany(
     user: AuthenticatedUser,
     input: {

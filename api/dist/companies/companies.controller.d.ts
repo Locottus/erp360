@@ -23,6 +23,18 @@ export declare class CompaniesController {
         currencyCode?: string;
         quotationValidityDays?: number;
     }): Promise<any>;
+    getCostPolicy(request: AuthenticatedRequest): Promise<{
+        policy: "weighted_average" | "fifo";
+        revision: number;
+    }>;
+    updateCostPolicy(request: AuthenticatedRequest, input: {
+        policy: 'weighted_average' | 'fifo';
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        policy: "weighted_average" | "fifo";
+        revision: number;
+    }>;
     getExchangeRates(request: AuthenticatedRequest): Promise<{
         id: string;
         from_currency: string;

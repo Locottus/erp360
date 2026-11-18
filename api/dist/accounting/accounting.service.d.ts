@@ -6,6 +6,18 @@ export declare class AccountingService {
     constructor(db: DatabaseService);
     listAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     listBankAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listBankReconciliationLines(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    reconcileBankLine(user: AuthUser, lineId: string, input: {
+        matchedPaymentId?: string;
+        status: 'matched' | 'reconciled' | 'difference';
+        reason: string;
+        differenceAmount?: number;
+    }): Promise<{
+        id: string;
+        status: string;
+        matchedPaymentId: string | null;
+        differenceAmount: number | null | undefined;
+    }>;
     upsertBankAccount(user: AuthUser, input: {
         code?: string;
         bankName?: string;

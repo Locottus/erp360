@@ -31,6 +31,24 @@ export class AuthController {
     return this.authService.revokeSessions(request.user);
   }
 
+  @Get('mfa/setup')
+  @UseGuards(AuthGuard)
+  mfaSetup(@Req() request: AuthenticatedRequest) {
+    return this.authService.setupMfa(request.user);
+  }
+
+  @Post('mfa/verify')
+  @UseGuards(AuthGuard)
+  mfaVerify(@Req() request: AuthenticatedRequest, @Body() body: { code: string }) {
+    return this.authService.verifyMfa(request.user, body.code);
+  }
+
+  @Post('mfa/disable')
+  @UseGuards(AuthGuard)
+  mfaDisable(@Req() request: AuthenticatedRequest, @Body() body: { code: string }) {
+    return this.authService.disableMfa(request.user, body.code);
+  }
+
   @Get('users')
   @UseGuards(AuthGuard)
   @Roles('admin')

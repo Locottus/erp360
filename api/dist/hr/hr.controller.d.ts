@@ -4,6 +4,20 @@ import { HrService } from './hr.service';
 export declare class HrController {
     private readonly hrService;
     constructor(hrService: HrService);
+    bindEmployeeAccount(request: AuthenticatedRequest, id: string, input: {
+        userId: string;
+        reason: string;
+    }): Promise<{
+        employeeId: string;
+        userId: string;
+        bindingStatus: string;
+    }>;
+    disableEmployeeAccount(request: AuthenticatedRequest, id: string, input: {
+        reason: string;
+    }): Promise<{
+        employeeId: string;
+        bindingStatus: string;
+    }>;
     updateEmployee(request: AuthenticatedRequest, id: string, input: Parameters<HrService['updateEmployee']>[2]): Promise<{
         id: string;
         revision: number;
@@ -17,8 +31,18 @@ export declare class HrController {
         id: string;
         employee_code: string;
     }>;
-    listEmployees(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
-    listAttendance(request: AuthenticatedRequest, status?: string): Promise<import("pg").QueryResultRow[]>;
+    listEmployees(request: AuthenticatedRequest, page?: string, pageSize?: string): Promise<import("pg").QueryResultRow[] | {
+        items: import("pg").QueryResultRow[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }>;
+    listAttendance(request: AuthenticatedRequest, status?: string, page?: string, pageSize?: string): Promise<import("pg").QueryResultRow[] | {
+        items: import("pg").QueryResultRow[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }>;
     checkIn(request: AuthenticatedRequest, body: CheckInInput): Promise<{
         id: string;
         employeeId: string;
@@ -45,7 +69,12 @@ export declare class HrController {
         id: string;
         status: "approved" | "rejected";
     }>;
-    listLeaveRequests(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    listLeaveRequests(request: AuthenticatedRequest, page?: string, pageSize?: string): Promise<import("pg").QueryResultRow[] | {
+        items: import("pg").QueryResultRow[];
+        total: number;
+        page: number;
+        pageSize: number;
+    }>;
     cancelLeaveRequest(request: AuthenticatedRequest, id: string, input: Parameters<HrService['cancelLeaveRequest']>[2]): Promise<{
         id: string;
         status: string;

@@ -25,6 +25,9 @@ let FiscalService = class FiscalService {
         if (!input.endpointUrl?.trim()) {
             throw new common_1.BadRequestException('endpointUrl is required.');
         }
+        if (input.environment === 'production') {
+            throw new common_1.BadRequestException('Production fiscal providers are not enabled until external certification is registered.');
+        }
         const result = await this.db.query(`INSERT INTO fiscal_provider_configs
          (company_id, country_code, provider_code, environment, endpoint_url, credentials_json, is_active, created_by, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,TRUE,$7,NOW())
@@ -159,6 +162,10 @@ let FiscalService = class FiscalService {
             if (doc.rows[0].status === 'accepted')
                 throw new common_1.ConflictException('Fiscal document already accepted; it cannot be submitted again.');
             const config = await this.getProviderConfig(client, user.companyId, doc.rows[0].country_code);
+            if (config.environment === 'production' &&
+                config.certification_status !== 'certified') {
+                throw new common_1.BadRequestException('Production fiscal transmission requires certification_status=certified.');
+            }
             const adapter = (0, fiscal_adapters_1.buildFiscalAdapter)(doc.rows[0].country_code);
             const result = await adapter.submit(doc.rows[0].payload, {
                 providerCode: config.provider_code,
@@ -241,7 +248,7 @@ let FiscalService = class FiscalService {
         return result.rows;
     }
     async getProviderConfig(client, companyId, countryCode) {
-        const config = await client.query(`SELECT id, provider_code, environment, endpoint_url, credentials_json
+        const config = await client.query(`SELECT id, provider_code, environment, endpoint_url, credentials_json, certification_status
        FROM fiscal_provider_configs
        WHERE company_id = $1 AND country_code = $2 AND is_active = TRUE
        LIMIT 1`, [companyId, countryCode]);

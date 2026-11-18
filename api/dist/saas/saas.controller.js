@@ -34,6 +34,9 @@ let SaasIdentityController = class SaasIdentityController {
     subscription(request) {
         return this.saas.getTenantSubscription(request.user.companyId);
     }
+    entitlements(request) {
+        return this.saas.getEntitlements(request.user.companyId);
+    }
 };
 exports.SaasIdentityController = SaasIdentityController;
 __decorate([
@@ -52,6 +55,14 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], SaasIdentityController.prototype, "subscription", null);
+__decorate([
+    (0, common_1.Get)('entitlements'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], SaasIdentityController.prototype, "entitlements", null);
 exports.SaasIdentityController = SaasIdentityController = __decorate([
     (0, common_1.Controller)('saas'),
     __metadata("design:paramtypes", [saas_service_1.SaasService])
@@ -82,6 +93,12 @@ let SaasOperatorController = class SaasOperatorController {
     }
     companies() {
         return this.saas.listCompanies();
+    }
+    entitlementsByCompany(id) {
+        return this.saas.getEntitlements(id);
+    }
+    setEntitlements(request, id, body) {
+        return this.saas.setEntitlement(operatorUser(request), id, body);
     }
     createSubscription(request, body) {
         return this.saas.createSubscription(operatorUser(request), body);
@@ -165,6 +182,22 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], SaasOperatorController.prototype, "companies", null);
+__decorate([
+    (0, common_1.Get)('companies/:id/entitlements'),
+    __param(0, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String]),
+    __metadata("design:returntype", void 0)
+], SaasOperatorController.prototype, "entitlementsByCompany", null);
+__decorate([
+    (0, common_1.Post)('companies/:id/entitlements'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], SaasOperatorController.prototype, "setEntitlements", null);
 __decorate([
     (0, common_1.Post)('subscriptions'),
     __param(0, (0, common_1.Req)()),

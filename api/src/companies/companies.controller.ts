@@ -22,6 +22,19 @@ export class CompaniesController {
     return this.companiesService.updateCurrentCompany(request.user, input);
   }
 
+  @Get('cost-policy')
+  @Roles('admin','accountant')
+  getCostPolicy(@Req() request: AuthenticatedRequest) {
+    return this.companiesService.getCostPolicy(request.user);
+  }
+
+  @Patch('cost-policy')
+  @Roles('admin','accountant')
+  updateCostPolicy(@Req() request: AuthenticatedRequest,
+    @Body() input: { policy: 'weighted_average' | 'fifo'; expectedRevision: number; reason: string }) {
+    return this.companiesService.updateCostPolicy(request.user, input);
+  }
+
   @Get('currency-rates')
   @Roles('admin')
   getExchangeRates(@Req() request: AuthenticatedRequest) {

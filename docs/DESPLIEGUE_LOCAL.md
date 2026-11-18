@@ -7,6 +7,34 @@ No detener contenedores de otros proyectos. La API ERP usa **3001**; 3000 puede 
 
 ## Base de datos y configuración
 
+### Migración 0035
+
+La migración `0035_operational_readiness.sql` se aplicó a la base operativa el
+17 de noviembre de 2026 después de respaldo custom y validación aislada.
+Añade:
+
+- política de costo empresarial y cuentas `5100`;
+- snapshots de costo por despacho;
+- estados de conciliación bancaria;
+- tabla cifrada de MFA TOTP;
+- eventos idempotentes de webhooks de pago;
+- estado de certificación fiscal.
+
+No ejecutar fiscal producción hasta configurar proveedor homologado. Para MFA,
+configurar `MFA_CREDENTIAL_KEY` o reutilizar únicamente por transición
+`ASSISTANT_CREDENTIAL_KEY`, ambos fuera de PostgreSQL y Git. Para webhooks,
+configurar `PAYMENT_WEBHOOK_SECRETS_JSON` como mapa JSON
+`{"proveedor":"secreto"}` y enviar `x-signature` con HMAC-SHA256.
+
+### Migración 0036 y respaldos
+
+La migración `0036_remaining_operational_foundations.sql` se aplicó el
+17 de noviembre de 2026 tras respaldo custom y validación aislada.
+Respaldo: ejecutar `.\scripts\backup.ps1`. Restauración:
+`.\scripts\restore.ps1 -BackupPath <archivo> -DatabaseName erp360`.
+Antes de restaurar sobre producción, detener escrituras y ensayar RPO/RTO
+en una base separada. El script no recrea ni elimina el volumen.
+
 ```powershell
 Copy-Item .env.example .env
 docker compose up -d db

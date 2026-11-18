@@ -22,6 +22,12 @@ let InventoryController = class InventoryController {
     constructor(inventoryService) {
         this.inventoryService = inventoryService;
     }
+    warehouses(request) {
+        return this.inventoryService.listWarehouses(request.user);
+    }
+    upsertWarehouse(request, input) {
+        return this.inventoryService.upsertWarehouse(request.user, input);
+    }
     replenishment(request, locationCode) {
         return this.inventoryService.listReplenishment(request.user, locationCode);
     }
@@ -78,6 +84,23 @@ let InventoryController = class InventoryController {
     }
 };
 exports.InventoryController = InventoryController;
+__decorate([
+    (0, common_1.Get)('warehouses'),
+    (0, roles_decorator_1.Roles)('admin', 'inventory'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "warehouses", null);
+__decorate([
+    (0, common_1.Post)('warehouses'),
+    (0, roles_decorator_1.Roles)('admin', 'inventory'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], InventoryController.prototype, "upsertWarehouse", null);
 __decorate([
     (0, common_1.Get)('replenishment'),
     (0, roles_decorator_1.Roles)('admin'),

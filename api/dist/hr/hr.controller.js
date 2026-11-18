@@ -22,6 +22,12 @@ let HrController = class HrController {
     constructor(hrService) {
         this.hrService = hrService;
     }
+    bindEmployeeAccount(request, id, input) {
+        return this.hrService.bindEmployeeAccount(request.user, id, input);
+    }
+    disableEmployeeAccount(request, id, input) {
+        return this.hrService.disableEmployeeAccount(request.user, id, input);
+    }
     updateEmployee(request, id, input) {
         return this.hrService.updateEmployee(request.user, id, input);
     }
@@ -31,11 +37,11 @@ let HrController = class HrController {
     createEmployee(request, body) {
         return this.hrService.createEmployee(request.user, body);
     }
-    listEmployees(request) {
-        return this.hrService.listEmployees(request.user);
+    listEmployees(request, page, pageSize) {
+        return this.hrService.listEmployees(request.user, { page, pageSize });
     }
-    listAttendance(request, status) {
-        return this.hrService.listAttendance(request.user, status);
+    listAttendance(request, status, page, pageSize) {
+        return this.hrService.listAttendance(request.user, status, { page, pageSize });
     }
     checkIn(request, body) {
         return this.hrService.checkIn(request.user, body);
@@ -52,14 +58,34 @@ let HrController = class HrController {
     rejectLeaveRequest(request, leaveRequestId, body) {
         return this.hrService.decideLeaveRequest(request.user, leaveRequestId, 'rejected', body?.note);
     }
-    listLeaveRequests(request) {
-        return this.hrService.listLeaveRequests(request.user);
+    listLeaveRequests(request, page, pageSize) {
+        return this.hrService.listLeaveRequests(request.user, { page, pageSize });
     }
     cancelLeaveRequest(request, id, input) {
         return this.hrService.cancelLeaveRequest(request.user, id, input);
     }
 };
 exports.HrController = HrController;
+__decorate([
+    (0, common_1.Post)('employees/:id/account-binding'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "bindEmployeeAccount", null);
+__decorate([
+    (0, common_1.Post)('employees/:id/account-binding/disable'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], HrController.prototype, "disableEmployeeAccount", null);
 __decorate([
     (0, common_1.Patch)('employees/:id'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -93,8 +119,10 @@ __decorate([
     (0, common_1.Get)('employees'),
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('page')),
+    __param(2, (0, common_1.Query)('pageSize')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listEmployees", null);
 __decorate([
@@ -102,8 +130,10 @@ __decorate([
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('status')),
+    __param(2, (0, common_1.Query)('page')),
+    __param(3, (0, common_1.Query)('pageSize')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, String, String]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listAttendance", null);
 __decorate([
@@ -157,8 +187,10 @@ __decorate([
     (0, common_1.Get)('leave-requests'),
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Query)('page')),
+    __param(2, (0, common_1.Query)('pageSize')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, String, String]),
     __metadata("design:returntype", void 0)
 ], HrController.prototype, "listLeaveRequests", null);
 __decorate([

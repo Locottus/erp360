@@ -4,6 +4,17 @@ import { InventoryService } from './inventory.service';
 export declare class InventoryController {
     private readonly inventoryService;
     constructor(inventoryService: InventoryService);
+    warehouses(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    upsertWarehouse(request: AuthenticatedRequest, input: {
+        locationCode: string;
+        name: string;
+        isActive?: boolean;
+    }): Promise<{
+        location_code: string;
+        name: string;
+        is_active: boolean;
+        revision: number;
+    }>;
     replenishment(request: AuthenticatedRequest, locationCode?: string): Promise<import("pg").QueryResultRow[]>;
     purchaseCommitments(request: AuthenticatedRequest, productId: string): Promise<import("pg").QueryResultRow[]>;
     purchasePlanning(request: AuthenticatedRequest, productId: string): Promise<import("./inventory.types").PurchasePlanning>;

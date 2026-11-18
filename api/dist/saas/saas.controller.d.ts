@@ -13,7 +13,7 @@ export declare class SaasIdentityController {
         integrations: {
             readonly payments: "not_configured";
             readonly email: "not_configured";
-            readonly enforcement: "informational";
+            readonly enforcement: "database_ready";
         };
     }>;
     subscription(request: AuthenticatedRequest): Promise<{
@@ -37,6 +37,13 @@ export declare class SaasIdentityController {
         };
         access: "informational";
     }>;
+    entitlements(request: AuthenticatedRequest): Promise<{
+        module_code: string;
+        status: string;
+        effective_at: string;
+        grace_until: string | null;
+        revision: number;
+    }[]>;
 }
 export declare class SaasOperatorController {
     private readonly saas;
@@ -81,6 +88,20 @@ export declare class SaasOperatorController {
         users: import("pg").QueryResultRow[];
     }>;
     companies(): Promise<import("pg").QueryResultRow[]>;
+    entitlementsByCompany(id: string): Promise<{
+        module_code: string;
+        status: string;
+        effective_at: string;
+        grace_until: string | null;
+        revision: number;
+    }[]>;
+    setEntitlements(request: OperatorRequest, id: string, body: unknown): Promise<{
+        module_code: string;
+        status: string;
+        effective_at: string;
+        grace_until: string | null;
+        revision: number;
+    }[]>;
     createSubscription(request: OperatorRequest, body: unknown): Promise<any>;
     updateSubscription(request: OperatorRequest, id: string, body: unknown): Promise<any>;
     createInvoice(request: OperatorRequest, id: string, body: unknown): Promise<any>;

@@ -1,3 +1,4 @@
+import { DatabaseService } from '../common/database.service';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
 import type { ClosePeriodInput, RegisterInvoicePaymentInput } from './accounting.types';
 import { AccountingService } from './accounting.service';
@@ -51,6 +52,18 @@ export declare class AccountingController {
         };
     }>;
     bankAccounts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    bankReconciliationLines(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    reconcileBankLine(request: AuthenticatedRequest, id: string, input: {
+        matchedPaymentId?: string;
+        status: 'matched' | 'reconciled' | 'difference';
+        reason: string;
+        differenceAmount?: number;
+    }): Promise<{
+        id: string;
+        status: string;
+        matchedPaymentId: string | null;
+        differenceAmount: number | null | undefined;
+    }>;
     upsertBankAccount(request: AuthenticatedRequest, input: {
         code: string;
         bankName: string;
@@ -163,4 +176,20 @@ export declare class AccountingController {
         month: number;
         status: string;
     }>;
+}
+export declare class PaymentWebhookController {
+    private readonly db;
+    constructor(db: DatabaseService);
+    receive(provider: string, companyCodeHeader: string | undefined, signature: string | undefined, body: Record<string, unknown>): Promise<{
+        received: boolean;
+        duplicate: boolean;
+        signatureValid: boolean;
+        message?: undefined;
+    } | {
+        received: boolean;
+        duplicate: boolean;
+        signatureValid: boolean;
+        message: string;
+    }>;
+    private readSecretMap;
 }

@@ -16,6 +16,9 @@ export class FiscalService {
     if (!input.endpointUrl?.trim()) {
       throw new BadRequestException('endpointUrl is required.');
     }
+    if (input.environment === 'production') {
+      throw new BadRequestException('Production fiscal providers are not enabled until external certification is registered.');
+    }
     const result = await this.db.query<{ id: string }>(
       `INSERT INTO fiscal_provider_configs
          (company_id, country_code, provider_code, environment, endpoint_url, credentials_json, is_active, created_by, updated_at)
@@ -193,6 +196,10 @@ export class FiscalService {
       }
       if (doc.rows[0].status === 'accepted') throw new ConflictException('Fiscal document already accepted; it cannot be submitted again.');
       const config = await this.getProviderConfig(client, user.companyId, doc.rows[0].country_code);
+      if (config.environment === 'production' &&
+          config.certification_status !== 'certified') {
+        throw new BadRequestException('Production fiscal transmission requires certification_status=certified.');
+      }
       const adapter = buildFiscalAdapter(doc.rows[0].country_code);
       const result = await adapter.submit(doc.rows[0].payload, {
         providerCode: config.provider_code,
@@ -299,8 +306,9 @@ export class FiscalService {
       environment: 'sandbox' | 'production';
       endpoint_url: string;
       credentials_json: Record<string, unknown>;
+      certification_status: 'not_certified' | 'certifying' | 'certified';
     }>(
-      `SELECT id, provider_code, environment, endpoint_url, credentials_json
+      `SELECT id, provider_code, environment, endpoint_url, credentials_json, certification_status
        FROM fiscal_provider_configs
        WHERE company_id = $1 AND country_code = $2 AND is_active = TRUE
        LIMIT 1`,

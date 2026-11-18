@@ -43,6 +43,12 @@ export class SaasIdentityController {
   subscription(@Req() request: AuthenticatedRequest) {
     return this.saas.getTenantSubscription(request.user.companyId);
   }
+
+  @Get('entitlements')
+  @UseGuards(AuthGuard)
+  entitlements(@Req() request: AuthenticatedRequest) {
+    return this.saas.getEntitlements(request.user.companyId);
+  }
 }
 
 @Controller('saas')
@@ -89,6 +95,20 @@ export class SaasOperatorController {
   @Get('companies')
   companies() {
     return this.saas.listCompanies();
+  }
+
+  @Get('companies/:id/entitlements')
+  entitlementsByCompany(@Param('id', ParseUUIDPipe) id: string) {
+    return this.saas.getEntitlements(id);
+  }
+
+  @Post('companies/:id/entitlements')
+  setEntitlements(
+    @Req() request: OperatorRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: unknown,
+  ) {
+    return this.saas.setEntitlement(operatorUser(request), id, body);
   }
 
   @Post('subscriptions')

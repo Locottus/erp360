@@ -29,6 +29,90 @@ let AccountingService = class AccountingService {
         return (await this.db.query(`SELECT id, code, bank_name, iban, currency_code, is_active, created_at
        FROM bank_accounts WHERE company_id=$1 ORDER BY created_at DESC`, [user.companyId])).rows;
     }
+    async listBankReconciliationLines(user) {
+        const result = await this.db.query(`SELECT l.id,l.reference,l.line_type,l.amount::text,l.booked_at,l.counterpart_reference,l.metadata,
+              l.reconciliation_status,l.matched_payment_id,l.difference_amount::text,l.reconciled_at,
+              s.statement_reference,s.statement_date,b.code AS bank_account_code,b.bank_name
+       FROM bank_statement_lines l
+       JOIN bank_account_statements s ON s.id=l.statement_id
+       JOIN bank_accounts b ON b.id=s.bank_account_id
+       WHERE s.company_id=$1
+       ORDER BY l.booked_at DESC,l.created_at DESC
+       LIMIT 1000`, [user.companyId]);
+        return result.rows;
+    }
+    async reconcileBankLine(user, lineId, input) {
+        if (!input || !['matched', 'reconciled', 'difference'].includes(input.status)) {
+            throw new common_1.BadRequestException('status must be matched, reconciled or difference.');
+        }
+        if (typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) {
+            throw new common_1.BadRequestException('reason must contain 10 to 1000 characters.');
+        }
+        if (input.status === 'difference' &&
+            (typeof input.differenceAmount !== 'number' || !Number.isFinite(input.differenceAmount) || input.differenceAmount < 0)) {
+            throw new common_1.BadRequestException('differenceAmount must be a non-negative number.');
+        }
+        const client = await this.db.connect();
+        try {
+            await client.query('BEGIN');
+            const line = await client.query(`SELECT l.id,l.amount::text,l.reconciliation_status,l.statement_id
+         FROM bank_statement_lines l
+         JOIN bank_account_statements s ON s.id=l.statement_id
+         WHERE l.id=$1 AND s.company_id=$2 FOR UPDATE OF l`, [lineId, user.companyId]);
+            if (!line.rows[0])
+                throw new common_1.NotFoundException('Bank statement line not found.');
+            if (line.rows[0].reconciliation_status === 'reconciled') {
+                throw new common_1.ConflictException('This bank line is already reconciled.');
+            }
+            let matchedPaymentId = null;
+            if (input.matchedPaymentId !== undefined) {
+                if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.matchedPaymentId)) {
+                    throw new common_1.BadRequestException('matchedPaymentId must be a UUID.');
+                }
+                const payment = await client.query(`SELECT id,amount::text FROM accounting_payments WHERE id=$1 AND company_id=$2`, [input.matchedPaymentId, user.companyId]);
+                if (!payment.rows[0])
+                    throw new common_1.NotFoundException('Matched accounting payment not found.');
+                if (Math.abs(Number(payment.rows[0].amount) - Number(line.rows[0].amount)) >= 0.0001) {
+                    throw new common_1.ConflictException('Payment amount does not match the bank line amount.');
+                }
+                matchedPaymentId = input.matchedPaymentId;
+                await client.query(`UPDATE accounting_payments SET status='reconciled' WHERE id=$1 AND company_id=$2`, [matchedPaymentId, user.companyId]);
+            }
+            const updated = await client.query(`UPDATE bank_statement_lines SET
+           reconciliation_status=$2,
+           matched_payment_id=$3,
+           difference_amount=$4,
+           reconciled_at=CASE WHEN $2='reconciled' THEN NOW() ELSE NULL END,
+           reconciled_by=CASE WHEN $2='reconciled' THEN $5 ELSE NULL END,
+           reconciliation_reason=$6
+         WHERE id=$1
+         RETURNING reconciliation_status`, [lineId, input.status, matchedPaymentId,
+                input.status === 'difference' ? input.differenceAmount : null,
+                user.sub, input.reason.trim()]);
+            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'accounting.bank_line.reconcile','bank_statement_lines',$3,$4)`, [user.companyId, user.sub, lineId, JSON.stringify({
+                    before_status: line.rows[0].reconciliation_status,
+                    after_status: updated.rows[0].reconciliation_status,
+                    matched_payment_id: matchedPaymentId,
+                    difference_amount: input.differenceAmount ?? null,
+                    reason: input.reason.trim(),
+                })]);
+            await client.query('COMMIT');
+            return {
+                id: lineId,
+                status: updated.rows[0].reconciliation_status,
+                matchedPaymentId,
+                differenceAmount: input.status === 'difference' ? input.differenceAmount : null,
+            };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     async upsertBankAccount(user, input) {
         if (typeof input?.code !== 'string' || !input.code.trim())
             throw new common_1.BadRequestException('code is required.');
@@ -342,6 +426,7 @@ let AccountingService = class AccountingService {
             { code: '2100', name: 'Cuentas por pagar', type: 'liability' },
             { code: '2200', name: 'IVA por pagar', type: 'liability' },
             { code: '4100', name: 'Ingresos por ventas', type: 'revenue' },
+            { code: '5100', name: 'Costo de ventas', type: 'expense' },
         ];
         const created = [];
         for (const account of defaults) {

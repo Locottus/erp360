@@ -25,6 +25,8 @@ import { SessionService } from './core/session.service';
           <input id="login-email" name="email" [(ngModel)]="email" type="email" required email autocomplete="username" />
           <label for="login-password">Contraseña</label>
           <input id="login-password" name="password" [(ngModel)]="password" [type]="showPassword ? 'text' : 'password'" required autocomplete="current-password" />
+          <label for="login-mfa">Código MFA <span class="muted">(solo si está activado)</span></label>
+          <input id="login-mfa" name="mfaCode" [(ngModel)]="mfaCode" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" />
           <button type="button" class="btn btn-secondary" (click)="showPassword = !showPassword" [attr.aria-pressed]="showPassword">{{ showPassword ? 'Ocultar' : 'Mostrar' }} contraseña</button>
           <button type="submit" class="btn btn-primary" [disabled]="loading || loginForm.invalid">{{ loading ? 'Ingresando…' : 'Entrar a mi empresa' }}</button>
           <p class="muted">¿Olvidaste la contraseña? Solicita una clave de recuperación al administrador.</p>
@@ -66,7 +68,7 @@ export class AuthConsoleComponent {
   private readonly router = inject(Router);
   private readonly http = inject(HttpClient);
   resetToken = ''; newPassword = '';
-  email = ''; password = ''; companyCode = ''; companyName = ''; fullName = '';
+  email = ''; password = ''; mfaCode = ''; companyCode = ''; companyName = ''; fullName = '';
   adminEmail = ''; adminPassword = ''; loading = false; error = ''; success = ''; showPassword = false;
 
   async resetPassword() {
@@ -88,8 +90,8 @@ export class AuthConsoleComponent {
     }
     this.loading = true;
     try {
-      await this.session.login(this.email.trim(), this.password);
-      this.password = '';
+      await this.session.login(this.email.trim(), this.password, this.mfaCode || undefined);
+      this.password = ''; this.mfaCode = '';
       await this.router.navigateByUrl('/workspace');
     } catch (error) {
       this.error = error instanceof HttpErrorResponse && error.status === 401

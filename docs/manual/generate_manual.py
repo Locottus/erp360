@@ -31,7 +31,7 @@ for name in ["Title", "Heading 1", "Heading 2", "Heading 3"]:
     doc.styles[name].paragraph_format.keep_with_next = True
 doc.styles["Heading 1"].paragraph_format.page_break_before = True
 header = section.header.paragraphs[0]
-header.text = "ERP360  |  Operación y configuración  |  Edición 3.19"
+header.text = "ERP360  |  Operación y configuración  |  Edición 3.20"
 header.style = doc.styles["Caption"]
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -140,7 +140,7 @@ def flow(title, purpose, prerequisites, operations, result, controls):
 doc.add_heading("ERP360", 0)
 p("MANUAL DE OPERACIÓN Y CONFIGURACIÓN", "Subtitle")
 p("Guía de usuario, administración funcional e integración")
-p(f"Edición 3.19 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
+p(f"Edición 3.20 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
 p("Audiencia: usuarios, responsables de empresa, integradores y soporte.")
 note("Este manual describe la implementación existente, no una promesa de paridad con otro ERP. "
      "Distingue pantallas web de operaciones disponibles solo por API. Fiscal es simulación sandbox; "
@@ -156,12 +156,12 @@ p("ERP360 utiliza Angular para experiencia web, NestJS para servicios y PostgreS
   "Varias empresas comparten esquema con separación lógica por company_id. La empresa administrativa "
   "proviene de la sesión JWT; el código de tienda identifica un catálogo público, no concede permisos.")
 table(["Área", "Canal existente", "Límites relevantes"], [
-    ("Empresas y usuarios", "Mi empresa, Usuarios y Acceso", "Perfil e identidad revisionados con motivo/auditoría, invitaciones y revocación. Sin MFA ni membresías multiempresa."),
+    ("Empresas y usuarios", "Mi empresa, Usuarios y Acceso", "Perfil e identidad revisionados con motivo/auditoría, invitaciones, revocación y MFA TOTP cifrado. Recuperación visual y membresías multiempresa siguen pendientes."),
     ("Maestros", "Catálogos, Operaciones y API", "Alta, edición, desactivación, exportación JSON e importación atómica de hasta 200 altas."),
     ("Ventas / compras", "Operaciones, Recepciones y API", "Recepciones parciales con ingreso físico atómico; devengo al completar y devolución con crédito proporcional."),
-    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias, conteos y reposición sugerida; sin valoración, lotes ni series."),
+    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias, conteos, reposición y almacenes autorizados. Política de costo y snapshot COGS en 0035; lotes FIFO completos e series siguen pendientes."),
     ("Facturación comercial", "Facturación, Control operativo y API", "Folio automático opcional, moneda en documentos nuevos, PDF, crédito total y reembolso registrado. Sin certificación fiscal."),
-    ("Contabilidad", "Libro mayor, Operaciones y API", "Plan base, asientos por origen, pagos, apertura/acumulado exactos por cuenta, balance y cierre. No suite financiera completa."),
+    ("Contabilidad", "Libro mayor, Operaciones y API", "Plan base, asientos por origen, pagos, COGS, conciliación bancaria inicial y cierre. Importación bancaria masiva y estados certificados siguen pendientes."),
     ("Fiscal GT/SV/DO", "API sandbox", "Adaptadores simulados; producción bloqueada, sin certificación legal."),
     ("RRHH", "Operaciones, Personas y API", "Empleados, bajas, jornadas y cancelación auditada de ausencias. No nómina ni saldos legales."),
     ("eCommerce", "Estudio, tienda pública y Control operativo", "Checkout idempotente, reserva MAIN, dirección, seguimiento manual y baja privada. Sin cobro, flete ni transportista externo."),
@@ -260,7 +260,8 @@ note("El rol sales permite consultar clientes, cotizaciones, pedidos, facturas, 
   "Las escrituras comerciales, contables y de inventario siguen reservadas a admin. La consulta de "
   "ventas no distingue por vendedor; no existe aún un rol contable independiente. Productos, "
   "impuestos y saldos de inventario siguen accesibles a usuarios autenticados de la empresa. "
-  "No hay MFA ni correo transaccional automático.")
+  "MFA TOTP ya puede activarse por API y solicitarse en el login; el flujo visual completo "
+  "de alta/restablecimiento y el correo transaccional siguen pendientes.")
 image("12-users.png", "Administración de usuarios de una empresa ficticia")
 image("25-user-revision.png", "Edición de usuario con revisión, motivo y roles; sin clave de activación visible")
 h("3.5 Actualizar el perfil de la empresa", 2)
@@ -1477,6 +1478,36 @@ table(["Término", "Significado"], [
     ("API-first / headless", "Lógica expuesta por servicios; no implica que exista pantalla para toda operación."),
     ("RAG", "Consulta de conocimiento documentado para asistencia IA futura, con fuentes y control de acceso."),
 ])
+h("22. Continuación operativa 0035 y 0036", 1)
+p("La edición 3.20 incorpora la base operativa agregada por las migraciones 0035 y 0036.")
+h("22.1 Costo, COGS y conciliación", 2)
+bullets([
+    "Mi empresa puede seleccionar promedio ponderado o FIFO para la valoración futura.",
+    "Cada despacho de venta conserva costo unitario, costo total, política, origen y asiento COGS asociado.",
+    "Contabilidad usa las cuentas 1200 Inventario y 5100 Costo de ventas. Ejecuta bootstrap de cuentas si faltan.",
+    "La conciliación bancaria registra pendiente, emparejado, reconciliado o diferencia. Un pago debe coincidir por importe.",
+    "Importar extractos masivos, matching automático y estados financieros certificados siguen pendientes.",
+])
+h("22.2 Identidad MFA y pagos", 2)
+bullets([
+    "Los usuarios pueden crear un secreto TOTP cifrado y verificarlo con un código de seis dígitos.",
+    "El login acepta mfaCode cuando MFA está habilitado. Reutilizar el código se rechaza.",
+    "Falta el flujo visual completo de alta, recuperación, desactivación y entrega segura.",
+    "Los webhooks de pago usan firma HMAC, eventId e idempotencia. Sin secreto firmado no aplica movimientos.",
+    "Fiscal producción permanece bloqueado hasta registrar una homologación/certificación externa.",
+])
+h("22.3 Operación, SaaS y entidades", 2)
+bullets([
+    "0036 crea ledger de migraciones, respaldo/restauración operativa y outbox SaaS.",
+    "Entitlements pueden persistirse por empresa/módulo con vigencia, gracia y revisión.",
+    "Al crear propuestas se bloquea otra solicitud abierta del mismo producto y proveedor.",
+    "Los almacenes deben registrarse por código normalizado antes de usarse como catálogo autorizado.",
+    "Checkout mantiene una reserva de 30 minutos y registra el estado de cotización de envío.",
+    "RRHH admite paginación y vínculo/desvínculo auditado de empleado con una cuenta activa.",
+])
+note("La base nueva no sustituye restauración probada sobre servidor limpio, RPO/RTO, monitoreo, "
+     "pasarela real, correo real, homologación fiscal, payroll, nómina ni cobro recurrente.")
+
 h("Anexo E. Referencias y control documental")
 bullets(["docs/DESPLIEGUE_LOCAL.md: arranque, entorno y operación segura.",
          "docs/MODELO_COMERCIAL_SAAS.md: cartera SaaS implementada y propuesta de medición/cobro automático pendiente de configuración.",
@@ -1489,6 +1520,9 @@ bullets(["docs/DESPLIEGUE_LOCAL.md: arranque, entorno y operación segura.",
 p("Capturas: navegador Chrome con API y DB locales; solo el asistente usa respuestas mock explícitas. Se renovaron las imágenes "
   "antiguas; no se incluyen tokens visibles, contraseñas ni datos reales. Los conteos de demostración "
   "pueden variar tras repetir pruebas y no constituyen una plantilla de saldos iniciales.")
+p("Edición 3.20: migraciones 0035 y 0036, capítulos operativos de costo/COGS, conciliación inicial, MFA TOTP, "
+  "webhooks idempotentes, ledger de migraciones, outbox SaaS, almacenes, deduplicación básica y paginación RRHH. "
+  "Los certificados fiscales, proveedores bancarios, cobros y correos reales siguen externos.")
 p("Edición 3.19: tres bloques informativos de compras, capítulos 12.2–12.4: resumen exacto por destino/fecha, "
   "solicitudes abiertas separadas de órdenes y CSV protegido. Captura nueva 42 sobre API/base aisladas, "
   "sin migración ni descuento automático de tránsito. Conserva los procedimientos de la edición 3.18.")

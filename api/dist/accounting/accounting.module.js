@@ -18,7 +18,7 @@ let AccountingModule = class AccountingModule {
 exports.AccountingModule = AccountingModule;
 exports.AccountingModule = AccountingModule = __decorate([
     (0, common_1.Module)({
-        controllers: [accounting_controller_1.AccountingController],
+        controllers: [accounting_controller_1.AccountingController, accounting_controller_1.PaymentWebhookController],
         providers: [accounting_service_1.AccountingService, database_service_1.DatabaseService, auth_service_1.AuthService, auth_guard_1.AuthGuard],
     })
 ], AccountingModule);

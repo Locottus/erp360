@@ -17,6 +17,29 @@ export declare class AuthService {
     }>;
     verifyAccessToken(token: string): AuthTokenPayload;
     authenticateAccessToken(token: string): Promise<AuthTokenPayload>;
+    setupMfa(user: AuthTokenPayload): Promise<{
+        enabled: boolean;
+        configured: boolean;
+        secret?: undefined;
+        otpauthUri?: undefined;
+    } | {
+        enabled: boolean;
+        configured: boolean;
+        secret: string;
+        otpauthUri: string;
+    }>;
+    verifyMfa(user: AuthTokenPayload, code: string): Promise<{
+        enabled: boolean;
+    }>;
+    disableMfa(user: AuthTokenPayload, code: string): Promise<{
+        enabled: boolean;
+    }>;
+    private mfaKey;
+    private encryptMfaSecret;
+    private decryptMfaSecret;
+    private randomBase32;
+    private base32Decode;
+    private verifyTotp;
     revokeSessions(user: AuthTokenPayload, userId?: string): Promise<{
         revoked: boolean;
     }>;

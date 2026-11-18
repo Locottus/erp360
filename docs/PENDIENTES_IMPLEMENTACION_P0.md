@@ -2,7 +2,13 @@
 
 ## Estado de avance actual
 - **P0-06 (multimoneda):** base operativa implementada en empresa, tasas y pagos contables (cliente/proveedor) con monto documental + monto base.
-- **P0-02 (valoración/costo):** base preliminar implementada con reporte `GET /inventory/reports/valuation-cogs` (promedio ponderado provisional).
+- **P0-02 (valoración/costo):** base de costo implementada con política de
+  empresa, snapshots por despacho y asiento COGS balanceado. Falta completar
+  lotes FIFO consumidos y pruebas contables masivas.
+- **P0-04 (bancos):** existe conciliación de líneas, vínculo a pago y diferencias
+  auditadas. Falta importar extractos reales y matching masivo.
+- **Identidad:** MFA TOTP implementado en API y campo de código en login.
+  Falta flujo visual de alta/restablecimiento y recuperación robusta.
 
 ## Pendientes inmediatos
 1. **P0-02 · Costo de ventas definitivo**

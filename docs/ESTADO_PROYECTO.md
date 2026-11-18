@@ -2,6 +2,52 @@
 
 ## Corte verificado: 17 de noviembre de 2026
 
+### Continuación operativa 0035 — base productiva inicial
+
+- Migración `0035_operational_readiness.sql` aplicada sobre la base operativa
+  después de una copia restaurada y respaldo custom previo.
+- Política empresarial de costo disponible para promedio ponderado o FIFO,
+  con revisión auditada. Los despachos pueden conservar costo unitario, costo
+  total, política y origen en el movimiento.
+- COGS se publica como asiento en las cuentas `1200` Inventario y `5100`
+  Costo de ventas cuando existe costo calculable. Un despacho duplicado no
+  genera un segundo asiento para el mismo pedido.
+- Conciliación bancaria tiene estados pendiente/emparejado/reconciliado/diferencia,
+  vínculo opcional a pago de cliente y razón auditada.
+- MFA TOTP disponible por usuario, con secreto cifrado y rechazo de códigos ya
+  usados. Requiere configurar `MFA_CREDENTIAL_KEY` o reutilizar de forma segura
+  `ASSISTANT_CREDENTIAL_KEY`.
+- Endpoints de webhook de pagos con firma HMAC por proveedor, idempotencia por
+  evento y retención sin aplicar. Todavía no hay proveedor bancario configurado.
+- Fiscal en producción rechaza transmisiones mientras no exista certificación
+  externa registrada. Sandbox continúa siendo la única capacidad demostrada.
+- Chat ampliado con orientación explícita de inventario, contabilidad, bancos,
+  fiscal, seguridad/MFA y navegación allowlisted.
+- Builds API/Angular correctos, 9 pruebas API focalizadas y 98 pruebas Angular
+  correctas después de la implementación. API 3001 y Angular 4201 disponibles
+  al finalizar.
+
+### Continuación 0036 — operación, SaaS, compras y personas
+
+- Ledger de migraciones creado y respaldos custom registrados para 0035/0036.
+- Scripts `scripts/backup.ps1` y `scripts/restore.ps1` disponibles para
+  respaldo/restauración de PostgreSQL sin recrear el volumen.
+- Entitlements SaaS persistidos por empresa/módulo con estado, vigencia, gracia,
+  revisión y outbox de eventos. HTTP aún no bloquea ni suspende módulos: la
+  integración de enforcement efectiva requiere política aprobada.
+- Catálogo de almacenes autorizados disponible por empresa y códigos normalizados.
+- Compras nuevas bloquean solicitudes abiertas del mismo producto/proveedor,
+  además de deduplicar otra propuesta abierta de la misma regla.
+- Checkout crea cuenta cliente con estado de verificación pendiente, sin validar
+  propiedad del correo todavía. Reserva expresa de 30 minutos y estado de
+  cotización de envío registrado; no cotiza ni cobra transportistas reales.
+- RRHH admite paginación opcional de empleados, asistencias y ausencias, y
+  vínculo/desvínculo auditado de empleado con usuario activo.
+- Migraciones 0035/0036 validadas en copias aisladas antes de aplicar a producción
+  local. Builds correctos; 9 pruebas API focalizadas y 98 Angular pasan.
+- Manual de usuario regenerado como edición 3.20 y comprobado en estructura DOCX;
+  contiene 0035/0036, MFA TOTP, conciliación inicial, almacenes, entitlements y límites.
+
 El ERP sigue en desarrollo; los cierres de lotes de abajo describen el núcleo,
 no paridad completa con Odoo ni preparación para producción.
 

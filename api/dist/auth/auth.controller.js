@@ -34,6 +34,15 @@ let AuthController = class AuthController {
     logout(request) {
         return this.authService.revokeSessions(request.user);
     }
+    mfaSetup(request) {
+        return this.authService.setupMfa(request.user);
+    }
+    mfaVerify(request, body) {
+        return this.authService.verifyMfa(request.user, body.code);
+    }
+    mfaDisable(request, body) {
+        return this.authService.disableMfa(request.user, body.code);
+    }
     users(request) { return this.authService.listUsers(request.user); }
     createUser(request, body) {
         return this.authService.createUser(request.user, body);
@@ -86,6 +95,32 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "logout", null);
+__decorate([
+    (0, common_1.Get)('mfa/setup'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "mfaSetup", null);
+__decorate([
+    (0, common_1.Post)('mfa/verify'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "mfaVerify", null);
+__decorate([
+    (0, common_1.Post)('mfa/disable'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "mfaDisable", null);
 __decorate([
     (0, common_1.Get)('users'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),

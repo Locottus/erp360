@@ -555,10 +555,22 @@ let EcommerceService = class EcommerceService {
            VALUES ($1,$2,$3,$4,$5)`, [order.rows[0].id, item.product_id, item.quantity, item.unit_price, item.line_total]);
             }
             await this.reserveSalesOrderStockTx(client, companyId, order.rows[0].id, 'MAIN');
+            await client.query(`INSERT INTO ecommerce_customer_accounts
+           (company_id,email,full_name,verification_status,verification_expires_at,updated_at)
+         VALUES($1,$2,$3,'pending',NOW()+INTERVAL '24 hours',NOW())
+         ON CONFLICT(company_id,email) DO UPDATE SET
+           full_name=COALESCE(EXCLUDED.full_name,ecommerce_customer_accounts.full_name),
+           verification_status=CASE WHEN ecommerce_customer_accounts.verification_status='verified'
+             THEN 'verified' ELSE 'pending' END,
+           verification_expires_at=CASE WHEN ecommerce_customer_accounts.verification_status='verified'
+             THEN ecommerce_customer_accounts.verification_expires_at
+             ELSE NOW()+INTERVAL '24 hours' END,
+           updated_at=NOW()`, [companyId, input.customerEmail.trim().toLowerCase(), input.customerName.trim()]);
             await client.query(`INSERT INTO ecommerce_fulfillments(company_id,sales_order_id,delivery_method,address,phone) VALUES($1,$2,$3,$4,$5)`, [companyId, order.rows[0].id, method, method === 'delivery' ? input.deliveryAddress.trim() : null, input.phone?.trim() || null]);
             await client.query(`INSERT INTO ecommerce_checkouts
-          (company_id, cart_id, sales_order_id, checkout_number, status, notes)
-         VALUES ($1,$2,$3,$4,'completed',$5)`, [companyId, cart.id, order.rows[0].id, checkoutNumber, input.notes ?? null]);
+          (company_id, cart_id, sales_order_id, checkout_number, status, notes, reservation_expires_at, shipping_quote_status)
+         VALUES ($1,$2,$3,$4,'completed',$5,NOW()+INTERVAL '30 minutes',$6)`, [companyId, cart.id, order.rows[0].id, checkoutNumber, input.notes ?? null,
+                method === 'delivery' ? 'pending' : 'not_requested']);
             await client.query(`UPDATE ecommerce_carts
          SET status = 'checked_out',
              customer_name = $1,
@@ -821,8 +833,9 @@ let EcommerceService = class EcommerceService {
             await client.query(`UPDATE inventory_stock_balances
          SET reserved = reserved + $1, updated_at = NOW()
          WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [quantity, companyId, locationCode, line.product_id]);
-            await client.query(`INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, location_code, quantity, status)
-         VALUES ($1,$2,$3,$4,$5,'reserved')`, [companyId, salesOrderId, line.product_id, locationCode, quantity]);
+            await client.query(`INSERT INTO inventory_reservations
+           (company_id, sales_order_id, product_id, location_code, quantity, status, expires_at)
+         VALUES ($1,$2,$3,$4,$5,'reserved',NOW()+INTERVAL '30 minutes')`, [companyId, salesOrderId, line.product_id, locationCode, quantity]);
             await client.query(`INSERT INTO inventory_movements
           (company_id, location_code, product_id, movement_type, quantity, reference_type, reference_id, created_by)
          VALUES ($1,$2,$3,'sale_reservation',$4,'sales_order',$5,NULL)`, [companyId, locationCode, line.product_id, quantity, salesOrderId]);

@@ -5,6 +5,17 @@ import { type PurchasePlanInput } from '../common/purchase-plan';
 export declare class InventoryService {
     private readonly db;
     constructor(db: DatabaseService);
+    listWarehouses(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    upsertWarehouse(user: AuthUser, input: {
+        locationCode: string;
+        name: string;
+        isActive?: boolean;
+    }): Promise<{
+        location_code: string;
+        name: string;
+        is_active: boolean;
+        revision: number;
+    }>;
     listReplenishment(user: AuthUser, locationCode?: string): Promise<import("pg").QueryResultRow[]>;
     purchaseCommitments(user: AuthUser, productId: string): Promise<import("pg").QueryResultRow[]>;
     purchasePlanning(user: AuthUser, productId: string): Promise<PurchasePlanning>;
@@ -135,6 +146,8 @@ export declare class InventoryService {
     private parsePageValue;
     private normalizeLocation;
     private ensureStockBalanceRow;
+    private resolveDispatchUnitCost;
+    private postSaleDispatchCogs;
     private insertMovement;
     private insertAudit;
 }

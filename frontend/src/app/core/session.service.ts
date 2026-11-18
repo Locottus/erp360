@@ -62,13 +62,14 @@ export class SessionService {
     return this.token();
   }
 
-  async login(email: string, password: string) {
+  async login(email: string, password: string, mfaCode?: string) {
     const revision = ++this.revision;
     this.error.set('');
     const response = await firstValueFrom(
       this.http.post<LoginResponse>(`${API_BASE_URL}/auth/login`, {
         email,
         password,
+        ...(mfaCode ? { mfaCode } : {}),
       }),
     );
     if (!response?.access_token || !response.user) {

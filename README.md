@@ -125,6 +125,17 @@ Ver instrucciones y capturas en el
 La API contiene los módulos operativos; no todos disponen aún de formularios
 administrativos en Angular. El checkout crea pedido y reserva inventario, sin
 pasarela de pago. La fiscalidad es simulación sandbox, no emisión legal.
+La migración `0035_operational_readiness.sql` añade política de costo empresarial,
+snapshots COGS, conciliación bancaria inicial, MFA TOTP cifrado y retención
+idempotente de webhooks de pagos. La homologación fiscal y los cobros externos
+siguen sin proveedor ni credenciales de producción.
+La migración `0036_remaining_operational_foundations.sql` añade ledger de
+migraciones, bases de entitlements/outbox SaaS, almacenes autorizados,
+expiración de reservas y vínculo empleado/cuenta. Las integraciones externas
+reales siguen deshabilitadas hasta configurar proveedores y aprobar políticas.
+El manual vigente es la
+[edición 3.20](/C:/angular/erp360/erp360-modernizado/docs/manual/MANUAL_ERP360_OPERACION_Y_CONFIGURACION.docx),
+actualizada con 0035/0036 y sus límites.
 La sesión JWT está en `sessionStorage` (no elimina el riesgo XSS). El botón
 flotante Asistente ofrece una guía local gratuita y, con consentimiento explícito,
 consultas mediante adaptadores OpenAI, DeepSeek o Claude. El proveedor y modelo

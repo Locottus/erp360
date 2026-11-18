@@ -390,6 +390,39 @@ manual; su ejecución no implica que alguien contactó al cliente.
 | P0 | Identidad y seguridad productiva | MFA, correo seguro, recuperación autoservicio, permisos finos, HTTPS/CSP, secretos y rate limit distribuido |
 | P0 | Operación y restauración | Ledger de migraciones, backups cifrados/retención, restauración probada y monitoreo |
 
+### Avance operativo 0035
+
+- Completado: política `weighted_average`/`fifo`, snapshot de costo por
+  despacho, asiento COGS en 1200/5100 y protección contra asiento duplicado.
+- Completado: conciliación bancaria con estados, pago vinculado y diferencia
+  auditada. Importación bancaria masiva y matching automático siguen pendientes.
+- Completado: MFA TOTP cifrado en API y código MFA en el login.
+  Falta el flujo visual completo de alta, recuperación y revocación de factor.
+- Completado: gateway de pagos de entrada con firma HMAC e idempotencia por
+  evento. Falta credencial y proceso de proveedor real, conversión contable
+  automática y conciliación externa.
+- Completado: bloqueo de producción fiscal sin certificación externa y
+  orientación del asistente por módulo.
+- Pendiente externo: homologación fiscal por país, pasarela/banco real,
+  credenciales, sandbox/producción, certificados y monitoreo.
+
+### Avance operativo 0036
+
+- Completado: ledger de migraciones, respaldo/restauración operativa y tablas
+  de entitlements/outbox SaaS.
+- Completado: catálogo de almacenes autorizados y bloqueo transversal básico
+  de solicitudes abiertas por producto/proveedor.
+- Completado: expiración de reserva de tienda a 30 minutos, cuenta cliente
+  verificable y estado de cotización de envío.
+- Completado: paginación opcional en empleados, asistencia y ausencias, más
+  vínculo/desvínculo auditado empleado/cuenta.
+- Pendiente externo: restore probado sobre servidor limpio, RPO/RTO real,
+  monitoreo/alertas y CI de migraciones.
+- Pendiente comercial: calendario SaaS efectivo, suspensión real, cobro recurrente,
+  correo, pasarela y enforcement en HTTP/RPC/jobs.
+- Pendiente tienda: verificación real de correo, cotizador de flete, proveedor
+  de pago, reembolso y SEO seguro.
+
 Los cobros nuevos de venta no liquidan residuos de 0,0001; revisar facturas
 anteriores que figuren pagadas con saldo positivo. La corrección no altera el
 histórico ni sustituye una política monetaria aprobada.

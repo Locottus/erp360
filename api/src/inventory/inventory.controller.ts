@@ -10,6 +10,19 @@ import { InventoryService } from './inventory.service';
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
+  @Get('warehouses')
+  @Roles('admin','inventory')
+  warehouses(@Req() request: AuthenticatedRequest) {
+    return this.inventoryService.listWarehouses(request.user);
+  }
+
+  @Post('warehouses')
+  @Roles('admin','inventory')
+  upsertWarehouse(@Req() request: AuthenticatedRequest,
+    @Body() input: { locationCode: string; name: string; isActive?: boolean }) {
+    return this.inventoryService.upsertWarehouse(request.user, input);
+  }
+
   @Get('replenishment')
   @Roles('admin')
   replenishment(@Req() request: AuthenticatedRequest, @Query('locationCode') locationCode?: string) {

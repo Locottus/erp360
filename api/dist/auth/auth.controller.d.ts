@@ -31,6 +31,27 @@ export declare class AuthController {
     logout(request: AuthenticatedRequest): Promise<{
         revoked: boolean;
     }>;
+    mfaSetup(request: AuthenticatedRequest): Promise<{
+        enabled: boolean;
+        configured: boolean;
+        secret?: undefined;
+        otpauthUri?: undefined;
+    } | {
+        enabled: boolean;
+        configured: boolean;
+        secret: string;
+        otpauthUri: string;
+    }>;
+    mfaVerify(request: AuthenticatedRequest, body: {
+        code: string;
+    }): Promise<{
+        enabled: boolean;
+    }>;
+    mfaDisable(request: AuthenticatedRequest, body: {
+        code: string;
+    }): Promise<{
+        enabled: boolean;
+    }>;
     users(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     createUser(request: AuthenticatedRequest, body: {
         email: string;

@@ -3,10 +3,11 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { decode, sign, verify } from 'jsonwebtoken';
-import { createHash, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'crypto';
 import { DatabaseService } from '../common/database.service';
 import { hashPassword, verifyPassword } from './crypto.util';
 import type { AuthTokenPayload, BootstrapAdminInput, LoginInput } from './auth.types';
@@ -43,6 +44,29 @@ export class AuthService {
 
     if (!user || !user.is_active || !verifyPassword(input.password, user.password_hash)) {
       throw new UnauthorizedException('Invalid credentials.');
+    }
+
+    const mfa = await this.db.query<{ secret_encrypted: string; enabled: boolean; last_used_step: string | null }>(
+      `SELECT secret_encrypted,enabled,last_used_step::text
+       FROM user_mfa_totp WHERE user_id=$1`,
+      [user.id],
+    );
+    if (mfa.rows[0]?.enabled) {
+      if (typeof input.mfaCode !== 'string') throw new UnauthorizedException('MFA code required.');
+      const secret = this.decryptMfaSecret(mfa.rows[0].secret_encrypted, user.id);
+      const step = this.verifyTotp(secret, input.mfaCode);
+      if (!step) throw new UnauthorizedException('Invalid MFA code.');
+      const lastStep = mfa.rows[0].last_used_step ? Number(mfa.rows[0].last_used_step) : 0;
+      if (step <= lastStep) throw new UnauthorizedException('MFA code already used.');
+      await this.db.query(
+        `UPDATE user_mfa_totp SET last_used_step=$2,updated_at=NOW() WHERE user_id=$1`,
+        [user.id, step],
+      );
+      await this.db.query(
+        `INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'user.login_mfa.success','users',$2,'{}')`,
+        [user.company_id, user.id],
+      );
     }
 
     const rolesResult = await this.db.query<{ code: string }>(
@@ -119,6 +143,158 @@ export class AuthService {
     }
     const user = await this.getCurrentUser(payload.sub);
     return { ...payload, roles: user.roles, email: user.email };
+  }
+
+  async setupMfa(user: AuthTokenPayload) {
+    const existing = await this.db.query<{ enabled: boolean }>(
+      'SELECT enabled FROM user_mfa_totp WHERE user_id=$1',
+      [user.sub],
+    );
+    if (existing.rows[0]?.enabled) return { enabled: true, configured: true };
+    const secret = this.randomBase32(20);
+    const encrypted = this.encryptMfaSecret(secret, user.sub);
+    await this.db.query(
+      `INSERT INTO user_mfa_totp(user_id,secret_encrypted,enabled,revision)
+       VALUES($1,$2,FALSE,0)
+       ON CONFLICT(user_id) DO UPDATE SET
+         secret_encrypted=EXCLUDED.secret_encrypted,enabled=FALSE,revision=user_mfa_totp.revision+1,updated_at=NOW()`,
+      [user.sub, encrypted],
+    );
+    await this.auditIdentity(user, 'user.mfa.setup.created', user.sub);
+    const issuer = encodeURIComponent(process.env.MFA_ISSUER_NAME || 'ERP360');
+    const account = encodeURIComponent(user.email);
+    return {
+      enabled: false,
+      configured: true,
+      secret,
+      otpauthUri: `otpauth://totp/${issuer}:${account}?secret=${secret}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`,
+    };
+  }
+
+  async verifyMfa(user: AuthTokenPayload, code: string) {
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      throw new BadRequestException('code must be a 6-digit MFA code.');
+    }
+    const row = await this.db.query<{ secret_encrypted: string; last_used_step: string | null }>(
+      'SELECT secret_encrypted,last_used_step::text FROM user_mfa_totp WHERE user_id=$1',
+      [user.sub],
+    );
+    if (!row.rows[0]) throw new BadRequestException('MFA setup was not created.');
+    const secret = this.decryptMfaSecret(row.rows[0].secret_encrypted, user.sub);
+    const step = this.verifyTotp(secret, code);
+    if (!step) throw new UnauthorizedException('Invalid MFA code.');
+    await this.db.query(
+      `UPDATE user_mfa_totp SET enabled=TRUE,enabled_at=COALESCE(enabled_at,NOW()),last_used_step=$2,revision=revision+1,updated_at=NOW()
+       WHERE user_id=$1`,
+      [user.sub, step],
+    );
+    await this.db.query(
+      `UPDATE users SET session_version=session_version+1,updated_at=NOW() WHERE id=$1 AND company_id=$2`,
+      [user.sub, user.companyId],
+    );
+    await this.auditIdentity(user, 'user.mfa.enabled', user.sub);
+    return { enabled: true };
+  }
+
+  async disableMfa(user: AuthTokenPayload, code: string) {
+    if (typeof code !== 'string' || !/^\d{6}$/.test(code)) {
+      throw new BadRequestException('code must be a 6-digit MFA code.');
+    }
+    const row = await this.db.query<{ secret_encrypted: string }>(
+      'SELECT secret_encrypted FROM user_mfa_totp WHERE user_id=$1 AND enabled=TRUE',
+      [user.sub],
+    );
+    if (!row.rows[0]) return { enabled: false };
+    const secret = this.decryptMfaSecret(row.rows[0].secret_encrypted, user.sub);
+    if (!this.verifyTotp(secret, code)) throw new UnauthorizedException('Invalid MFA code.');
+    await this.db.query(
+      `UPDATE user_mfa_totp SET enabled=FALSE,last_used_step=NULL,revision=revision+1,updated_at=NOW() WHERE user_id=$1`,
+      [user.sub],
+    );
+    await this.db.query(
+      `UPDATE users SET session_version=session_version+1,updated_at=NOW() WHERE id=$1 AND company_id=$2`,
+      [user.sub, user.companyId],
+    );
+    await this.auditIdentity(user, 'user.mfa.disabled', user.sub);
+    return { enabled: false };
+  }
+
+  private mfaKey() {
+    const source = process.env.MFA_CREDENTIAL_KEY || process.env.ASSISTANT_CREDENTIAL_KEY;
+    if (!source || !/^[A-Za-z0-9+/]{43}=$/.test(source)) {
+      throw new ServiceUnavailableException('Falta MFA_CREDENTIAL_KEY o una clave de cifrado válida en el servidor.');
+    }
+    const key = Buffer.from(source, 'base64');
+    if (key.length !== 32) throw new ServiceUnavailableException('Clave MFA no válida.');
+    return key;
+  }
+
+  private encryptMfaSecret(secret: string, userId: string) {
+    const iv = randomBytes(12);
+    const cipher = createCipheriv('aes-256-gcm', this.mfaKey(), iv);
+    cipher.setAAD(Buffer.from(`erp360-mfa-v1:${userId.toLowerCase()}`));
+    const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
+    return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), encrypted.toString('base64')].join('.');
+  }
+
+  private decryptMfaSecret(value: string, userId: string) {
+    try {
+      const [version, iv, tag, ciphertext, extra] = value.split('.');
+      if (version !== 'v1' || !iv || !tag || !ciphertext || extra) throw new Error('Invalid MFA envelope');
+      const decipher = createDecipheriv('aes-256-gcm', this.mfaKey(), Buffer.from(iv, 'base64'));
+      decipher.setAAD(Buffer.from(`erp360-mfa-v1:${userId.toLowerCase()}`));
+      decipher.setAuthTag(Buffer.from(tag, 'base64'));
+      return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64')), decipher.final()]).toString('utf8');
+    } catch {
+      throw new UnauthorizedException('No se pudo descifrar el factor MFA. Solicita restablecerlo.');
+    }
+  }
+
+  private randomBase32(length: number) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const bytes = randomBytes(length);
+    let bits = '';
+    for (const byte of bytes) bits += byte.toString(2).padStart(8, '0');
+    let result = '';
+    for (let index = 0; index + 5 <= bits.length; index += 5) {
+      result += alphabet[parseInt(bits.slice(index, index + 5), 2)];
+    }
+    return result;
+  }
+
+  private base32Decode(value: string) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const normalized = value.toUpperCase().replace(/=+$/, '');
+    let bits = '';
+    for (const char of normalized) {
+      const index = alphabet.indexOf(char);
+      if (index < 0) throw new BadRequestException('MFA secret inválido.');
+      bits += index.toString(2).padStart(5, '0');
+    }
+    const bytes: number[] = [];
+    for (let index = 0; index + 8 <= bits.length; index += 8) {
+      bytes.push(parseInt(bits.slice(index, index + 8), 2));
+    }
+    return Buffer.from(bytes);
+  }
+
+  private verifyTotp(secret: string, code: string) {
+    const key = this.base32Decode(secret);
+    const nowStep = Math.floor(Date.now() / 30000);
+    for (let step = nowStep - 1; step <= nowStep + 1; step++) {
+      const counter = Buffer.alloc(8);
+      counter.writeBigUInt64BE(BigInt(step));
+      const digest = createHmac('sha1', key).update(counter).digest();
+      const offset = digest[digest.length - 1] & 0xf;
+      const binary =
+        ((digest[offset] & 0x7f) << 24) |
+        ((digest[offset + 1] & 0xff) << 16) |
+        ((digest[offset + 2] & 0xff) << 8) |
+        (digest[offset + 3] & 0xff);
+      const expected = (binary % 1000000).toString().padStart(6, '0');
+      if (expected === code) return step;
+    }
+    return null;
   }
 
   async revokeSessions(user: AuthTokenPayload, userId = user.sub) {

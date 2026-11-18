@@ -26,8 +26,22 @@ export declare class SaasService {
     integrations(): Promise<{
         readonly payments: "not_configured";
         readonly email: "not_configured";
-        readonly enforcement: "informational";
+        readonly enforcement: "database_ready";
     }>;
+    getEntitlements(companyId: string): Promise<{
+        module_code: string;
+        status: string;
+        effective_at: string;
+        grace_until: string | null;
+        revision: number;
+    }[]>;
+    setEntitlement(user: OperatorUser, companyId: string, input: unknown): Promise<{
+        module_code: string;
+        status: string;
+        effective_at: string;
+        grace_until: string | null;
+        revision: number;
+    }[]>;
     listOperators(): Promise<import("pg").QueryResultRow[]>;
     listAccounts(): Promise<import("pg").QueryResultRow[]>;
     createAccount(user: OperatorUser, input: unknown): Promise<any>;

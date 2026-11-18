@@ -127,8 +127,63 @@ let SaasService = class SaasService {
         return {
             payments: 'not_configured',
             email: 'not_configured',
-            enforcement: 'informational',
+            enforcement: 'database_ready',
         };
+    }
+    async getEntitlements(companyId) {
+        const result = await this.db.query(`WITH latest AS (
+         SELECT DISTINCT ON(module_code) module_code,status,effective_at,grace_until,revision
+         FROM saas_module_entitlements
+         WHERE company_id=$1 AND effective_at<=clock_timestamp()
+         ORDER BY module_code,effective_at DESC
+       )
+       SELECT module_code,status,effective_at::text,grace_until::text,revision
+       FROM latest
+       ORDER BY module_code`, [companyId]);
+        return result.rows;
+    }
+    async setEntitlement(user, companyId, input) {
+        this.assertWrite(user);
+        const body = (0, saas_inputs_1.objectInput)(input);
+        const moduleCode = (0, saas_inputs_1.requiredText)(body.moduleCode, 'moduleCode', 32);
+        if (!['base', 'sales', 'purchases', 'inventory', 'accounting', 'store', 'people'].includes(moduleCode)) {
+            throw new common_1.BadRequestException('moduleCode is not supported.');
+        }
+        const status = (0, saas_inputs_1.requiredText)(body.status, 'status', 16);
+        if (!['enabled', 'suspended', 'cancelled'].includes(status)) {
+            throw new common_1.BadRequestException('status must be enabled, suspended or cancelled.');
+        }
+        const effectiveAt = (0, saas_inputs_1.requiredDate)(body.effectiveAt ?? new Date().toISOString().slice(0, 10), 'effectiveAt');
+        const reason = (0, saas_inputs_1.requiredReason)(body.reason);
+        const graceUntil = body.graceUntil === undefined || body.graceUntil === null
+            ? null
+            : (0, saas_inputs_1.requiredDate)(body.graceUntil, 'graceUntil');
+        if (graceUntil && graceUntil < effectiveAt) {
+            throw new common_1.BadRequestException('graceUntil cannot be earlier than effectiveAt.');
+        }
+        return this.transaction(async (client) => {
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`saas-entitlement:${companyId}:${moduleCode}`]);
+            const latest = await client.query(`SELECT revision FROM saas_module_entitlements
+         WHERE company_id=$1 AND module_code=$2
+         ORDER BY effective_at DESC,revision DESC LIMIT 1 FOR UPDATE`, [companyId, moduleCode]);
+            const revision = (latest.rows[0]?.revision ?? 0) + 1;
+            await client.query(`INSERT INTO saas_module_entitlements
+           (company_id,module_code,status,effective_at,grace_until,revision,reason,created_by)
+         VALUES($1,$2,$3,$4::date,$5::date,$6,$7,$8)
+         ON CONFLICT(company_id,module_code,effective_at) DO UPDATE SET
+           status=EXCLUDED.status,grace_until=EXCLUDED.grace_until,revision=saas_module_entitlements.revision+1,
+           reason=EXCLUDED.reason,created_by=EXCLUDED.created_by`, [companyId, moduleCode, status, effectiveAt, graceUntil, revision, reason, user.sub]);
+            await client.query(`INSERT INTO saas_outbox(company_id,event_type,payload)
+         VALUES($1,'entitlement.changed',$2)`, [companyId, JSON.stringify({ moduleCode, status, effectiveAt, graceUntil, revision, reason })]);
+            await this.audit(client, user.sub, {
+                companyId,
+                action: 'entitlement.changed',
+                entityType: 'saas_module_entitlement',
+                entityId: companyId,
+                payload: { moduleCode, status, effectiveAt, graceUntil, revision, reason },
+            });
+            return this.getEntitlements(companyId);
+        });
     }
     async listOperators() {
         const result = await this.db.query(`SELECT o.user_id, u.full_name, u.email, o.role

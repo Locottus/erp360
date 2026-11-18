@@ -12,8 +12,10 @@ var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.AccountingController = void 0;
+exports.PaymentWebhookController = exports.AccountingController = void 0;
 const common_1 = require("@nestjs/common");
+const crypto_1 = require("crypto");
+const database_service_1 = require("../common/database.service");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
 const accounting_service_1 = require("./accounting.service");
@@ -33,6 +35,12 @@ let AccountingController = class AccountingController {
     }
     bankAccounts(request) {
         return this.accountingService.listBankAccounts(request.user);
+    }
+    bankReconciliationLines(request) {
+        return this.accountingService.listBankReconciliationLines(request.user);
+    }
+    reconcileBankLine(request, id, input) {
+        return this.accountingService.reconcileBankLine(request.user, id, input);
     }
     upsertBankAccount(request, input) {
         return this.accountingService.upsertBankAccount(request.user, input);
@@ -122,6 +130,24 @@ __decorate([
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "bankAccounts", null);
+__decorate([
+    (0, common_1.Get)('bank-reconciliation-lines'),
+    (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "bankReconciliationLines", null);
+__decorate([
+    (0, common_1.Post)('bank-reconciliation-lines/:id/reconcile'),
+    (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "reconcileBankLine", null);
 __decorate([
     (0, common_1.Post)('bank-accounts'),
     (0, roles_decorator_1.Roles)('admin'),
@@ -293,4 +319,75 @@ exports.AccountingController = AccountingController = __decorate([
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     __metadata("design:paramtypes", [accounting_service_1.AccountingService])
 ], AccountingController);
+let PaymentWebhookController = class PaymentWebhookController {
+    db;
+    constructor(db) {
+        this.db = db;
+    }
+    async receive(provider, companyCodeHeader, signature, body) {
+        const providerCode = provider.trim().toLowerCase();
+        if (!/^[a-z0-9_-]{1,64}$/.test(providerCode)) {
+            throw new common_1.BadRequestException('Invalid payment provider.');
+        }
+        const companyCode = (companyCodeHeader ?? (typeof body.companyCode === 'string' ? body.companyCode : '')).trim();
+        if (!companyCode)
+            throw new common_1.BadRequestException('x-company-code is required.');
+        const company = await this.db.query('SELECT id FROM companies WHERE code=$1 AND is_active=TRUE', [companyCode]);
+        if (!company.rows[0])
+            throw new common_1.BadRequestException('Active company not found.');
+        const eventId = typeof body.eventId === 'string'
+            ? body.eventId
+            : typeof body.id === 'string' ? body.id : '';
+        const eventType = typeof body.eventType === 'string'
+            ? body.eventType
+            : typeof body.type === 'string' ? body.type : 'unknown';
+        if (!eventId || eventId.length > 128)
+            throw new common_1.BadRequestException('eventId is required.');
+        let signatureValid = false;
+        const secretMap = this.readSecretMap();
+        const secret = secretMap[providerCode];
+        if (secret && signature) {
+            const payload = JSON.stringify(body);
+            const expected = (0, crypto_1.createHmac)('sha256', secret).update(payload, 'utf8').digest();
+            const supplied = Buffer.from(signature.replace(/^sha256=/i, '').trim(), 'hex');
+            signatureValid = supplied.length === expected.length &&
+                (0, crypto_1.timingSafeEqual)(supplied, expected);
+        }
+        const insert = await this.db.query(`INSERT INTO payment_gateway_events
+         (company_id,provider,event_id,event_type,signature_valid,payload,processed)
+       VALUES($1,$2,$3,$4,$5,$6,FALSE)
+       ON CONFLICT(provider,event_id) DO NOTHING
+       RETURNING id`, [company.rows[0].id, providerCode, eventId, eventType, signatureValid, JSON.stringify(body)]);
+        if (!insert.rows[0])
+            return { received: true, duplicate: true, signatureValid };
+        if (!signatureValid) {
+            return { received: true, duplicate: false, signatureValid: false, message: 'Evento retenido para revisión; no se aplicó ningún pago.' };
+        }
+        return { received: true, duplicate: false, signatureValid: true, message: 'Evento recibido. El procesamiento contable automático requiere una conciliación autorizada.' };
+    }
+    readSecretMap() {
+        try {
+            const parsed = JSON.parse(process.env.PAYMENT_WEBHOOK_SECRETS_JSON || '{}');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        }
+        catch {
+            return {};
+        }
+    }
+};
+exports.PaymentWebhookController = PaymentWebhookController;
+__decorate([
+    (0, common_1.Post)(':provider'),
+    __param(0, (0, common_1.Param)('provider')),
+    __param(1, (0, common_1.Headers)('x-company-code')),
+    __param(2, (0, common_1.Headers)('x-signature')),
+    __param(3, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object, Object, Object]),
+    __metadata("design:returntype", Promise)
+], PaymentWebhookController.prototype, "receive", null);
+exports.PaymentWebhookController = PaymentWebhookController = __decorate([
+    (0, common_1.Controller)('payments/webhooks'),
+    __metadata("design:paramtypes", [database_service_1.DatabaseService])
+], PaymentWebhookController);
 //# sourceMappingURL=accounting.controller.js.map
