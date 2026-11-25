@@ -34,6 +34,7 @@ describe('Store checkout, fulfillment and self-service unsubscribe', () => {
     await admin('/ecommerce/admin/settings', { storeName: 'Control Store', storeSlug: `control-${suffix}`, currencyCode: 'USD' }).expect(201);
     await admin('/ecommerce/admin/settings', { storeName: 'Control Store', storeSlug: `control-${suffix}`, currencyCode: 'EUR' }).expect(400);
     listingId = (await admin('/ecommerce/admin/listings', { productId, slug: 'public', title: 'Public product', unitPrice: 10 }).expect(201)).body.id;
+    await admin('/accounting/bootstrap-accounts', {}).expect(201);
   });
   afterAll(async () => { await app.close(); });
 

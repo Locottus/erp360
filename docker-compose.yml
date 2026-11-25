@@ -17,5 +17,55 @@ services:
       timeout: 5s
       retries: 10
 
+  api:
+    build:
+      context: ./api
+    profiles: ['app']
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3001
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-erp360}
+      POSTGRES_USER: ${POSTGRES_USER:-erp360}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp360_dev_password}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:4200}
+      JWT_SECRET: ${JWT_SECRET:-}
+      PORTAL_RATE_LIMIT_PER_MINUTE: ${PORTAL_RATE_LIMIT_PER_MINUTE:-60}
+      JWT_SECRETS_JSON: ${JWT_SECRETS_JSON:-}
+      JWT_ACTIVE_KID: ${JWT_ACTIVE_KID:-}
+      ASSISTANT_CREDENTIAL_KEY: ${ASSISTANT_CREDENTIAL_KEY:-}
+      MFA_CREDENTIAL_KEY: ${MFA_CREDENTIAL_KEY:-}
+      BOOTSTRAP_ENABLED: ${BOOTSTRAP_ENABLED:-false}
+    ports:
+      - '127.0.0.1:${API_PORT:-3001}:3001'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/health/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+    profiles: ['app']
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '127.0.0.1:${FRONTEND_PORT:-4200}:80'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://127.0.0.1/']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
 volumes:
   erp360_db_data:

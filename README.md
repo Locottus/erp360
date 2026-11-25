@@ -15,6 +15,11 @@ Este directorio concentra la migración del nuevo ERP basada en el requerimiento
 
 Fase actual: **Etapa 2 — Ejecución técnica**.
 
+Evaluación y plan basado en `ERP360LIGHT`: ver
+[`docs/EVALUACION_ERP360LIGHT_20261125.md`](docs/EVALUACION_ERP360LIGHT_20261125.md).
+La cobertura funcional es amplia, pero el sistema no está homologado ni listo
+para operación comercial completa.
+
 Último corte verificado: **17 de noviembre de 2026**. API local en 3001,
 Angular en 4201 y PostgreSQL existente conservado. La migración 0032 permite
 configurar vigencia de cotizaciones en Mi empresa, con auditoría y revisión,

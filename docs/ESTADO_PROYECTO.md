@@ -1,11 +1,26 @@
 # Estado del proyecto ERP360 modernizado
 
+## Evaluación ERP360LIGHT: 25 de noviembre de 2026
+
+- La comparación completa, matriz de brechas y plan priorizado están en
+  [EVALUACION_ERP360LIGHT_20261125.md](EVALUACION_ERP360LIGHT_20261125.md).
+- El migrador es compatible con Windows PowerShell 5, registra 38 migraciones
+  desde una base vacía, rechaza esquemas sin ledger y detecta cambios de hash.
+- JWT de producción rechaza secretos débiles y el fallback conocido.
+- Docker añade perfiles opcionales `app` para API/Angular; el perfil por defecto
+  continúa sirviendo solo PostgreSQL.
+- API: 47/47 unitarias y 117/117 e2e; Angular: 103/103. Builds API y Angular
+  correctos. Docker respondió 200 en API, proxy `/api` y frontend.
+- La suite completa HTTP se ejecuta contra `erp360_audit_20261125`; no constituye
+  validación sobre la base operativa.
+
 ## Inicio de preparación operativa: 25 de noviembre de 2026
 
 - Readiness comprueba una consulta PostgreSQL y devuelve 503 ante fallo; liveness
   sigue independiente. No certifica el esquema ni servicios externos.
-- Compose usa loopback por defecto para nuevas publicaciones PostgreSQL. El
-  contenedor operativo existente no fue recreado y conserva su publicación anterior.
+- Compose usa loopback por defecto para nuevas publicaciones PostgreSQL. Los
+  cambios de publicación pueden recrear el contenedor al ejecutar `up`; comprobar
+  el estado y conservar el volumen antes de operar.
 - Se excluyen secretos de entorno y respaldos futuros en `.gitignore`. El proyecto
   tiene un repositorio Git propio con cambios sin confirmar y dependencias ya
   versionadas: ignorar no retira archivos previamente rastreados.

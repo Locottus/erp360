@@ -1,6 +1,8 @@
 # ERP360: continuidad del desarrollo
 
-Fecha de corte: 18 de noviembre de 2026. Repositorio de trabajo:
+Fecha de corte documental: 25 de noviembre de 2026 para la
+[evaluación ERP360LIGHT](EVALUACION_ERP360LIGHT_20261125.md); última continuidad
+funcional registrada: 18 de noviembre de 2026. Repositorio de trabajo:
 `C:\angular\erp360\erp360-modernizado`.
 
 Este documento permite retomar el desarrollo. No afirma que el ERP esté

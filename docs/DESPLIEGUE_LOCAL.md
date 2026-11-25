@@ -68,19 +68,39 @@ carga este archivo automáticamente: se utiliza `node --env-file` abajo.
 En bases existentes, respaldar y comprobar las migraciones ya aplicadas antes de
 ejecutar SQL. No reinicializar ni eliminar volúmenes para actualizar.
 
-En una instalación nueva aplicar los scripts en orden, deteniendo ante un error:
+En una instalación nueva usar el migrador, que exige un esquema vacío, mantiene
+un ledger y rechaza cambios de contenido en migraciones ya registradas:
 
 ```powershell
-$migrations = Get-ChildItem .\database\migrations\*.sql | Sort-Object Name
-foreach ($migration in $migrations) {
-    Get-Content $migration.FullName -Raw |
-        docker exec -i erp360-db psql -v ON_ERROR_STOP=1 -U erp360 -d erp360
-    if ($LASTEXITCODE -ne 0) { throw "Falló $($migration.Name). Revisar antes de continuar." }
-}
+.\scripts\migrate.ps1 -Environment validation -Database erp360
 ```
+
+Para una base local o productiva, reemplazar `validation` por `local` o
+`production`; esos modos realizan respaldo antes de cada migración. El migrador
+falla si encuentra tablas del ERP pero no un `migration_ledger`, para evitar
+reaplicar SQL sobre una instalación histórica sin reconciliar.
 
 Si faltan dependencias tras clonar: `npm ci` en `api` y `frontend`.
 No es necesario reinstalarlas en cada arranque.
+
+### Stack completo con perfiles Compose
+
+El flujo predeterminado `docker compose up -d db` no construye ni inicia la
+aplicación. El perfil opcional `app` construye API y frontend y publica ambos
+solo en loopback:
+
+```powershell
+$env:JWT_SECRET = "<secreto aleatorio de al menos 32 caracteres>"
+docker compose --profile app up -d --build db api frontend
+docker compose --profile app ps
+```
+
+Nginx sirve el frontend en `http://127.0.0.1:4200` y reescribe `/api` hacia
+la API en la red interna de Compose. El esquema PostgreSQL debe migrarse antes;
+el contenedor API no ejecuta migraciones automáticamente. Para usar
+`JWT_SECRETS_JSON` en lugar de `JWT_SECRET`, configurar el JSON y
+`JWT_ACTIVE_KID`; `NODE_ENV=production` valida que existan claves explícitas y
+fuertes. No usar secretos del ejemplo para producción.
 
 ### Tres bloques: planificación, solicitudes y CSV
 
@@ -513,9 +533,9 @@ administrativo revisado. No hay conversión multimoneda.
   fiscal certificada ni considerar el checkout como un cobro.
 - Servir Angular compilado y API detrás de HTTPS y un reverse proxy que exponga
   `/api` sin el prefijo al backend. El proxy Angular **solo** funciona en desarrollo.
-- Configurar explícitamente JWT; `NODE_ENV=production` rechaza la clave fallback
-  si no se proporciona un secreto o conjunto de claves. Usar secretos aleatorios
-  suficientemente fuertes, un gestor de secretos y rotación controlada.
+- Configurar explícitamente JWT; `NODE_ENV=production` rechaza claves menores de
+  32 caracteres, el secreto de desarrollo conocido y claves duplicadas. Usar
+  secretos aleatorios, un gestor de secretos y rotación controlada.
 - La rotación usa `JWT_SECRETS_JSON` (array de `{kid, secret}`) y `JWT_ACTIVE_KID`.
   Retirar claves antiguas invalida todos sus tokens: planificarlo.
 - Configurar CORS con orígenes concretos si hay acceso cross-origin. No usar `*`.

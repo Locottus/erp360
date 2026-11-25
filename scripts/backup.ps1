@@ -1,26 +1,32 @@
 param(
   [string]$BackupDirectory = ".\backups",
-  [switch]$IncludeDump
+  [switch]$IncludeDump,
+  [string]$Container = "erp360-db",
+  [string]$Database = "erp360"
 )
 
 $ErrorActionPreference = "Stop"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$directory = Resolve-Path -LiteralPath $PSScriptRoot | ForEach-Object { Join-Path $_ ".." } | Resolve-Path
-$target = Join-Path $directory $BackupDirectory
+$directory = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
+$target = if ([IO.Path]::IsPathRooted($BackupDirectory)) {
+  $BackupDirectory
+} else {
+  Join-Path $directory $BackupDirectory
+}
 New-Item -ItemType Directory -Force -Path $target | Out-Null
-$container = "erp360-db"
 $containerPath = "/tmp/erp360-$timestamp.backup"
-$hostPath = Join-Path $target "erp360-$timestamp.backup"
+$databaseFileName = [regex]::Replace($Database, "[^A-Za-z0-9._-]", "_")
+$hostPath = Join-Path $target "$databaseFileName-$timestamp.backup"
 
-docker exec $container pg_dump -U erp360 -d erp360 -Fc -f $containerPath
+docker exec $Container pg_dump -U erp360 -d $Database -Fc -f $containerPath
 if ($LASTEXITCODE -ne 0) { throw "Database dump failed." }
-docker cp "${container}:${containerPath}" $hostPath
+docker cp "${Container}:${containerPath}" $hostPath
 if ($LASTEXITCODE -ne 0) { throw "Could not copy database backup." }
-docker exec $container rm -f $containerPath
+docker exec $Container rm -f $containerPath
 
 if ($IncludeDump) {
-  $dumpPath = Join-Path $target "erp360-$timestamp.sql"
-  docker exec $container pg_dump -U erp360 -d erp360 --clean --if-exists > $dumpPath
+  $dumpPath = Join-Path $target "$databaseFileName-$timestamp.sql"
+  docker exec $Container pg_dump -U erp360 -d $Database --clean --if-exists > $dumpPath
 }
 
 Write-Output $hostPath

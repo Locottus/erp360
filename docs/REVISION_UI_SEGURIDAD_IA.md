@@ -38,7 +38,7 @@ ficticios, de una empresa aislada de documentación.
 | Alta / login sin endurecimiento de entrada | Validación de tipos, correo, código y mínimo 12 caracteres en alta | Regresiones API |
 | Rate limit limitado al portal | Grupos auth, storefront, portal y XML-RPC; mapa acotado y expiración | Revisión de código; limitador no distribuido |
 | Emisión fiscal simulada podía aparentar producción | Adaptador rechaza entorno production | Dos pruebas unitarias sandbox/producción |
-| Clave JWT fallback de desarrollo en producción | Validación de configuración al arranque; fallback prohibido con NODE_ENV=production | Unitaria de configuración |
+| Clave JWT débil o fallback de desarrollo en producción | Arranque rechaza secretos menores de 32 caracteres, fallback conocido y `kid` duplicados | Unitarias de configuración |
 
 ### UX y procesos
 

@@ -218,6 +218,12 @@ describe('Catalogs + Commerce (e2e)', () => {
       .expect(201);
 
     await request(app.getHttpServer())
+      .post('/accounting/bootstrap-accounts')
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(201);
+
+    await request(app.getHttpServer())
       .post(`/inventory/sales/orders/${confirmed.body.orderId}/dispatch`)
       .set('Authorization', `Bearer ${token}`)
       .send({ locationCode: 'MAIN' })
@@ -231,12 +237,6 @@ describe('Catalogs + Commerce (e2e)', () => {
     expect(
       stock.body.some((row: { on_hand: string; reserved: string }) => Number(row.on_hand) >= 0 && Number(row.reserved) >= 0),
     ).toBe(true);
-
-    await request(app.getHttpServer())
-      .post('/accounting/bootstrap-accounts')
-      .set('Authorization', `Bearer ${token}`)
-      .send({})
-      .expect(201);
 
     await request(app.getHttpServer())
       .post(`/accounting/sales-invoices/${issuedInvoice.body.invoiceId}/post`)

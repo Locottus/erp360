@@ -266,7 +266,7 @@ describe('SaaS billing and operator console (e2e)', () => {
         expect(body.integrations).toEqual({
           payments: 'not_configured',
           email: 'not_configured',
-          enforcement: 'informational',
+          enforcement: 'database_ready',
         });
       });
     await request(app.getHttpServer())

@@ -5,6 +5,8 @@ exports.resolveActiveJwtKey = resolveActiveJwtKey;
 exports.resolveVerificationKeys = resolveVerificationKeys;
 const common_1 = require("@nestjs/common");
 const DEFAULT_KID = 'default';
+const DEVELOPMENT_FALLBACK_SECRET = 'erp360-dev-secret-change-me';
+const MINIMUM_PRODUCTION_SECRET_LENGTH = 32;
 function loadJwtKeysFromEnv(rawJson, fallbackSecret) {
     if (rawJson && rawJson.trim().length > 0) {
         try {
@@ -19,6 +21,11 @@ function loadJwtKeysFromEnv(rawJson, fallbackSecret) {
             if (normalized.some((k) => !k.secret)) {
                 throw new common_1.BadRequestException('Each JWT key entry must contain a non-empty secret.');
             }
+            const kids = new Set(normalized.map((key) => key.kid));
+            if (kids.size !== normalized.length) {
+                throw new common_1.BadRequestException('Each JWT key entry must use a unique kid.');
+            }
+            assertProductionSecrets(normalized);
             return normalized;
         }
         catch (error) {
@@ -31,8 +38,10 @@ function loadJwtKeysFromEnv(rawJson, fallbackSecret) {
     if (process.env.NODE_ENV === 'production' && !fallbackSecret?.trim()) {
         throw new common_1.BadRequestException('Explicit JWT keys are required in production.');
     }
-    const secret = (fallbackSecret ?? '').trim() || 'erp360-dev-secret-change-me';
-    return [{ kid: DEFAULT_KID, secret }];
+    const secret = (fallbackSecret ?? '').trim() || DEVELOPMENT_FALLBACK_SECRET;
+    const keys = [{ kid: DEFAULT_KID, secret }];
+    assertProductionSecrets(keys);
+    return keys;
 }
 function resolveActiveJwtKey(keys, activeKid) {
     const requestedKid = (activeKid ?? '').trim();
@@ -52,5 +61,14 @@ function resolveVerificationKeys(keys, tokenKid) {
     }
     const selected = keys.find((key) => key.kid === kid);
     return selected ? [selected, ...keys.filter((key) => key.kid !== kid)] : keys;
+}
+function assertProductionSecrets(keys) {
+    if (process.env.NODE_ENV !== 'production') {
+        return;
+    }
+    if (keys.some((key) => key.secret === DEVELOPMENT_FALLBACK_SECRET ||
+        key.secret.length < MINIMUM_PRODUCTION_SECRET_LENGTH)) {
+        throw new common_1.BadRequestException(`JWT secrets must be at least ${MINIMUM_PRODUCTION_SECRET_LENGTH} characters in production and cannot use the development fallback.`);
+    }
 }
 //# sourceMappingURL=jwt-keys.util.js.map
