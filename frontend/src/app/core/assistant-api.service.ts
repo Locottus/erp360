@@ -1,13 +1,13 @@
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { API_BASE_URL } from './api';
 import type { HelpService } from './help.service';
 
 export type AiProvider = 'deepseek' | 'openai' | 'claude';
 export type ProviderOption = { code: AiProvider; label: string; models: string[] };
 export type DiagnosticTarget = { kind: 'screen'; screen: string; area?: string } |
-  { kind: 'purchase-request'; id: string } | { kind: 'sales-order' | 'stock'; id: string; locationCode: string };
+  { kind: 'purchase-request' | 'purchase-order'; id: string } | { kind: 'sales-order' | 'stock'; id: string; locationCode: string };
 export type DiagnosticReport = {
   target: DiagnosticTarget; capturedAt: string; readOnly: true;
   evidence: { id: string; source: string; facts: Record<string, boolean | string | number | null> }[];
@@ -43,6 +43,13 @@ export function assistantError(error: unknown) {
 @Injectable({ providedIn: 'root' })
 export class AssistantApiService {
   private readonly http = inject(HttpClient);
+  async checkApi() {
+    const result = await firstValueFrom(this.http.get<unknown>(`${API_BASE_URL}/health/live`).pipe(timeout(5000)));
+    if (!result || typeof result !== 'object' || !('status' in result) || result.status !== 'ok' ||
+        !('check' in result) || result.check !== 'liveness' || !('service' in result) || result.service !== 'erp360-api') {
+      throw new Error('La respuesta de la API no corresponde a la comprobación esperada.');
+    }
+  }
   usage() { return firstValueFrom(this.http.get<AiUsage>(`${API_BASE_URL}/assistant/usage`)); }
   diagnose(target: DiagnosticTarget) {
     return firstValueFrom(this.http.post<DiagnosticReport>(`${API_BASE_URL}/assistant/diagnostics`, target));

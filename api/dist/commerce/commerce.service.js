@@ -443,9 +443,12 @@ let CommerceService = class CommerceService {
                 plan.destinationLocationCode,
                 plan.expectedReceiptDate,
             ]);
-            for (const line of lineCalc.lines) {
-                await client.query(`INSERT INTO purchase_request_lines (request_id, product_id, quantity, unit_cost, line_total)
-           VALUES ($1,$2,$3,$4,$5)`, [requestRec.rows[0].id, line.productId, line.quantity, line.unitCost, line.lineTotal]);
+            for (const [index, line] of lineCalc.lines.entries()) {
+                const linePlan = (0, purchase_plan_1.normalizePurchasePlan)(input.lines[index]);
+                await client.query(`INSERT INTO purchase_request_lines
+             (request_id,product_id,quantity,unit_cost,line_total,destination_location_code,expected_receipt_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::date)`, [requestRec.rows[0].id, line.productId, line.quantity, line.unitCost, line.lineTotal,
+                    linePlan.destinationLocationCode, linePlan.expectedReceiptDate]);
             }
             await this.insertAudit(client, user, 'commerce.purchase.request.create', requestRec.rows[0].id, { request_number: input.requestNumber, line_count: lineCalc.lines.length, ...plan });
             await client.query('COMMIT');
@@ -525,7 +528,9 @@ let CommerceService = class CommerceService {
         rp.reason AS replenishment_reason,
         COALESCE(json_agg(json_build_object(
           'id',l.id,'product_id',l.product_id,'sku',p.sku,'product_name',p.name,
-          'quantity',l.quantity::text,'unit_cost',l.unit_cost::text,'line_total',l.line_total::text
+          'quantity',l.quantity::text,'unit_cost',l.unit_cost::text,'line_total',l.line_total::text,
+          'destination_location_code',COALESCE(l.destination_location_code,pr.destination_location_code),
+          'expected_receipt_date',COALESCE(l.expected_receipt_date,pr.expected_receipt_date)::text
         ) ORDER BY l.id) FILTER (WHERE l.id IS NOT NULL),'[]'::json) AS lines
        FROM purchase_requests pr
        JOIN companies c ON c.id=pr.company_id
@@ -677,12 +682,14 @@ let CommerceService = class CommerceService {
                 requestRec.rows[0].destination_location_code,
                 requestRec.rows[0].expected_receipt_date,
             ]);
-            const lines = await client.query(`SELECT product_id, quantity, unit_cost, line_total
+            const lines = await client.query(`SELECT product_id,quantity,unit_cost,line_total,destination_location_code,expected_receipt_date
          FROM purchase_request_lines
          WHERE request_id = $1`, [requestRec.rows[0].id]);
             for (const line of lines.rows) {
-                await client.query(`INSERT INTO purchase_order_lines (order_id, product_id, quantity, unit_cost, line_total)
-           VALUES ($1,$2,$3,$4,$5)`, [po.rows[0].id, line.product_id, line.quantity, line.unit_cost, line.line_total]);
+                await client.query(`INSERT INTO purchase_order_lines
+             (order_id,product_id,quantity,unit_cost,line_total,destination_location_code,expected_receipt_date)
+           VALUES ($1,$2,$3,$4,$5,$6,$7::date)`, [po.rows[0].id, line.product_id, line.quantity, line.unit_cost, line.line_total,
+                    line.destination_location_code, line.expected_receipt_date]);
             }
             await client.query(`UPDATE purchase_requests SET status = 'approved', updated_at = NOW() WHERE id = $1`, [
                 requestRec.rows[0].id,

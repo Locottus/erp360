@@ -30,7 +30,8 @@ type PurchaseRequestDetails = {
   supplier_name: string; subtotal: string; tax_total: string; grand_total: string;
   replenishment_location: string | null; replenishment_rule_revision: number | null; replenishment_reason: string | null;
   destination_location_code: string | null; expected_receipt_date: string | null;
-  lines: Array<{ id: string; sku: string | null; product_name: string | null; quantity: string; unit_cost: string; line_total: string }>;
+  lines: Array<{ id: string; sku: string | null; product_name: string | null; quantity: string; unit_cost: string;
+    line_total: string; destination_location_code: string | null; expected_receipt_date: string | null }>;
 };
 type DeliveryPlanSnapshot = {
   destination_location_code: string | null; expected_receipt_date: string | null; revision: number;
@@ -194,10 +195,13 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
               </div>
               <p>Destino y fecha se conservan al aprobar. Son planificación, no una reserva de inventario ni una confirmación del proveedor.
                 Una fecha pasada se admite y se señala al quedar la orden abierta; no impide recibir. La ubicación física real se confirma en Recepciones.</p>
+              <p>El destino y la fecha de cada renglón pueden sobrescribir el plan general; si quedan vacíos, heredan los valores de la solicitud.</p>
               @for (line of purchaseLines; track $index; let i = $index) {
                 <div class="toolbar-grid line-editor"><label>Producto<select [name]="'purchase-product-' + i" [(ngModel)]="line.productId" required><option value="">Selecciona</option>@for (item of products; track item.id) { <option [value]="item.id">{{ item.sku }} · {{ item.name }}</option> }</select></label>
                   <label>Cantidad<input [name]="'purchase-qty-' + i" type="number" min="0.0001" step="0.0001" [(ngModel)]="line.quantity" required /></label>
                   <label>Costo unitario<input [name]="'purchase-cost-' + i" type="number" min="0" step="0.0001" [(ngModel)]="line.unitCost" /></label>
+                  <label>Destino del renglón (opcional)<input [name]="'purchase-line-destination-' + i" [(ngModel)]="line.destinationLocationCode" maxlength="32" /></label>
+                  <label>Fecha de recepción del renglón (opcional)<input [name]="'purchase-line-date-' + i" type="date" [(ngModel)]="line.expectedReceiptDate" /></label>
                   <button class="btn btn-secondary" type="button" (click)="removeLine(purchaseLines, i)" [disabled]="purchaseLines.length === 1">Quitar</button></div>
               }
               <div class="quick-actions"><button class="btn btn-secondary" type="button" (click)="addLine(purchaseLines)">Agregar producto</button><button class="btn btn-primary" type="submit" [disabled]="busy || purchaseForm.invalid">Crear solicitud</button></div>
@@ -215,6 +219,7 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
                   <button class="btn btn-secondary" type="button" (click)="showDeliveryPlan(item.id, 'request')" [disabled]="busy || loading">Plan e historial de solicitud {{ item.request_number }}</button>
                   @if (item.purchase_order_id) {
                     <button class="btn btn-secondary" type="button" (click)="showDeliveryPlan(item.purchase_order_id, 'order')" [disabled]="busy || loading">Plan e historial de orden {{ item.purchase_order_number }}</button>
+                    <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'purchase-order', id: item.purchase_order_id}, '/operations?tab=purchases')">Analizar orden</button>
                   }
                   <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'purchase-request', id: item.id}, '/operations?tab=purchases')">Analizar solicitud</button>
                   @if (!item.purchase_order_id && (item.status === 'draft' || item.status === 'submitted')) {
@@ -284,10 +289,11 @@ type CommerceLine = { productId: string; quantity: number; unitPrice: number | n
                 }
                 @if (purchaseDetails.lines.length) {
                   <div class="table-scroll"><table class="table-list">
-                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unitario</th><th>Importe</th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Cantidad</th><th>Costo unitario</th><th>Importe</th><th>Destino / fecha prevista</th></tr></thead>
                     <tbody>@for (line of purchaseDetails.lines; track line.id) {
                       <tr><th scope="row">{{ line.sku || 'Sin código' }} · {{ line.product_name || 'Producto no disponible' }}</th>
-                        <td>{{ line.quantity }}</td><td>{{ line.unit_cost }}</td><td>{{ line.line_total }}</td></tr>
+                        <td>{{ line.quantity }}</td><td>{{ line.unit_cost }}</td><td>{{ line.line_total }}</td>
+                        <td>{{ line.destination_location_code || 'No definido' }} · {{ line.expected_receipt_date || 'No definida' }}</td></tr>
                     }</tbody>
                   </table></div>
                 } @else { <p class="status status-error" role="alert">La solicitud no tiene líneas; revisa el documento antes de aprobar.</p> }
@@ -440,7 +446,10 @@ export class OperationsComponent {
   prepareValidity() { this.validity = { date: this.validityQuotation?.valid_until ?? '', unlimited: false, reason: '', reviewed: false }; }
   salesLines: CommerceLine[] = [{ productId: '', quantity: 1, unitPrice: null }];
   purchase = { requestNumber: '', supplierId: '', taxRateCode: '', destinationLocationCode: '', expectedReceiptDate: '' };
-  purchaseLines: Array<{ productId: string; quantity: number; unitCost: number | null }> = [{ productId: '', quantity: 1, unitCost: null }];
+  purchaseLines: Array<{
+    productId: string; quantity: number; unitCost: number | null;
+    destinationLocationCode: string; expectedReceiptDate: string;
+  }> = [{ productId: '', quantity: 1, unitCost: null, destinationLocationCode: '', expectedReceiptDate: '' }];
   employee = { employeeCode: '', fullName: '', email: '', jobTitle: '', hireDate: '' };
   attendanceEmployeeId = '';
   leave = { employeeId: '', startDate: '', endDate: '', reason: '' };
@@ -598,11 +607,15 @@ export class OperationsComponent {
         ...this.purchase, taxRateCode: this.purchase.taxRateCode || undefined,
         destinationLocationCode: this.purchase.destinationLocationCode.trim() || null,
         expectedReceiptDate: this.purchase.expectedReceiptDate || null,
-        lines: this.purchaseLines.map(line => ({ ...line, unitCost: line.unitCost ?? undefined })),
+        lines: this.purchaseLines.map(line => ({
+          ...line, unitCost: line.unitCost ?? undefined,
+          destinationLocationCode: line.destinationLocationCode.trim() || null,
+          expectedReceiptDate: line.expectedReceiptDate || null,
+        })),
       }));
       this.orderNumbers[result.id] = this.autoNumber('PO');
       this.purchase = { requestNumber: this.autoNumber('PR'), supplierId: '', taxRateCode: '', destinationLocationCode: '', expectedReceiptDate: '' };
-      this.purchaseLines = [{ productId: '', quantity: 1, unitCost: null }];
+      this.purchaseLines = [{ productId: '', quantity: 1, unitCost: null, destinationLocationCode: '', expectedReceiptDate: '' }];
       this.message = 'Solicitud de compra creada.';
       await this.refresh();
     });

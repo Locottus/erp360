@@ -23,7 +23,8 @@ export class AssistantDiagnosticsService {
 
   async inspect(user: AuthTokenPayload, input: unknown): Promise<DiagnosticReport> {
     const target = diagnosticTarget(input);
-    const allowed = target.kind === 'purchase-request' ? ['admin', 'purchases'] : ['admin', 'sales'];
+    const allowed = target.kind === 'purchase-order' ? ['admin']
+      : target.kind === 'purchase-request' ? ['admin', 'purchases'] : ['admin', 'sales'];
     if (target.kind !== 'stock' && target.kind !== 'screen' && !allowed.some(role => user.roles.includes(role))) {
       throw new ForbiddenException('Tu rol no permite consultar este tipo de documento.');
     }
@@ -44,6 +45,7 @@ export class AssistantDiagnosticsService {
       });
       if (target.kind === 'screen') await this.screen(client, user, target, report);
       else if (target.kind === 'purchase-request') await this.purchase(client, user, target, report);
+      else if (target.kind === 'purchase-order') await this.purchaseOrder(client, user, target, report);
       else if (target.kind === 'sales-order') await this.sales(client, user, target, report);
       else await this.stock(client, user, target, report);
       await client.query('COMMIT');
@@ -54,7 +56,8 @@ export class AssistantDiagnosticsService {
     if (!report.findings.length) this.finding(report, 'checks_without_block', 'info',
       'No se detecta un bloqueo entre las comprobaciones realizadas.',
       'Actualiza la pantalla y revisa las validaciones del flujo. Esto no garantiza que una operación pueda ejecutarse.',
-      report.evidence.map(item => item.id), target.kind === 'purchase-request' ? '/operations?tab=purchases' : '/inventory');
+      report.evidence.map(item => item.id), target.kind === 'purchase-request' ? '/operations?tab=purchases'
+        : target.kind === 'purchase-order' ? '/receiving' : '/inventory');
     await this.db.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
       VALUES($1,$2,'assistant.diagnostic.read','assistant',$3,$4)`,
       [user.companyId, user.sub, target.kind === 'screen' ? target.screen : target.id, JSON.stringify({
@@ -73,7 +76,7 @@ export class AssistantDiagnosticsService {
     report.findings.push({ code, severity, title, recommendation, evidenceIds, route });
   }
   private state(value: string) {
-    return ['draft', 'submitted', 'approved', 'rejected', 'confirmed', 'invoiced', 'cancelled'].includes(value) ? value : 'unrecognized';
+    return ['draft', 'submitted', 'approved', 'rejected', 'confirmed', 'invoiced', 'cancelled', 'ordered', 'partially_received', 'received'].includes(value) ? value : 'unrecognized';
   }
 
   private async screen(client: PoolClient, user: AuthTokenPayload,
@@ -106,7 +109,7 @@ export class AssistantDiagnosticsService {
   }
 
   private async purchase(client: PoolClient, user: AuthTokenPayload,
-    target: Extract<DiagnosticTarget, { kind: 'purchase-request' }>, report: DiagnosticReport) {
+    target: { kind: 'purchase-request'; id: string }, report: DiagnosticReport) {
     const result = await client.query<{
       status: string; created_by: string | null; independent: boolean; has_lines: boolean; has_order: boolean;
     }>(`SELECT pr.status,pr.created_by,c.require_independent_purchase_approver AS independent,
@@ -135,6 +138,58 @@ export class AssistantDiagnosticsService {
         : 'Debe revisar y aprobar otro administrador distinto del creador.', [id], route);
     if (!row.has_lines) this.finding(report, 'purchase_empty', 'blocking', 'La solicitud no tiene líneas.',
       'Revisa el documento con el responsable antes de intentar aprobarlo.', [id], route);
+  }
+
+  private async purchaseOrder(client: PoolClient, user: AuthTokenPayload,
+    target: { kind: 'purchase-order'; id: string }, report: DiagnosticReport) {
+    const result = await client.query<{
+      status: string; has_lines: boolean; has_legacy: boolean; pending_lines: number;
+      over_received_lines: number; overdue: boolean; posted: boolean;
+    }>(`SELECT po.status,
+        EXISTS(SELECT 1 FROM purchase_order_lines l WHERE l.order_id=po.id) AS has_lines,
+        EXISTS(SELECT 1 FROM purchase_receipts r WHERE r.company_id=po.company_id
+          AND r.purchase_order_id=po.id AND r.payload IS NULL) AS has_legacy,
+        (SELECT COUNT(*)::int FROM purchase_order_lines l WHERE l.order_id=po.id AND l.quantity >
+          COALESCE((SELECT SUM(rl.quantity) FROM purchase_receipt_lines rl
+            JOIN purchase_receipts r ON r.id=rl.receipt_id
+            WHERE rl.order_line_id=l.id AND r.company_id=po.company_id AND r.purchase_order_id=po.id),0)) AS pending_lines,
+        (SELECT COUNT(*)::int FROM purchase_order_lines l WHERE l.order_id=po.id AND l.quantity <
+          COALESCE((SELECT SUM(rl.quantity) FROM purchase_receipt_lines rl
+            JOIN purchase_receipts r ON r.id=rl.receipt_id
+            WHERE rl.order_line_id=l.id AND r.company_id=po.company_id AND r.purchase_order_id=po.id),0)) AS over_received_lines,
+        COALESCE(po.status IN ('ordered','partially_received') AND
+          po.expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,FALSE) AS overdue,
+        EXISTS(SELECT 1 FROM accounting_journal_entries je WHERE je.company_id=po.company_id
+          AND je.source_type='purchase_order' AND je.source_id=po.id AND je.status='posted') AS posted
+      FROM purchase_orders po WHERE po.id=$1 AND po.company_id=$2`, [target.id, user.companyId]);
+    const row = result.rows[0];
+    if (!row) throw new NotFoundException('Orden no encontrada en tu empresa.');
+    const id = this.evidence(report, 'Estado de orden, recepciones documentadas y asiento publicado', {
+      state: this.state(row.status), hasLines: row.has_lines, hasLegacyReceipt: row.has_legacy,
+      pendingLines: row.has_legacy ? null : row.pending_lines,
+      overReceivedLines: row.has_legacy ? null : row.over_received_lines,
+      overdue: row.overdue, posted: row.posted,
+    });
+    const route = '/receiving';
+    if (!row.has_lines) this.finding(report, 'order_empty', 'blocking', 'La orden no tiene líneas.',
+      'Solicita revisión del documento antes de recibir o contabilizar.', [id], route);
+    if (row.has_legacy) this.finding(report, 'legacy_receipt', 'warning', 'Hay una recepción histórica sin detalle de lote.',
+      'No mezcles la recepción histórica con cantidades por línea. Revisa su aplicación en Operaciones y concilia el histórico.', [id], '/operations?tab=purchases');
+    if (!row.has_legacy && row.over_received_lines) this.finding(report, 'order_over_received', 'blocking',
+      'Hay líneas con cantidades recibidas superiores a las pedidas.',
+      'Detén nuevas recepciones y solicita conciliación de los documentos; no ajustes para ocultar diferencias.', [id], route);
+    if (!row.has_legacy && row.has_lines && row.status === 'received' && row.pending_lines) this.finding(report, 'order_pending_lines', 'warning',
+      'La orden figura completa, pero hay líneas con cantidades pendientes documentadas.',
+      'Revisa recepciones e histórico antes de contabilizar o repetir una recepción.', [id], route);
+    if (row.overdue) this.finding(report, 'order_overdue', 'warning', 'La fecha comprometida ha pasado con la orden abierta.',
+      'Confirma la entrega pendiente con el proveedor; una fecha vencida no demuestra recepción física.', [id], route);
+    if (row.status === 'received' && !row.posted) this.finding(report, 'order_not_posted', 'info',
+      'No se encontró un asiento publicado para esta compra.',
+      'Revisa el estado, la recepción y el período antes de contabilizar. El asistente no contabiliza.', [id], route);
+    if (row.status === 'cancelled' || row.status === 'draft') this.finding(report, 'order_not_receivable', 'blocking',
+      'La orden no está en un estado habilitado para recepción por cantidades.',
+      'Revisa el documento original antes de proceder; no repitas una operación.', [id], route);
+    report.limitations.push('Los recuentos se basan en recepciones documentadas, no verifican entrega física, devoluciones ni todos los requisitos contables.');
   }
 
   private async sales(client: PoolClient, user: AuthTokenPayload,

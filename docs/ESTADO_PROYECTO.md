@@ -1,6 +1,67 @@
 # Estado del proyecto ERP360 modernizado
 
-## Corte verificado: 17 de noviembre de 2026
+## Inicio de preparación operativa: 25 de noviembre de 2026
+
+- Readiness comprueba una consulta PostgreSQL y devuelve 503 ante fallo; liveness
+  sigue independiente. No certifica el esquema ni servicios externos.
+- Compose usa loopback por defecto para nuevas publicaciones PostgreSQL. El
+  contenedor operativo existente no fue recreado y conserva su publicación anterior.
+- Se excluyen secretos de entorno y respaldos futuros en `.gitignore`. El proyecto
+  tiene un repositorio Git propio con cambios sin confirmar y dependencias ya
+  versionadas: ignorar no retira archivos previamente rastreados.
+- Validados 13 e2e de salud/asistente y 39 e2e adicionales de operación y
+  seguridad sobre PostgreSQL sintético aislado; 10 unitarias y build API.
+  La recuperación de prueba restauró 94 tablas y un
+  registro sintético exacto; no es prueba de los scripts operativos, del respaldo
+  real ni de RPO/RTO.
+- No se modificaron datos de la base ERP, se aplicaron migraciones allí ni se
+  reiniciaron servicios. Un primer test negativo usó puerto 0: el cliente puede
+  interpretarlo como el puerto predeterminado; pudo intentar autenticación con
+  credenciales sintéticas en el PostgreSQL local, sin consultar ni escribir datos.
+  La prueba se corrigió para usar un servidor efímero aislado.
+- La regresión de inventario/facturación inicialmente falló porque el fixture
+  inicializaba las cuentas contables después del despacho que las exige. La
+  prueba ahora verifica el rechazo y configura las cuentas antes del despacho,
+  sin cambiar las reglas productivas.
+
+## Continuación del asistente: 25 de noviembre de 2026
+
+- Agregado diagnóstico explícito de orden de compra en Compras y Recepciones,
+  solo para administrador y con aislamiento por empresa. Comprueba estado,
+  líneas, recepciones documentadas, vencimiento y asiento publicado; no infiere
+  pendientes cuando hay recepciones históricas sin detalle.
+- El chat permite comprobar la conectividad del endpoint de liveness de la API
+  ERP. Esto no comprueba PostgreSQL, otras APIs ni proveedores IA.
+- El adaptador DeepSeek existente coincide con el contrato publicado para
+  `deepseek-flash` y `deepseek-v4-pro`; las pruebas del proveedor son sintéticas,
+  no se configuró ni llamó una cuenta real.
+- Builds API y Angular, 9 pruebas unitarias API y 39 Angular focalizadas
+  correctos. La prueba e2e contra PostgreSQL quedó pendiente en ese corte y
+  pasó en la preparación operativa posterior. El typecheck global de pruebas detectó un
+  error preexistente en `test/core-management.e2e-spec.ts:219`.
+- Sin migración, activación de proveedor, cambios de datos ni reinicio de servicios.
+
+## Corte anterior verificado: 18 de noviembre de 2026
+
+### Continuación 0037 — cierre contable/operativo (18 de noviembre de 2026)
+
+- Implementados importación de extracto bancario CSV con validación de saldos,
+  deduplicación SHA-256, líneas pendientes y conciliación manual auditada.
+- Añadidos crédito de venta por cantidades de línea, reembolsos limitados por
+  cobros acumulados, retorno físico separado y reversión de COGS por costo de
+  despacho trazable. Devoluciones a proveedor conservan linaje de recepción
+  después de transferencias.
+- Añadidos estados financieros operativos no certificados. El plan de compra
+  admite destino/fecha por línea, herencia del plan general, y conteos
+  informativos de solicitudes con destino/fecha similares; no bloquean.
+- La migración `0037_operational_accounting_completion.sql` y los flujos API
+  se validaron en PostgreSQL aislado `erp360_validation2` con migraciones
+  0001–0037. No se aplicó 0037 ni se modificaron datos de la base operativa.
+- Builds API/Angular correctos; seis suites e2e focalizadas: **47 pruebas**.
+  Suite Angular completa: **99 pruebas**. Manual actualizado a edición 3.21
+  y regenerado tras completar validaciones.
+- Sin commit ni staging: el repositorio conserva muchos artefactos y archivos
+  no versionados. Revisar cambios por lote antes de decidir qué versionar.
 
 ### Continuación operativa 0035 — base productiva inicial
 
@@ -36,8 +97,9 @@
   revisión y outbox de eventos. HTTP aún no bloquea ni suspende módulos: la
   integración de enforcement efectiva requiere política aprobada.
 - Catálogo de almacenes autorizados disponible por empresa y códigos normalizados.
-- Compras nuevas bloquean solicitudes abiertas del mismo producto/proveedor,
-  además de deduplicar otra propuesta abierta de la misma regla.
+- En el corte 0036, las compras bloqueaban solicitudes abiertas similares. La
+  continuación 0037 retiró ese bloqueo transversal: la planificación muestra
+  el conteo por destino/fecha solo como advertencia informativa.
 - Checkout crea cuenta cliente con estado de verificación pendiente, sin validar
   propiedad del correo todavía. Reserva expresa de 30 minutos y estado de
   cotización de envío registrado; no cotiza ni cobra transportistas reales.
@@ -62,7 +124,8 @@ no paridad completa con Odoo ni preparación para producción.
   de CSV SaaS compartido), 32 Angular en tres suites; navegador real, tres flujos,
   tres anchos, descarga real, errores 503 sintéticos y recuperación real.
   Fixtures solo en copia restaurada aislada; copia/API temporales retiradas.
-- Manual vigente **3.19**, capítulos 12.2–12.4, captura nueva 42 y ayuda contextual.
+- Manual **3.19 en ese corte**, capítulos 12.2–12.4, captura nueva 42 y ayuda
+  contextual; sustituido por edición **3.21** en la continuación 0037.
   Documentación consolidada al terminar los tres bloques. API ERP reiniciada;
   huellas de seis conjuntos operativos preservadas (264/241/210 documentos,
   1169 movimientos, 320 saldos, 893 asientos); otros proyectos sin cambios.
@@ -115,10 +178,11 @@ no paridad completa con Odoo ni preparación para producción.
 
 Continuidad vigente: [pendientes](PENDIENTES_DESARROLLO.md) y
 [bitácora](BITACORA_CONTINUIDAD.md). La visibilidad por destino/fecha y solicitudes
-ya está entregada; no confundirla con deduplicación transversal automática.
-Siguen pendientes definir esa política, almacenes autorizados y fechas por línea.
-La carga inicial de Operaciones ya se corrigió. Las políticas contables,
-monetarias y fiscales requieren definición antes de ampliar su efecto.
+ya está entregada, con advertencia informativa por destino/fecha; no infiere
+necesidad común ni bloquea solicitudes. El catálogo de almacenes existe en API;
+la asignación de códigos históricos sigue siendo operativa. La herencia de plan
+por línea también está disponible. Las políticas contables, monetarias y fiscales
+requieren definición antes de ampliar su efecto oficial.
 
 ## Registro histórico inicial (10 y 11 de noviembre)
 

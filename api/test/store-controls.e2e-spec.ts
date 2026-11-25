@@ -29,8 +29,8 @@ describe('Store checkout, fulfillment and self-service unsubscribe', () => {
       if (other) otherToken = login.body.access_token; else token = login.body.access_token;
     }
     productId = (await admin('/masters/products', { sku: 'PUBLIC', name: 'Public product', unitPrice: 10 }).expect(201)).body.id;
-    await admin('/inventory/adjustments', { productId, quantity: 20, direction: 'in', locationCode: 'MAIN' }).expect(201);
-    await admin('/inventory/adjustments', { productId, quantity: 10, direction: 'in', locationCode: 'WH-B' }).expect(201);
+    await admin('/inventory/adjustments', { productId, quantity: 20, unitCost: 5, direction: 'in', locationCode: 'MAIN' }).expect(201);
+    await admin('/inventory/adjustments', { productId, quantity: 10, unitCost: 5, direction: 'in', locationCode: 'WH-B' }).expect(201);
     await admin('/ecommerce/admin/settings', { storeName: 'Control Store', storeSlug: `control-${suffix}`, currencyCode: 'USD' }).expect(201);
     await admin('/ecommerce/admin/settings', { storeName: 'Control Store', storeSlug: `control-${suffix}`, currencyCode: 'EUR' }).expect(400);
     listingId = (await admin('/ecommerce/admin/listings', { productId, slug: 'public', title: 'Public product', unitPrice: 10 }).expect(201)).body.id;

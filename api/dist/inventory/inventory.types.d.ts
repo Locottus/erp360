@@ -9,6 +9,7 @@ export type StockAdjustmentInput = {
     locationCode?: string;
     direction: 'in' | 'out';
     quantity: number;
+    unitCost?: number;
     notes?: string;
 };
 export type PurchasePlanning = {
@@ -54,5 +55,6 @@ export type PurchasePlanning = {
         expected_receipt_date: string | null;
         origin: 'manual' | 'replenishment';
         source_location_code: string | null;
+        similar_open_request_count: number;
     }[];
 };

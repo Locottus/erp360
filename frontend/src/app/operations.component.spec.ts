@@ -230,13 +230,15 @@ describe('Quotation validity UI', () => {
       id: purchase.id, request_number: 'PR', status: 'draft', supplier_name: 'Supplier', currency_code: 'USD',
       subtotal: '6.0000', tax_total: '0.0000', grand_total: '6.0000',
       destination_location_code: 'WH-B', expected_receipt_date: '2099-01-01',
-      lines: [{ id: 'line', sku: 'P', product_name: 'Product', quantity: '2.0000', unit_cost: '3.0000', line_total: '6.0000' }],
+      lines: [{ id: 'line', sku: 'P', product_name: 'Product', quantity: '2.0000', unit_cost: '3.0000',
+        line_total: '6.0000', destination_location_code: 'WH-B', expected_receipt_date: '2099-01-01' }],
     });
     await pending; fixture.detectChanges();
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('P · Product'); expect(text).toContain('2.0000'); expect(text).toContain('3.0000');
     expect(text).toContain('Estado al consultar: draft');
     expect(text).toContain('Destino previsto: WH-B'); expect(text).toContain('2099-01-01');
+    expect(text).toContain('Destino / fecha prevista');
     user.set(null); fixture.detectChanges(); expect(component.purchaseDetails).toBeNull();
   });
   it('sends explicit purchase planning and keeps blank planning unknown', async () => {
@@ -244,7 +246,8 @@ describe('Quotation validity UI', () => {
     for (const planned of [true, false]) {
       component.purchase = { requestNumber: 'PLANNED', supplierId: 's', taxRateCode: '',
         destinationLocationCode: planned ? ' WH-B ' : '', expectedReceiptDate: planned ? '2099-01-01' : '' };
-      component.purchaseLines = [{ productId: 'p', quantity: 1, unitCost: 2 }];
+      component.purchaseLines = [{ productId: 'p', quantity: 1, unitCost: 2,
+        destinationLocationCode: '', expectedReceiptDate: '' }];
       const pending = component.createPurchase();
       const req = http.expectOne(`${API_BASE_URL}/commerce/purchases/requests`);
       expect(req.request.body.destinationLocationCode).toBe(planned ? 'WH-B' : null);

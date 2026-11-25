@@ -26,7 +26,7 @@ export type PurchaseLineInput = {
   productId: string;
   quantity: number;
   unitCost?: number;
-};
+} & PurchasePlanInput;
 
 export type CreatePurchaseRequestInput = PurchasePlanInput & {
   requestNumber: string;

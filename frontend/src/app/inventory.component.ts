@@ -116,6 +116,11 @@ type FulfillmentOrder = {
             <label>Cantidad
               <input name="quantity" type="number" min="0.0001" step="0.0001" [(ngModel)]="adjustment.quantity" required />
             </label>
+            @if (adjustment.direction === 'in') {
+              <label>Costo unitario inicial / de entrada
+                <input name="unitCost" type="number" min="0" step="0.0001" [(ngModel)]="adjustment.unitCost" required />
+              </label>
+            }
             <label>Ubicación
               <input name="adjustmentLocation" [(ngModel)]="adjustment.locationCode" maxlength="32" required />
             </label>
@@ -182,7 +187,7 @@ type FulfillmentOrder = {
         }
       </article>
       <app-replenishment />
-      <p class="muted">La valoración de inventario, lotes, series y caducidad aún no están disponibles. Transferencias y conteos se realizan desde Control operativo.</p>
+      <p class="muted">Las entradas manuales requieren costo unitario; salidas, conteos y despachos consumen capas valorizadas. Los saldos históricos sin costo deben conciliarse antes de reducirlos. Lotes físicos, series y caducidad no están disponibles.</p>
     </section>
   `,
 })
@@ -198,7 +203,7 @@ export class InventoryComponent implements OnInit {
   locationCode = 'MAIN';
   productFilter = '';
   orderLocations: Record<string, string> = {};
-  adjustment = { productId: '', direction: 'in' as 'in' | 'out', quantity: 1, locationCode: 'MAIN', notes: '' };
+  adjustment = { productId: '', direction: 'in' as 'in' | 'out', quantity: 1, unitCost: 0, locationCode: 'MAIN', notes: '' };
   pendingDispatchId = '';
   loading = false;
   busy = false;
@@ -244,13 +249,16 @@ export class InventoryComponent implements OnInit {
   async adjustStock() {
     if (this.busy) return;
     const quantity = Number(this.adjustment.quantity);
-    if (!Number.isFinite(quantity) || quantity <= 0 || !this.adjustment.notes.trim()) {
-      this.error = 'Indica una cantidad positiva y un motivo para el ajuste.'; return;
+    if (!Number.isFinite(quantity) || quantity <= 0 || !this.adjustment.notes.trim() ||
+        (this.adjustment.direction === 'in' && (!Number.isFinite(Number(this.adjustment.unitCost)) || Number(this.adjustment.unitCost) < 0))) {
+      this.error = 'Indica cantidad, motivo y costo unitario válido para una entrada.'; return;
     }
     this.busy = true; this.error = ''; this.message = '';
     try {
       await firstValueFrom(this.http.post(`${this.api}/inventory/adjustments`, {
-        ...this.adjustment, quantity, locationCode: this.adjustment.locationCode.trim(), notes: this.adjustment.notes.trim(),
+        ...this.adjustment,
+        ...(this.adjustment.direction === 'in' ? { unitCost: Number(this.adjustment.unitCost) } : { unitCost: undefined }),
+        quantity, locationCode: this.adjustment.locationCode.trim(), notes: this.adjustment.notes.trim(),
       }));
       this.message = 'Ajuste registrado. Revisa el nuevo saldo y el movimiento del kardex.';
       this.adjustment = { ...this.adjustment, quantity: 1, notes: '' };

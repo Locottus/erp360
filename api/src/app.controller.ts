@@ -1,9 +1,10 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Header } from '@nestjs/common';
 import { AppService } from './app.service';
+import { HealthService } from './health.service';
 
 @Controller()
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(private readonly appService: AppService, private readonly health: HealthService) {}
 
   @Get()
   getHello(): string {
@@ -11,6 +12,7 @@ export class AppController {
   }
 
   @Get('/health/live')
+  @Header('Cache-Control', 'no-store')
   getLiveness() {
     return {
       status: 'ok',
@@ -21,7 +23,9 @@ export class AppController {
   }
 
   @Get('/health/ready')
-  getReadiness() {
+  @Header('Cache-Control', 'no-store')
+  async getReadiness() {
+    await this.health.checkReadiness();
     return {
       status: 'ok',
       check: 'readiness',

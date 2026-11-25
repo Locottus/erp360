@@ -11,6 +11,9 @@ export type DiagnosticTarget = {
     kind: 'purchase-request';
     id: string;
 } | {
+    kind: 'purchase-order';
+    id: string;
+} | {
     kind: 'sales-order' | 'stock';
     id: string;
     locationCode: string;

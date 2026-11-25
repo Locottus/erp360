@@ -31,7 +31,7 @@ type PurchasePlanning = {
   requests: {
     request_id: string; request_number: string; status: string; supplier_name: string; quantity: string;
     destination_location_code: string | null; expected_receipt_date: string | null;
-    origin: 'manual' | 'replenishment'; source_location_code: string | null;
+    origin: 'manual' | 'replenishment'; source_location_code: string | null; similar_open_request_count: number;
   }[];
 };
 
@@ -124,16 +124,17 @@ type PurchasePlanning = {
               </table></div>
               <section aria-label="Solicitudes abiertas del producto">
                 <h4>Solicitudes sin orden: {{ plan.open_requests }} · Cantidad solicitada: {{ plan.open_request_quantity }}</h4>
-                <p>No son compras confirmadas y no se suman al pendiente de órdenes. Pueden duplicar una necesidad de otra regla o solicitud manual.
-                  El origen de reposición no implica destino. Revisa antes de proponer o aprobar; esta consulta no bloquea cambios.</p>
+                  <p>No son compras confirmadas y no se suman al pendiente de órdenes. La cantidad de solicitudes con igual destino y fecha es una advertencia informativa, no un bloqueo.
+                  El origen de reposición no implica destino. Revisa si satisfacen la misma necesidad antes de proponer o aprobar.</p>
                 <div class="table-scroll"><table class="table-list planning-table">
-                  <thead><tr><th>Solicitud / proveedor</th><th>Estado</th><th>Cantidad solicitada</th><th>Origen</th><th>Destino / fecha UTC</th></tr></thead>
+                  <thead><tr><th>Solicitud / proveedor</th><th>Estado</th><th>Cantidad solicitada</th><th>Origen</th><th>Destino / fecha UTC</th><th>Solicitudes similares</th></tr></thead>
                   <tbody>@for (item of plan.requests; track item.request_id) {
                     <tr><th scope="row">{{ item.request_number }} · {{ item.supplier_name }}</th>
                       <td>{{ item.status === 'draft' ? 'Borrador' : 'Enviada' }}</td><td>{{ item.quantity }}</td>
                       <td>{{ item.origin === 'replenishment' ? 'Reposición · ' + item.source_location_code : 'Manual' }}</td>
-                      <td>{{ item.destination_location_code || 'No definido' }} · {{ item.expected_receipt_date || 'No definida' }}</td></tr>
-                  } @empty { <tr><td colspan="5">Sin solicitudes abiertas sin orden para este producto.</td></tr> }</tbody>
+                      <td>{{ item.destination_location_code || 'No definido' }} · {{ item.expected_receipt_date || 'No definida' }}</td>
+                      <td>{{ item.similar_open_request_count > 1 ? 'Revisar ' + item.similar_open_request_count : '1' }}</td></tr>
+                  } @empty { <tr><td colspan="6">Sin solicitudes abiertas sin orden para este producto.</td></tr> }</tbody>
                 </table></div>
                 <a routerLink="/operations" [queryParams]="{tab:'purchases'}">Revisar solicitudes y planes en Compras</a>
               </section>

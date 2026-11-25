@@ -12,7 +12,7 @@ describe('Local contextual assistant chat', () => {
   let user: ReturnType<typeof signal<AuthUser | null>>;
   let router: Router;
   let help: HelpService;
-  let api: { usage: jasmine.Spy; chat: jasmine.Spy; diagnose: jasmine.Spy };
+  let api: { usage: jasmine.Spy; chat: jasmine.Spy; diagnose: jasmine.Spy; checkApi: jasmine.Spy };
   const report: DiagnosticReport = { target: { kind: 'screen', screen: '/inventory' }, capturedAt: '2026-11-11T00:00:00Z', readOnly: true,
     evidence: [{ id: 'E1', source: 'Stock verificado', facts: { invalidBalances: 1 } }],
     findings: [{ code: 'review', severity: 'warning', title: 'Revisa el saldo.', recommendation: 'Concilia el kardex.',
@@ -29,6 +29,7 @@ describe('Local contextual assistant chat', () => {
   beforeEach(() => {
     user = signal<AuthUser | null>({ id: 'demo', fullName: 'Demo', email: 'demo@example.test', companyId: 'c', roles: ['admin'] });
     api = { usage: jasmine.createSpy('usage').and.resolveTo(meter), diagnose: jasmine.createSpy('diagnose').and.resolveTo(report),
+      checkApi: jasmine.createSpy('checkApi').and.resolveTo(),
       chat: jasmine.createSpy('chat').and.resolveTo({ text: 'Respuesta de IA sintética.', provider: 'deepseek', usage: meter, truncated: false }) };
     TestBed.configureTestingModule({ imports: [AssistantChatComponent], providers: [
       provideRouter([]),
@@ -175,6 +176,30 @@ describe('Local contextual assistant chat', () => {
     expect(api.chat.calls.mostRecent().args).toHaveSize(3);
     component.shareDiagnostic.set(true); component.draft = 'Propón pasos seguros'; await component.send();
     expect(api.chat.calls.mostRecent().args[3]).toEqual(report.target);
+  });
+  it('checks API connectivity only on request and does not claim database health', async () => {
+    const fixture = setup(); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    expect(api.checkApi).not.toHaveBeenCalled();
+    await component.checkApi();
+    expect(component.messages().at(-1)?.text).toContain('no comprueba la base de datos');
+    expect(api.chat).not.toHaveBeenCalled();
+    api.checkApi.and.rejectWith(new Error('private upstream details'));
+    await component.checkApi();
+    expect(component.error()).toContain('No se pudo verificar');
+    expect(component.error()).not.toContain('private upstream details');
+    expect(component.checkingApi()).toBeFalse();
+  });
+  it('discards a late API check after changing identity', async () => {
+    const fixture = setup(); await fixture.whenStable();
+    const component = fixture.componentInstance;
+    let finish!: () => void;
+    api.checkApi.and.returnValue(new Promise<void>(resolve => { finish = resolve; }));
+    const pending = component.checkApi();
+    user.set(null); fixture.detectChanges();
+    finish(); await pending;
+    expect(component.messages()).toHaveSize(1);
+    expect(component.checkingApi()).toBeFalse();
   });
   it('discards late diagnostic evidence on logout and reports authorization errors without fabricated findings', async () => {
     const fixture = setup(); await fixture.whenStable();

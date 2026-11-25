@@ -38,7 +38,8 @@ describe('AI provider adapters', () => {
     const second: RequestInit = fetchMock.mock.calls[1][1];
     expect(first.redirect).toBe('error');
     expect(first.headers).toMatchObject({ Authorization: `Bearer ${secret}` });
-    expect(JSON.parse(String(first.body))).toMatchObject({ max_tokens: 128, thinking: { type: 'disabled' } });
+    expect(JSON.parse(String(first.body))).toMatchObject({ model: 'deepseek-flash', messages, stream: false, max_tokens: 128, thinking: { type: 'disabled' } });
+    expect(JSON.parse(String(first.body)).tools).toBeUndefined();
     expect(JSON.parse(String(second.body))).toMatchObject({ max_completion_tokens: 128, reasoning_effort: 'none', store: false });
     expect(JSON.parse(String(second.body)).tools).toBeUndefined();
   });
@@ -63,6 +64,9 @@ describe('AI provider adapters', () => {
     fetchMock.mockRejectedValueOnce(new Error(secret));
     await expect(new ClaudeProvider().complete(secret, 'claude-haiku-5-5', messages, 128))
       .rejects.toMatchObject({ code: 'claude_transport_or_parse_error', releaseReservation: false });
+    fetchMock.mockResolvedValueOnce(new Response(secret, { status: 401 }));
+    await expect(new DeepSeekProvider().complete(secret, 'deepseek-flash', messages, 128))
+      .rejects.toMatchObject({ code: 'deepseek_http_401', releaseReservation: true });
   });
   it('rejects malformed token counters and oversized responses, but accounts for empty generated content', async () => {
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 1 }, choices: [] })));

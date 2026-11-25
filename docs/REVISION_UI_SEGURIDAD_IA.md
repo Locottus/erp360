@@ -118,10 +118,12 @@ reinicia uso. Las compras requieren confirmación del operador de servicio pagad
 Fallos inciertos retienen reservas hasta conciliación verificada por owner.
 Se probaron protocolos con respuestas sintéticas, no inferencia ni cobro reales.
 El agente ahora tiene resúmenes de pantalla para todas las áreas y comprobaciones
-por solicitud de compra, pedido y saldo. Son consultas parametrizadas READ ONLY
+por solicitud y orden de compra, pedido de venta y saldo. Son consultas parametrizadas READ ONLY
 con timeout, permisos operativos y auditoría sin contenido. Compartir con IA
 estados/recuentos verificados exige consentimiento adicional; no se transmiten
 IDs/nombres/importes del diagnóstico. El modelo no elige SQL, URLs o herramientas.
+La comprobación explícita de conexión API solo verifica `/health/live`; no
+demuestra disponibilidad de base de datos ni de proveedores externos.
 
 ### Evolución recomendada (conocimiento completo y más herramientas pendientes)
 

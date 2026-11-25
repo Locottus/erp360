@@ -32,7 +32,7 @@ function diagnosticTarget(input) {
         return { kind: 'screen', screen, ...(area ? { area } : {}) };
     }
     const id = uuid(body.id, 'target.id').toLowerCase();
-    if (body.kind === 'purchase-request')
+    if (body.kind === 'purchase-request' || body.kind === 'purchase-order')
         return { kind: body.kind, id };
     if (body.kind !== 'sales-order' && body.kind !== 'stock') {
         throw new common_1.BadRequestException('Herramienta de diagnóstico no permitida.');

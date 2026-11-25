@@ -58,7 +58,7 @@ describe('Inventory and billing workflows (e2e)', () => {
     productId = product.body.id;
     await request(app.getHttpServer()).post('/inventory/adjustments')
       .set('Authorization', `Bearer ${token}`)
-      .send({ productId, direction: 'in', quantity: 10, locationCode: 'WH-A', notes: 'Opening e2e balance' })
+      .send({ productId, direction: 'in', quantity: 10, unitCost: 12, locationCode: 'WH-A', notes: 'Opening e2e balance' })
       .expect(201);
     const quotation = await request(app.getHttpServer()).post('/commerce/sales/quotations')
       .set('Authorization', `Bearer ${token}`)
@@ -130,6 +130,15 @@ describe('Inventory and billing workflows (e2e)', () => {
     expect(Number(unchangedStock.body[0].on_hand)).toBe(10);
     expect(Number(unchangedStock.body[0].reserved)).toBe(2);
 
+    const missingAccounts = await request(app.getHttpServer())
+      .post(`/inventory/sales/orders/${salesOrderId}/dispatch`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({})
+      .expect(400);
+    expect(missingAccounts.body.message).toContain('1200');
+    await request(app.getHttpServer()).post('/accounting/bootstrap-accounts')
+      .set('Authorization', `Bearer ${token}`).send({}).expect(201);
+
     await request(app.getHttpServer())
       .post(`/inventory/sales/orders/${salesOrderId}/dispatch`)
       .set('Authorization', `Bearer ${token}`)
@@ -180,8 +189,6 @@ describe('Inventory and billing workflows (e2e)', () => {
       .expect(200);
     expect(otherInvoices.body).toHaveLength(0);
 
-    await request(app.getHttpServer()).post('/accounting/bootstrap-accounts')
-      .set('Authorization', `Bearer ${token}`).send({}).expect(201);
     await request(app.getHttpServer()).post(`/accounting/sales-invoices/${invoice.id}/post`)
       .set('Authorization', `Bearer ${token}`).send({}).expect(201);
 

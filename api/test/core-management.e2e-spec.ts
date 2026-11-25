@@ -134,10 +134,10 @@ describe('Users, company, replenishment and exact general ledger', () => {
     expect(rows[0]).toMatchObject({ location_code: 'MAIN', revision: 1, needs_replenishment: true,
       minimum_quantity: '2.0001', target_quantity: '5.0002', suggested_quantity: '5.0002' });
     expect((await get('/inventory/stock').expect(200)).body).toHaveLength(0);
-    await post('/inventory/adjustments', { productId, direction: 'in', quantity: 2, locationCode: 'MAIN', notes: 'Replenishment fixture stock' }).expect(201);
+    await post('/inventory/adjustments', { productId, direction: 'in', quantity: 2, unitCost: 1, locationCode: 'MAIN', notes: 'Replenishment fixture stock' }).expect(201);
     rows = (await get('/inventory/replenishment').query({ locationCode: 'main' }).expect(200)).body;
     expect(rows[0]).toMatchObject({ available: '2.0000', needs_replenishment: true, suggested_quantity: '3.0002' });
-    await post('/inventory/adjustments', { productId, direction: 'in', quantity: 0.0001, locationCode: 'MAIN', notes: 'Reach exact minimum fixture' }).expect(201);
+    await post('/inventory/adjustments', { productId, direction: 'in', quantity: 0.0001, unitCost: 1, locationCode: 'MAIN', notes: 'Reach exact minimum fixture' }).expect(201);
     rows = (await get('/inventory/replenishment').expect(200)).body;
     expect(rows[0]).toMatchObject({ available: '2.0001', needs_replenishment: false, suggested_quantity: '0' });
     const customer = await post('/masters/customers', { code: 'CORE', name: 'Reserved stock fixture' }).expect(201);

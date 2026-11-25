@@ -28,8 +28,9 @@ export class AccountingController {
 
   @Get('reports/financial-statements')
   @Roles('admin')
-  financialStatements(@Req() request: AuthenticatedRequest, @Query('asOfDate') asOfDate?: string) {
-    return this.accountingService.getFinancialStatements(request.user, asOfDate);
+  financialStatements(@Req() request: AuthenticatedRequest, @Query('asOfDate') asOfDate?: string,
+    @Query('fromDate') fromDate?: string, @Query('toDate') toDate?: string) {
+    return this.accountingService.getFinancialStatements(request.user, asOfDate, fromDate, toDate);
   }
 
   @Get('bank-accounts')
@@ -57,6 +58,13 @@ export class AccountingController {
     return this.accountingService.upsertBankAccount(request.user, input);
   }
 
+  @Post('bank-accounts/:id/statements/import')
+  @Roles('admin')
+  importBankStatement(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { statementReference: string; statementDate: string; openingBalance: string; closingBalance: string; csv: string }) {
+    return this.accountingService.importBankStatement(request.user, id, input);
+  }
+
   @Post('purchase-orders/:id/returns')
   @Roles('admin')
   returnToSupplier(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
@@ -65,8 +73,15 @@ export class AccountingController {
   }
   @Post('sales-invoices/:id/credit')
   @Roles('admin')
-  credit(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() input: { reason: string; returnStock: boolean }) {
+  credit(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string; returnStock: boolean; lines?: { orderLineId: string; quantity: number }[] }) {
     return this.accountingService.creditInvoice(request.user, id, input);
+  }
+
+  @Get('sales-invoices/:id/creditable-lines')
+  @Roles('admin')
+  creditableInvoiceLines(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+    return this.accountingService.creditableInvoiceLines(request.user, id);
   }
 
   @Get('credits')
@@ -82,7 +97,7 @@ export class AccountingController {
   @Post('credits/:id/stock-return')
   @Roles('admin')
   returnCreditedStock(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() input: { reference: string; reason: string }) {
+    @Body() input: { reference: string; reason: string; lines?: { creditNoteLineId: string; quantity: number }[] }) {
     return this.accountingService.returnCreditedStock(request.user, id, input);
   }
   @Get('payables')

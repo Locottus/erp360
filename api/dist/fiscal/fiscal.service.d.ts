@@ -38,7 +38,7 @@ export declare class FiscalService {
     }>;
     submitFiscalDocument(user: AuthUser, fiscalDocumentId: string): Promise<{
         id: string;
-        status: "rejected" | "submitted" | "error" | "accepted";
+        status: "error" | "rejected" | "submitted" | "accepted";
         providerTrackId: string;
         message: string;
     }>;

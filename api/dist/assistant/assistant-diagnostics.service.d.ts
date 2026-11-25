@@ -31,12 +31,13 @@ export declare class AssistantDiagnosticsService {
     private state;
     private screen;
     private purchase;
+    private purchaseOrder;
     private sales;
     private stock;
 }
 export declare function providerDiagnostic(report: DiagnosticReport): {
     capturedAt: string;
-    tool: "stock" | "screen" | "purchase-request" | "sales-order";
+    tool: "stock" | "screen" | "purchase-request" | "purchase-order" | "sales-order";
     evidence: {
         id: string;
         source: string;

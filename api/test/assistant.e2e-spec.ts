@@ -268,6 +268,33 @@ describe('Assistant tenant services and monthly quotas', () => {
       expect((await db.query('SELECT reserved::text FROM inventory_stock_balances WHERE company_id=$1', [companyId])).rows[0].reserved).toBe('0.0000');
     } finally { await db.query('DELETE FROM inventory_reservations WHERE id=$1 AND company_id=$2', [reservation, companyId]); }
   });
+  it('diagnoses a purchase order with tenant and receipt permissions, including legacy history', async () => {
+    const orderId = (await db.query<{ id: string }>(`INSERT INTO purchase_orders
+      (company_id,supplier_id,request_id,order_number,status,created_by,expected_receipt_date)
+      SELECT company_id,supplier_id,id,$2,'ordered',$3,'2000-01-01' FROM purchase_requests WHERE id=$1
+      RETURNING id`, [diagnosticRequestId, `DIAG-ORDER-${suffix}`, ownerId])).rows[0].id;
+    try {
+      await db.query(`INSERT INTO purchase_order_lines(order_id,product_id,quantity,unit_cost,line_total)
+        VALUES($1,$2,2,1,2)`, [orderId, productId]);
+      const target = { kind: 'purchase-order', id: orderId };
+      const response = (await post('/assistant/diagnostics', target).expect(201)).body;
+      expect(response.evidence[1].facts).toMatchObject({ state: 'ordered', pendingLines: 1, overdue: true });
+      expect(response.findings.map((item: { code: string }) => item.code)).toContain('order_overdue');
+      await post('/assistant/diagnostics', target, buyerToken).expect(403);
+      await post('/assistant/diagnostics', target, otherToken).expect(404);
+      await db.query(`INSERT INTO purchase_receipts(company_id,purchase_order_id,receipt_number,created_by)
+        VALUES($1,$2,$3,$4)`, [companyId, orderId, `DIAG-LEGACY-${suffix}`, ownerId]);
+      const legacy = (await post('/assistant/diagnostics', target).expect(201)).body;
+      expect(legacy.evidence[1].facts).toMatchObject({ hasLegacyReceipt: true, pendingLines: null });
+      expect(legacy.findings.map((item: { code: string }) => item.code)).toContain('legacy_receipt');
+      await post('/assistant/chat', { ...message(), diagnostic: { consent: true, target } }).expect(201);
+      const sent = JSON.stringify(complete.mock.calls[0][3]);
+      for (const value of [privateMarker, orderId, companyId, secret]) expect(sent).not.toContain(value);
+    } finally {
+      await db.query('DELETE FROM purchase_receipts WHERE purchase_order_id=$1 AND company_id=$2', [orderId, companyId]);
+      await db.query('DELETE FROM purchase_orders WHERE id=$1 AND company_id=$2', [orderId, companyId]);
+    }
+  });
   it('refreshes consented evidence on the server, omits record identities and meters the enriched prompt', async () => {
     const diagnostic = { consent: true, target: { kind: 'purchase-request', id: diagnosticRequestId },
       evidence: { forged: privateMarker } };

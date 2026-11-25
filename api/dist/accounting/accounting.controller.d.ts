@@ -36,16 +36,20 @@ export declare class AccountingController {
         }[];
         total: number;
     }>;
-    financialStatements(request: AuthenticatedRequest, asOfDate?: string): Promise<{
+    financialStatements(request: AuthenticatedRequest, asOfDate?: string, fromDate?: string, toDate?: string): Promise<{
+        basis: string;
         balanceSheet: {
-            asOfDate: string | null;
+            asOfDate: string;
             assets: number;
             liabilities: number;
             equity: number;
+            accumulatedNetIncome: number;
             totalLiabilitiesAndEquity: number;
             balancesMatch: boolean;
         };
         incomeStatement: {
+            fromDate: string;
+            toDate: string;
             revenue: number;
             expenses: number;
             netIncome: number;
@@ -78,6 +82,17 @@ export declare class AccountingController {
         currencyCode: string;
         isActive: boolean;
     }>;
+    importBankStatement(request: AuthenticatedRequest, id: string, input: {
+        statementReference: string;
+        statementDate: string;
+        openingBalance: string;
+        closingBalance: string;
+        csv: string;
+    }): Promise<{
+        id: string;
+        importedLines: number;
+        replayed: boolean;
+    }>;
     returnToSupplier(request: AuthenticatedRequest, id: string, input: Parameters<AccountingService['returnToSupplier']>[2]): Promise<{
         returnId: string;
         replayed: boolean;
@@ -91,10 +106,19 @@ export declare class AccountingController {
     credit(request: AuthenticatedRequest, id: string, input: {
         reason: string;
         returnStock: boolean;
+        lines?: {
+            orderLineId: string;
+            quantity: number;
+        }[];
     }): Promise<{
         id: string;
         creditNumber: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+        fullyCredited: boolean;
     }>;
+    creditableInvoiceLines(request: AuthenticatedRequest, id: string): Promise<import("pg").QueryResultRow[]>;
     credits(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     refund(request: AuthenticatedRequest, id: string, input: RegisterInvoicePaymentInput): Promise<{
         id: string;
@@ -102,6 +126,10 @@ export declare class AccountingController {
     returnCreditedStock(request: AuthenticatedRequest, id: string, input: {
         reference: string;
         reason: string;
+        lines?: {
+            creditNoteLineId: string;
+            quantity: number;
+        }[];
     }): Promise<{
         id: string;
         replayed: boolean;

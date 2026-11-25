@@ -19,7 +19,7 @@ describe('Replenishment rule editing', () => {
       pending_quantity: '3.0001', pending_orders: 1, review_orders: 1 }],
     requests: [{ request_id: 'r', request_number: 'PR-OTHER', supplier_name: 'Supplier', status: 'draft',
       quantity: '2.0001', origin: 'replenishment', source_location_code: 'SOURCE-A',
-      destination_location_code: 'DEST-B', expected_receipt_date: null }] };
+      destination_location_code: 'DEST-B', expected_receipt_date: null, similar_open_request_count: 2 }] };
   let user: ReturnType<typeof signal<AuthUser | null>>;
   let http: HttpTestingController;
   beforeEach(() => {
@@ -84,6 +84,7 @@ describe('Replenishment rule editing', () => {
     expect(text).toContain('PR-OTHER'); expect(text).toContain('SOURCE-A'); expect(text).toContain('DEST-B');
     expect(text).toContain('No definido'); expect(text).toContain('No definida');
     expect(text).toContain('Cantidad solicitada: 2.0001'); expect(text).toContain('no se suman al pendiente');
+    expect(text).toContain('Revisar 2');
   });
   it('clears and discards a late breakdown after identity changes', async () => {
     const fixture = await setup(); const component = fixture.componentInstance;

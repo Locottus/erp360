@@ -15,6 +15,7 @@ import { EcommerceModule } from './ecommerce/ecommerce.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { SaasModule } from './saas/saas.module';
 import { AssistantModule } from './assistant/assistant.module';
+import { HealthService } from './health.service';
 
 @Module({
   imports: [
@@ -34,6 +35,6 @@ import { AssistantModule } from './assistant/assistant.module';
     AssistantModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, HealthService],
 })
 export class AppModule {}

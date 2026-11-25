@@ -68,6 +68,7 @@ export declare class InventoryService {
         destinationCode?: string;
         quantity: number;
         expectedOnHand?: number;
+        unitCost?: number;
         notes?: string;
     }): Promise<{
         id: string;
@@ -146,7 +147,9 @@ export declare class InventoryService {
     private parsePageValue;
     private normalizeLocation;
     private ensureStockBalanceRow;
-    private resolveDispatchUnitCost;
+    private getInventoryCostPolicy;
+    private createCostLot;
+    private consumeCostLots;
     private postSaleDispatchCogs;
     private insertMovement;
     private insertAudit;

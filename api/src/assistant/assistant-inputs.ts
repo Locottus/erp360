@@ -12,6 +12,7 @@ export type Message = { role: 'system' | 'user' | 'assistant'; content: string }
 export type DiagnosticTarget =
   | { kind: 'screen'; screen: string; area?: string }
   | { kind: 'purchase-request'; id: string }
+  | { kind: 'purchase-order'; id: string }
   | { kind: 'sales-order' | 'stock'; id: string; locationCode: string };
 
 export function diagnosticTarget(input: unknown): DiagnosticTarget {
@@ -29,7 +30,7 @@ export function diagnosticTarget(input: unknown): DiagnosticTarget {
     return { kind: 'screen', screen, ...(area ? { area } : {}) };
   }
   const id = uuid(body.id, 'target.id').toLowerCase();
-  if (body.kind === 'purchase-request') return { kind: body.kind, id };
+  if (body.kind === 'purchase-request' || body.kind === 'purchase-order') return { kind: body.kind, id };
   if (body.kind !== 'sales-order' && body.kind !== 'stock') {
     throw new BadRequestException('Herramienta de diagnóstico no permitida.');
   }

@@ -95,6 +95,69 @@ describe('Purchase request decisions', () => {
     expect((await request(app.getHttpServer()).get(url).auth(token, { type: 'bearer' }).expect(200)).body.open_requests).toBe(1);
   });
 
+  it('inherits request planning per line, preserves overrides on approval, and reports similar requests without blocking', async () => {
+    const secondProduct = (await post('/masters/products', {
+      sku: `PLAN-LINE-${suffix}`, name: 'Line plan product', unitPrice: 1,
+    }).expect(201)).body.id as string;
+    const plan = { destinationLocationCode: 'WH-HEADER', expectedReceiptDate: '2099-02-01' };
+    const firstId = (await post('/commerce/purchases/requests', {
+      requestNumber: `LINE-PLAN-${suffix}`, supplierId, ...plan,
+      lines: [
+        { productId, quantity: 1, unitCost: 3 },
+        { productId: secondProduct, quantity: 1, unitCost: 4,
+          destinationLocationCode: 'WH-LINE', expectedReceiptDate: '2099-03-01' },
+      ],
+    }).expect(201)).body.id as string;
+    const secondId = (await post('/commerce/purchases/requests', {
+      requestNumber: `LINE-SIMILAR-${suffix}`, supplierId, ...plan,
+      lines: [{ productId, quantity: 2, unitCost: 3 }],
+    }).expect(201)).body.id as string;
+
+    const details = (await request(app.getHttpServer()).get(`/commerce/purchases/requests/${firstId}`)
+      .auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(details.lines).toEqual(expect.arrayContaining([
+      expect.objectContaining({ product_id: productId, destination_location_code: 'WH-HEADER',
+        expected_receipt_date: '2099-02-01' }),
+      expect.objectContaining({ product_id: secondProduct, destination_location_code: 'WH-LINE',
+        expected_receipt_date: '2099-03-01' }),
+    ]));
+
+    const planning = (await request(app.getHttpServer())
+      .get(`/inventory/replenishment/${productId}/purchase-planning`)
+      .auth(token, { type: 'bearer' }).expect(200)).body;
+    expect(planning.requests).toEqual(expect.arrayContaining([
+      expect.objectContaining({ request_id: firstId, similar_open_request_count: 2 }),
+      expect.objectContaining({ request_id: secondId, similar_open_request_count: 2 }),
+    ]));
+
+    const approved = (await post(`/commerce/purchases/requests/${firstId}/approve`, {
+      orderNumber: `LINE-PLAN-PO-${suffix}`,
+    }).expect(201)).body;
+    const orderLines = await db.query(
+      `SELECT l.product_id,COALESCE(l.destination_location_code,po.destination_location_code) AS destination_location_code,
+          COALESCE(l.expected_receipt_date,po.expected_receipt_date)::text AS expected_receipt_date
+       FROM purchase_order_lines l JOIN purchase_orders po ON po.id=l.order_id WHERE l.order_id=$1`,
+      [approved.purchaseOrderId],
+    );
+    expect(orderLines.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ product_id: productId, destination_location_code: 'WH-HEADER',
+        expected_receipt_date: '2099-02-01' }),
+      expect.objectContaining({ product_id: secondProduct, destination_location_code: 'WH-LINE',
+        expected_receipt_date: '2099-03-01' }),
+    ]));
+    const productPlans = await Promise.all([productId, secondProduct].map(id =>
+      request(app.getHttpServer()).get(`/inventory/replenishment/${id}/purchase-planning`)
+        .auth(token, { type: 'bearer' }).expect(200)));
+    expect(productPlans[0].body.orders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ order_number: `LINE-PLAN-PO-${suffix}`, destination_location_code: 'WH-HEADER',
+        expected_receipt_date: '2099-02-01' }),
+    ]));
+    expect(productPlans[1].body.orders).toEqual(expect.arrayContaining([
+      expect.objectContaining({ order_number: `LINE-PLAN-PO-${suffix}`, destination_location_code: 'WH-LINE',
+        expected_receipt_date: '2099-03-01' }),
+    ]));
+  });
+
   it('rejects with audit, excludes other tenants and prevents approval', async () => {
     const id = await makeRequest('REJECT');
     const getDetails = (bearer: string) => request(app.getHttpServer()).get(`/commerce/purchases/requests/${id}`).auth(bearer, { type: 'bearer' });

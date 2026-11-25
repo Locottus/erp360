@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { DatabaseService } from '../common/database.service';
 import { nextDocumentNumber } from '../common/document-sequence';
 import { normalizeQuantityDocument, type QuantityDocument } from '../common/quantity-document';
@@ -16,6 +17,51 @@ type PaymentAmounts = {
   baseCurrencyCode: string;
   exchangeRate: number;
 };
+
+type ParsedBankCsvLine = {
+  reference: string;
+  lineType: 'debit' | 'credit';
+  amount: string;
+  bookedAt: string;
+  counterpartReference: string | null;
+};
+
+function parseCsvRecords(csv: string): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < csv.length; index++) {
+    const character = csv[index];
+    if (quoted) {
+      if (character === '"' && csv[index + 1] === '"') {
+        field += '"';
+        index++;
+      } else if (character === '"') {
+        quoted = false;
+      } else {
+        field += character;
+      }
+    } else if (character === '"' && field.length === 0) {
+      quoted = true;
+    } else if (character === ',') {
+      record.push(field);
+      field = '';
+    } else if (character === '\n' || character === '\r') {
+      if (character === '\r' && csv[index + 1] === '\n') index++;
+      record.push(field);
+      if (record.some(value => value.trim() !== '')) records.push(record);
+      record = [];
+      field = '';
+    } else {
+      field += character;
+    }
+  }
+  if (quoted) throw new BadRequestException('CSV contains an unclosed quoted field.');
+  record.push(field);
+  if (record.some(value => value.trim() !== '')) records.push(record);
+  return records;
+}
 
 @Injectable()
 export class AccountingService {
@@ -167,66 +213,189 @@ export class AccountingService {
     return { id: result.rows[0].id, code, bankName: bankName, iban, currencyCode, isActive: input.isActive ?? true };
   }
 
-  async getFinancialStatements(user: AuthUser, asOfDate?: string) {
-    if (asOfDate !== undefined && asOfDate !== '') {
-      if (typeof asOfDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(asOfDate) || asOfDate.startsWith('0000') ||
-          !Number.isFinite(Date.parse(asOfDate)) || new Date(asOfDate).toISOString().slice(0, 10) !== asOfDate) {
-        throw new BadRequestException('asOfDate must be a valid YYYY-MM-DD date.');
+  async importBankStatement(user: AuthUser, bankAccountId: string, input: {
+    statementReference: string; statementDate: string; openingBalance: string; closingBalance: string; csv: string;
+  }) {
+    if (!input || typeof input.statementReference !== 'string' || !input.statementReference.trim() ||
+        input.statementReference.trim().length > 64 || /[\u0000-\u001f]/.test(input.statementReference)) {
+      throw new BadRequestException('statementReference must contain 1 to 64 valid characters.');
+    }
+    const statementDate = requiredDate(input.statementDate, 'statementDate');
+    const parseMoney = (value: string, field: string, allowZero: boolean) => {
+      if (typeof value !== 'string' || !/^\d{1,14}(?:\.\d{1,4})?$/.test(value)) {
+        throw new BadRequestException(`${field} must be a non-negative amount with up to 4 decimals.`);
       }
+      const [whole, fraction = ''] = value.split('.');
+      const scaled = BigInt(whole) * 10000n + BigInt(fraction.padEnd(4, '0'));
+      if (!allowZero && scaled <= 0n) throw new BadRequestException(`${field} must be greater than zero.`);
+      return { value: Number(value), scaled };
+    };
+    const opening = parseMoney(input.openingBalance, 'openingBalance', true);
+    const closing = parseMoney(input.closingBalance, 'closingBalance', true);
+    if (typeof input.csv !== 'string' || !input.csv.trim() || Buffer.byteLength(input.csv, 'utf8') > 1_000_000) {
+      throw new BadRequestException('csv must contain a file of at most 1 MB.');
     }
-    const params: unknown[] = [user.companyId];
-    let dateCondition = '';
-    if (asOfDate) {
-      params.push(asOfDate);
-      dateCondition = ` AND je.entry_date <= $${params.length}`;
+    const records = parseCsvRecords(input.csv.replace(/^\uFEFF/, ''));
+    const headers = records.shift()?.map(value => value.trim().toLowerCase());
+    const expectedHeaders = ['reference', 'line_type', 'amount', 'booked_at', 'counterpart_reference'];
+    if (!headers || headers.length !== expectedHeaders.length ||
+        headers.some((header, index) => header !== expectedHeaders[index])) {
+      throw new BadRequestException(`CSV header must be: ${expectedHeaders.join(',')}.`);
     }
-    const result = await this.db.query<{ account_type: string; balance: string }>(
+    if (records.length < 1 || records.length > 5000) {
+      throw new BadRequestException('CSV must contain between 1 and 5000 transaction rows.');
+    }
+    const seenReferences = new Set<string>();
+    let debits = 0n;
+    let credits = 0n;
+    const lines: ParsedBankCsvLine[] = records.map((record, index) => {
+      if (record.length !== expectedHeaders.length) throw new BadRequestException(`CSV row ${index + 2} must contain exactly 5 fields.`);
+      const [reference, rawType, rawAmount, bookedAt, rawCounterpart] = record.map(value => value.trim());
+      if (!reference || reference.length > 64 || /[\u0000-\u001f]/.test(reference) || seenReferences.has(reference)) {
+        throw new BadRequestException(`CSV row ${index + 2} has an invalid or repeated reference.`);
+      }
+      seenReferences.add(reference);
+      const lineType = rawType.toLowerCase();
+      if (lineType !== 'debit' && lineType !== 'credit') {
+        throw new BadRequestException(`CSV row ${index + 2} line_type must be debit or credit.`);
+      }
+      const amount = parseMoney(rawAmount, `CSV row ${index + 2} amount`, false);
+      const timestamp = Date.parse(bookedAt);
+      if (!/^\d{4}-\d{2}-\d{2}T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(bookedAt) || !Number.isFinite(timestamp)) {
+        throw new BadRequestException(`CSV row ${index + 2} booked_at must be an ISO 8601 timestamp with timezone.`);
+      }
+      if (lineType === 'debit') debits += amount.scaled;
+      else credits += amount.scaled;
+      return {
+        reference,
+        lineType,
+        amount: amount.value.toFixed(4),
+        bookedAt: new Date(timestamp).toISOString(),
+        counterpartReference: rawCounterpart || null,
+      };
+    });
+    if (opening.scaled + credits - debits !== closing.scaled) {
+      throw new BadRequestException('Opening balance plus credits minus debits must equal closing balance.');
+    }
+    const importHash = createHash('sha256').update(input.csv, 'utf8').digest('hex');
+    const client = await this.db.connect();
+    try {
+      await client.query('BEGIN');
+      const bank = await client.query<{ id: string }>(
+        'SELECT id FROM bank_accounts WHERE id=$1 AND company_id=$2 AND is_active FOR UPDATE',
+        [bankAccountId, user.companyId],
+      );
+      if (!bank.rows[0]) throw new NotFoundException('Active bank account not found in this company.');
+      const prior = await client.query<{ id: string; statement_reference: string; import_sha256: string }>(
+        `SELECT id,statement_reference,import_sha256 FROM bank_account_statements
+         WHERE company_id=$1 AND bank_account_id=$2 AND (statement_reference=$3 OR import_sha256=$4)
+         FOR UPDATE`,
+        [user.companyId, bankAccountId, input.statementReference.trim(), importHash],
+      );
+      if (prior.rows[0]) {
+        if (prior.rows[0].statement_reference !== input.statementReference.trim() ||
+            prior.rows[0].import_sha256?.trim() !== importHash) {
+          throw new ConflictException('Statement reference or CSV file was already imported with different data.');
+        }
+        await client.query('COMMIT');
+        return { id: prior.rows[0].id, importedLines: lines.length, replayed: true };
+      }
+      const statement = await client.query<{ id: string }>(
+        `INSERT INTO bank_account_statements
+          (company_id,bank_account_id,statement_reference,statement_date,opening_balance,closing_balance,created_by,import_format,import_sha256)
+         VALUES($1,$2,$3,$4::date,$5,$6,$7,'generic_csv',$8) RETURNING id`,
+        [user.companyId, bankAccountId, input.statementReference.trim(), statementDate,
+          opening.value, closing.value, user.sub, importHash],
+      );
+      for (const line of lines) {
+        await client.query(
+          `INSERT INTO bank_statement_lines(statement_id,line_type,reference,amount,booked_at,counterpart_reference)
+           VALUES($1,$2,$3,$4,$5::timestamptz,$6)`,
+          [statement.rows[0].id, line.lineType, line.reference, line.amount, line.bookedAt, line.counterpartReference],
+        );
+      }
+      await this.insertAudit(client, user, 'accounting.bank_statement.import', statement.rows[0].id, {
+        bank_account_id: bankAccountId, statement_reference: input.statementReference.trim(),
+        statement_date: statementDate, imported_lines: lines.length, import_sha256: importHash,
+        reconciliation_started_as: 'pending',
+      });
+      await client.query('COMMIT');
+      return { id: statement.rows[0].id, importedLines: lines.length, replayed: false };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException('Duplicate bank statement or transaction reference.');
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getFinancialStatements(user: AuthUser, asOfDate?: string, fromDate?: string, toDate?: string) {
+    const reportTo = requiredDate(toDate ?? asOfDate ?? new Date().toISOString().slice(0, 10), 'toDate');
+    const reportFrom = requiredDate(fromDate ?? `${reportTo.slice(0, 4)}-01-01`, 'fromDate');
+    if (reportFrom > reportTo) throw new BadRequestException('fromDate must not be later than toDate.');
+    const result = await this.db.query<{ account_type: string; balance: string; period_balance: string }>(
       `SELECT a.account_type,
-              COALESCE(SUM(CASE
-                WHEN je.company_id = $1 AND je.status = 'posted'${dateCondition} THEN
-                  CASE a.account_type
-                    WHEN 'asset' THEN jl.debit - jl.credit
-                    WHEN 'liability' THEN jl.credit - jl.debit
-                    WHEN 'equity' THEN jl.credit - jl.debit
-                    WHEN 'revenue' THEN jl.credit - jl.debit
-                    WHEN 'expense' THEN jl.debit - jl.credit
-                    ELSE 0
-                  END
-                ELSE 0 END), 0)::text AS balance
+              COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date<=$2::date THEN
+                CASE a.account_type
+                  WHEN 'asset' THEN jl.debit-jl.credit
+                  WHEN 'liability' THEN jl.credit-jl.debit
+                  WHEN 'equity' THEN jl.credit-jl.debit
+                  WHEN 'revenue' THEN jl.credit-jl.debit
+                  WHEN 'expense' THEN jl.debit-jl.credit
+                  ELSE 0 END ELSE 0 END),0)::text AS balance,
+              COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date BETWEEN $3::date AND $2::date THEN
+                CASE a.account_type
+                  WHEN 'revenue' THEN jl.credit-jl.debit
+                  WHEN 'expense' THEN jl.debit-jl.credit
+                  ELSE 0 END ELSE 0 END),0)::text AS period_balance
        FROM accounting_accounts a
-       LEFT JOIN accounting_journal_lines jl ON jl.account_id = a.id
-       LEFT JOIN accounting_journal_entries je ON je.id = jl.journal_entry_id
-       WHERE a.company_id = $1
-       GROUP BY a.account_type`, params,
+       LEFT JOIN accounting_journal_lines jl ON jl.account_id=a.id
+       LEFT JOIN accounting_journal_entries je ON je.id=jl.journal_entry_id AND je.company_id=a.company_id
+       WHERE a.company_id=$1
+       GROUP BY a.account_type`,
+      [user.companyId, reportTo, reportFrom],
     );
-    const balances = Object.fromEntries(result.rows.map(row => [row.account_type, Number(row.balance)]));
-    const assets = Number(balances.asset ?? 0);
-    const liabilities = Number(balances.liability ?? 0);
-    const equity = Number(balances.equity ?? 0);
-    const revenue = Number(balances.revenue ?? 0);
-    const expenses = Number(balances.expense ?? 0);
+    const balances = Object.fromEntries(result.rows.map(row => [row.account_type, {
+      balance: Number(row.balance), period: Number(row.period_balance),
+    }]));
+    const assets = balances.asset?.balance ?? 0;
+    const liabilities = balances.liability?.balance ?? 0;
+    const bookedEquity = balances.equity?.balance ?? 0;
+    const accumulatedNetIncome = (balances.revenue?.balance ?? 0) - (balances.expense?.balance ?? 0);
+    const equity = bookedEquity + accumulatedNetIncome;
+    const revenue = balances.revenue?.period ?? 0;
+    const expenses = balances.expense?.period ?? 0;
+    const totalLiabilitiesAndEquity = liabilities + equity;
     const balanceSheet = {
-      asOfDate: asOfDate ?? null,
+      asOfDate: reportTo,
       assets,
       liabilities,
       equity,
-      totalLiabilitiesAndEquity: liabilities + equity,
-      balancesMatch: Math.abs(assets - (liabilities + equity)) < 0.0001,
+      accumulatedNetIncome,
+      totalLiabilitiesAndEquity,
+      balancesMatch: Math.abs(assets - totalLiabilitiesAndEquity) < 0.0001,
     };
     const incomeStatement = {
+      fromDate: reportFrom,
+      toDate: reportTo,
       revenue,
       expenses,
       netIncome: revenue - expenses,
     };
     await this.insertAuditDirect(user, 'accounting.report.financial_statements', user.companyId, {
-      as_of_date: asOfDate ?? null,
+      from_date: reportFrom,
+      to_date: reportTo,
       assets,
       liabilities,
       equity,
       revenue,
       expenses,
+      basis: 'operational_unreviewed',
     });
-    return { balanceSheet, incomeStatement };
+    return { basis: 'operational_unreviewed', balanceSheet, incomeStatement };
   }
 
   async generalLedger(user: AuthUser, options: {
@@ -287,71 +456,204 @@ export class AccountingService {
     return { ...result.rows[0], fromDate: from, toDate: to, page, pageSize };
   }
 
-  async creditInvoice(user: AuthUser, invoiceId: string, input: { reason: string; returnStock: boolean }) {
-    if (typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000 ||
-        typeof input.returnStock !== 'boolean') {
-      throw new BadRequestException('A reason (10 to 1000 characters) and explicit returnStock choice are required.');
+  async creditableInvoiceLines(user: AuthUser, invoiceId: string) {
+    const invoice = await this.db.query<{ order_id: string; status: string }>(
+      'SELECT order_id,status FROM sales_invoices WHERE id=$1 AND company_id=$2',
+      [invoiceId, user.companyId],
+    );
+    if (!invoice.rows[0]) throw new NotFoundException('Invoice not found.');
+    if (invoice.rows[0].status === 'void') return [];
+    return (await this.db.query(
+      `SELECT l.id AS order_line_id,l.product_id,p.sku,p.name AS product_name,
+         l.quantity::text AS invoiced_quantity,l.unit_price::text AS unit_price,
+         (l.quantity-COALESCE((SELECT SUM(cnl.quantity) FROM sales_credit_note_lines cnl
+           JOIN sales_credit_notes cn ON cn.id=cnl.credit_note_id AND cn.company_id=$2
+           WHERE cn.invoice_id=$1 AND cnl.order_line_id=l.id),0))::text AS creditable_quantity
+       FROM sales_order_lines l JOIN products p ON p.id=l.product_id AND p.company_id=$2
+       WHERE l.order_id=$3
+         AND l.quantity>COALESCE((SELECT SUM(cnl.quantity) FROM sales_credit_note_lines cnl
+           JOIN sales_credit_notes cn ON cn.id=cnl.credit_note_id AND cn.company_id=$2
+           WHERE cn.invoice_id=$1 AND cnl.order_line_id=l.id),0)
+       ORDER BY l.id`,
+      [invoiceId, user.companyId, invoice.rows[0].order_id],
+    )).rows;
+  }
+
+  async creditInvoice(user: AuthUser, invoiceId: string, input: {
+    reason: string; returnStock: boolean; lines?: { orderLineId: string; quantity: number }[];
+  }) {
+    if (typeof input?.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000 ||
+        typeof input.returnStock !== 'boolean' || (input.lines !== undefined && !Array.isArray(input.lines))) {
+      throw new BadRequestException('A reason, explicit returnStock choice, and valid optional line quantities are required.');
     }
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-      const source = await client.query<{ order_id: string }>('SELECT order_id FROM sales_invoices WHERE id=$1 AND company_id=$2', [invoiceId, user.companyId]);
+      const source = await client.query<{ order_id: string }>(
+        'SELECT order_id FROM sales_invoices WHERE id=$1 AND company_id=$2', [invoiceId, user.companyId],
+      );
       if (!source.rows[0]) throw new NotFoundException('Invoice not found.');
       await client.query('SELECT id FROM sales_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [source.rows[0].order_id, user.companyId]);
-      const invoice = await client.query<{ status: string; subtotal: string; tax_total: string; grand_total: string; currency_code: string | null }>(
-        'SELECT status,subtotal,tax_total,grand_total,currency_code FROM sales_invoices WHERE id=$1 AND company_id=$2 FOR UPDATE', [invoiceId, user.companyId],
+      const invoice = await client.query<{
+        status: string; subtotal: string; tax_total: string; grand_total: string; currency_code: string | null;
+      }>(
+        'SELECT status,subtotal,tax_total,grand_total,currency_code FROM sales_invoices WHERE id=$1 AND company_id=$2 FOR UPDATE',
+        [invoiceId, user.companyId],
       );
-      if (invoice.rows[0].status === 'void') throw new ConflictException('Invoice was already voided/credited.');
+      if (invoice.rows[0].status === 'void') throw new ConflictException('Invoice was already fully credited.');
       if (Number(invoice.rows[0].grand_total) <= 0) throw new BadRequestException('A credit requires a positive invoice total.');
       await this.assertSourceEntryExists(client, user.companyId, 'sales_invoice', invoiceId);
+      const sourceLines = await client.query<{
+        id: string; product_id: string; quantity: string; unit_price: string; remaining_quantity: string;
+      }>(
+        `SELECT l.id,l.product_id,l.quantity::text,l.unit_price::text,
+           (l.quantity-COALESCE((SELECT SUM(cnl.quantity) FROM sales_credit_note_lines cnl
+             JOIN sales_credit_notes cn ON cn.id=cnl.credit_note_id AND cn.company_id=$2
+             WHERE cn.invoice_id=$1 AND cnl.order_line_id=l.id),0))::text AS remaining_quantity
+         FROM sales_order_lines l WHERE l.order_id=$3 ORDER BY l.id FOR UPDATE`,
+        [invoiceId, user.companyId, source.rows[0].order_id],
+      );
+      if (!sourceLines.rows.length) throw new BadRequestException('Invoice has no verifiable order lines.');
+      const selected = new Map<string, number>();
+      if (input.lines === undefined) {
+        for (const line of sourceLines.rows) {
+          const remaining = Number(line.remaining_quantity);
+          if (remaining > 0) selected.set(line.id, remaining);
+        }
+      } else {
+        if (input.lines.length === 0) throw new BadRequestException('At least one credit line is required.');
+        for (const line of input.lines) {
+          if (!line || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(line.orderLineId) ||
+              typeof line.quantity !== 'number' || !Number.isFinite(line.quantity) || line.quantity <= 0 ||
+              Math.round(line.quantity * 10000) / 10000 !== line.quantity || selected.has(line.orderLineId)) {
+            throw new BadRequestException('Each credit line must have a unique orderLineId and positive quantity with up to 4 decimals.');
+          }
+          selected.set(line.orderLineId, line.quantity);
+        }
+      }
+      const selectedLines = [...selected.entries()].map(([id, quantity]) => {
+        const sourceLine = sourceLines.rows.find(line => line.id === id);
+        if (!sourceLine) throw new BadRequestException(`Order line '${id}' does not belong to this invoice.`);
+        if (quantity > Number(sourceLine.remaining_quantity) + 0.00005) {
+          throw new BadRequestException('Credit quantity exceeds the uninvoiced quantity remaining for an order line.');
+        }
+        return {
+          orderLineId: id,
+          quantity,
+          subtotal: Number((quantity * Number(sourceLine.unit_price)).toFixed(4)),
+          productId: sourceLine.product_id,
+        };
+      });
+      if (!selectedLines.length) throw new ConflictException('Invoice quantities have already been fully credited.');
+      const subtotal = Number(selectedLines.reduce((sum, line) => sum + line.subtotal, 0).toFixed(4));
+      const priorCredits = await client.query<{ subtotal: string; tax_total: string }>(
+        `SELECT COALESCE(SUM(subtotal),0)::text AS subtotal,COALESCE(SUM(tax_total),0)::text AS tax_total
+         FROM sales_credit_notes WHERE company_id=$1 AND invoice_id=$2`,
+        [user.companyId, invoiceId],
+      );
+      const remainingSubtotal = Number((Number(invoice.rows[0].subtotal) - Number(priorCredits.rows[0].subtotal)).toFixed(4));
+      const remainingTax = Number((Number(invoice.rows[0].tax_total) - Number(priorCredits.rows[0].tax_total)).toFixed(4));
+      if (subtotal <= 0 || subtotal > remainingSubtotal + 0.00005) {
+        throw new BadRequestException('Credit subtotal exceeds the invoice amount remaining.');
+      }
+      const taxTotal = subtotal >= remainingSubtotal - 0.00005
+        ? remainingTax
+        : Math.min(remainingTax, Number((Number(invoice.rows[0].tax_total) * subtotal / Number(invoice.rows[0].subtotal)).toFixed(4)));
+      const grandTotal = Number((subtotal + taxTotal).toFixed(4));
       const creditNumber = await nextDocumentNumber(client, user.companyId, 'AUTO-CN');
       const credit = await client.query<{ id: string }>(
         `INSERT INTO sales_credit_notes(company_id,invoice_id,credit_number,reason,subtotal,tax_total,grand_total,currency_code,stock_returned,created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
-        [user.companyId, invoiceId, creditNumber, input.reason.trim(), invoice.rows[0].subtotal, invoice.rows[0].tax_total,
-          invoice.rows[0].grand_total, invoice.rows[0].currency_code, input.returnStock, user.sub],
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,FALSE,$9) RETURNING id`,
+        [user.companyId, invoiceId, creditNumber, input.reason.trim(), subtotal, taxTotal, grandTotal,
+          invoice.rows[0].currency_code, user.sub],
       );
-      const entryId = await this.createEntryHeader(client, user, 'sales_credit', credit.rows[0].id, `Nota de credito ${creditNumber}`);
-      const accounts = await this.getSystemAccounts(client, user.companyId, ['1100', '4100', '2200']);
-      if (Number(invoice.rows[0].subtotal) > 0) await this.insertLine(client, entryId, accounts['4100'], 'Reversion ingreso', Number(invoice.rows[0].subtotal), 0);
-      if (Number(invoice.rows[0].tax_total) > 0) await this.insertLine(client, entryId, accounts['2200'], 'Reversion impuesto', Number(invoice.rows[0].tax_total), 0);
-      await this.insertLine(client, entryId, accounts['1100'], 'Credito a cliente', 0, Number(invoice.rows[0].grand_total));
-      const reservations = await client.query<{ id: string; product_id: string; location_code: string; quantity: string; status: string }>(
-        `SELECT id,product_id,location_code,quantity,status FROM inventory_reservations
-         WHERE company_id=$1 AND sales_order_id=$2 AND status IN ('reserved','fulfilled')
-         ORDER BY product_id,location_code FOR UPDATE`, [user.companyId, source.rows[0].order_id],
-      );
-      if (input.returnStock && !reservations.rows.some(row => row.status === 'fulfilled')) {
-        throw new BadRequestException('No dispatched goods exist to return.');
-      }
-      for (const row of reservations.rows) {
-        if (row.status === 'reserved') {
-          const updated = await client.query(
-            `UPDATE inventory_stock_balances SET reserved=reserved-$1,updated_at=NOW()
-             WHERE company_id=$2 AND product_id=$3 AND location_code=$4 AND reserved>=$1 RETURNING id`,
-            [row.quantity, user.companyId, row.product_id, row.location_code],
-          );
-          if (!updated.rows[0]) throw new BadRequestException('Reservation balance is inconsistent.');
-          await client.query(`UPDATE inventory_reservations SET status='released',updated_at=NOW() WHERE id=$1`, [row.id]);
-        } else if (input.returnStock) {
-          await this.restoreCreditedStock(client, user, credit.rows[0].id, row, input.reason.trim());
-          continue;
-        } else continue;
+      let taxAllocated = 0;
+      for (const [index, line] of selectedLines.entries()) {
+        const lineTax = index === selectedLines.length - 1
+          ? Number((taxTotal - taxAllocated).toFixed(4))
+          : Number((taxTotal * line.subtotal / subtotal).toFixed(4));
+        taxAllocated = Number((taxAllocated + lineTax).toFixed(4));
         await client.query(
-          `INSERT INTO inventory_movements(company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by)
-           VALUES($1,$2,$3,$4,$5,'sales_credit',$6,$7,$8)`,
-          [user.companyId, row.location_code, row.product_id, 'reservation_release',
-            row.quantity, credit.rows[0].id, input.reason.trim(), user.sub],
+          `INSERT INTO sales_credit_note_lines(company_id,credit_note_id,order_line_id,quantity,subtotal,tax_total,grand_total)
+           VALUES($1,$2,$3,$4,$5,$6,$7)`,
+          [user.companyId, credit.rows[0].id, line.orderLineId, line.quantity, line.subtotal, lineTax,
+            Number((line.subtotal + lineTax).toFixed(4))],
         );
       }
-      await client.query(`UPDATE sales_invoices SET status='void' WHERE id=$1 AND company_id=$2`, [invoiceId, user.companyId]);
-      await client.query(`UPDATE sales_orders SET status='cancelled',updated_at=NOW() WHERE id=$1 AND company_id=$2`, [source.rows[0].order_id, user.companyId]);
-      await this.insertAudit(client, user, 'accounting.sales.credit', credit.rows[0].id, { invoice_id: invoiceId, return_stock: input.returnStock, reason: input.reason.trim() });
+      const entryId = await this.createEntryHeader(client, user, 'sales_credit', credit.rows[0].id, `Nota de credito ${creditNumber}`);
+      const accounts = await this.getSystemAccounts(client, user.companyId, ['1100', '4100', '2200']);
+      if (subtotal > 0) await this.insertLine(client, entryId, accounts['4100'], 'Reversion ingreso', subtotal, 0);
+      if (taxTotal > 0) await this.insertLine(client, entryId, accounts['2200'], 'Reversion impuesto', taxTotal, 0);
+      await this.insertLine(client, entryId, accounts['1100'], 'Credito a cliente', 0, grandTotal);
+
+      const reservations = await client.query<{ id: string; sales_order_line_id: string | null; product_id: string;
+        location_code: string; quantity: string; status: string }>(
+        `SELECT id,sales_order_line_id,product_id,location_code,quantity,status FROM inventory_reservations
+         WHERE company_id=$1 AND sales_order_id=$2 AND status IN ('reserved','fulfilled')
+         ORDER BY product_id,location_code FOR UPDATE`,
+        [user.companyId, source.rows[0].order_id],
+      );
+      for (const reservation of reservations.rows.filter(row => row.status === 'reserved')) {
+        const matchingCreditLines = selectedLines.filter(line =>
+          reservation.sales_order_line_id
+            ? line.orderLineId === reservation.sales_order_line_id
+            : line.productId === reservation.product_id &&
+              sourceLines.rows.filter(sourceLine => sourceLine.product_id === reservation.product_id).length === 1,
+        );
+        const creditedQuantity = matchingCreditLines.reduce((sum, line) => sum + line.quantity, 0);
+        const releaseQuantity = Math.min(Number(reservation.quantity), creditedQuantity);
+        if (releaseQuantity <= 0) continue;
+        const balance = await client.query(
+          `UPDATE inventory_stock_balances SET reserved=reserved-$1,updated_at=NOW()
+           WHERE company_id=$2 AND product_id=$3 AND location_code=$4 AND reserved >= $1 RETURNING id`,
+          [releaseQuantity, user.companyId, reservation.product_id, reservation.location_code],
+        );
+        if (!balance.rows[0]) throw new BadRequestException('Reservation balance is inconsistent.');
+        await client.query(
+          `UPDATE inventory_reservations SET quantity=quantity-$2,
+             status=CASE WHEN quantity=$2 THEN 'released' ELSE 'reserved' END,updated_at=NOW()
+           WHERE id=$1`,
+          [reservation.id, releaseQuantity],
+        );
+        await client.query(
+          `INSERT INTO inventory_movements(company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by)
+           VALUES($1,$2,$3,'reservation_release',$4,'sales_credit',$5,$6,$7)`,
+          [user.companyId, reservation.location_code, reservation.product_id, releaseQuantity,
+            credit.rows[0].id, input.reason.trim(), user.sub],
+        );
+      }
+      if (input.returnStock) {
+        const creditLines = await client.query<{ id: string; order_line_id: string; quantity: string }>(
+          `SELECT id,order_line_id,quantity::text FROM sales_credit_note_lines WHERE credit_note_id=$1 ORDER BY id`,
+          [credit.rows[0].id],
+        );
+        const returnLines = creditLines.rows.map(line => ({
+          creditNoteLineId: line.id, quantity: Number(line.quantity),
+        }));
+        const returnDoc = await client.query<{ id: string }>(
+          `INSERT INTO sales_credit_stock_returns(company_id,credit_note_id,reference,reason,created_by)
+           VALUES($1,$2,$3,$4,$5) RETURNING id`,
+          [user.companyId, credit.rows[0].id, `CREDIT-${creditNumber}`, input.reason.trim(), user.sub],
+        );
+        await this.restoreCreditedStockLines(client, user, credit.rows[0].id, returnDoc.rows[0].id,
+          returnLines, input.reason.trim());
+      }
+      const fullyCredited = Number((subtotal + Number(priorCredits.rows[0].subtotal)).toFixed(4)) >=
+        Number(invoice.rows[0].subtotal) - 0.00005;
+      if (fullyCredited) {
+        await client.query(`UPDATE sales_invoices SET status='void' WHERE id=$1 AND company_id=$2`, [invoiceId, user.companyId]);
+        await client.query(`UPDATE sales_orders SET status='cancelled',updated_at=NOW() WHERE id=$1 AND company_id=$2`,
+          [source.rows[0].order_id, user.companyId]);
+      }
+      await this.insertAudit(client, user, 'accounting.sales.credit', credit.rows[0].id, {
+        invoice_id: invoiceId, return_stock: input.returnStock, reason: input.reason.trim(),
+        subtotal, tax_total: taxTotal, grand_total: grandTotal, lines: selectedLines.length,
+      });
       await client.query('COMMIT');
-      return { id: credit.rows[0].id, creditNumber };
+      return { id: credit.rows[0].id, creditNumber, subtotal, taxTotal, grandTotal, fullyCredited };
     } catch (error) {
       await client.query('ROLLBACK');
-      if ((error as { code?: string }).code === '23505') throw new ConflictException('Invoice already has a credit note.');
+      if ((error as { code?: string }).code === '23505') throw new ConflictException('Credit document reference already exists.');
       throw error;
     } finally { client.release(); }
   }
@@ -359,20 +661,32 @@ export class AccountingService {
   async listCredits(user: AuthUser) {
     return (await this.db.query(
       `SELECT cn.id,cn.credit_number,cn.reason,cn.grand_total,cn.currency_code,cn.stock_returned,si.invoice_number,
-              (NOT cn.stock_returned AND EXISTS(SELECT 1 FROM inventory_reservations ir
-                WHERE ir.sales_order_id=si.order_id AND ir.company_id=cn.company_id AND ir.status='fulfilled')) AS can_return_stock,
+              EXISTS(SELECT 1 FROM sales_credit_note_lines cnl
+                JOIN inventory_reservations ir ON ir.sales_order_line_id=cnl.order_line_id
+                  AND ir.company_id=cnl.company_id AND ir.sales_order_id=si.order_id AND ir.status='fulfilled'
+                WHERE cnl.credit_note_id=cn.id AND cnl.company_id=cn.company_id
+                  AND cnl.quantity>COALESCE((SELECT SUM(srl.quantity) FROM sales_credit_stock_return_lines srl
+                    WHERE srl.credit_note_line_id=cnl.id AND srl.company_id=cnl.company_id),0)) AS can_return_stock,
               COALESCE(paid.total,0)::text AS paid_amount,
-              (COALESCE(paid.total,0)-COALESCE(refunded.total,0))::text AS refund_due
+              GREATEST(0,LEAST(cn.grand_total-COALESCE(refunded.total,0),
+                COALESCE(paid.total,0)-COALESCE(refunded_invoice.total,0)))::text AS refund_due
        FROM sales_credit_notes cn JOIN sales_invoices si ON si.id=cn.invoice_id AND si.company_id=cn.company_id
        LEFT JOIN (SELECT invoice_id,SUM(amount) AS total FROM accounting_payments WHERE company_id=$1 GROUP BY invoice_id) paid ON paid.invoice_id=cn.invoice_id
        LEFT JOIN (SELECT credit_note_id,SUM(amount) AS total FROM sales_customer_refunds WHERE company_id=$1 GROUP BY credit_note_id) refunded ON refunded.credit_note_id=cn.id
+       LEFT JOIN (SELECT cn2.invoice_id,SUM(r.amount) AS total
+                  FROM sales_customer_refunds r JOIN sales_credit_notes cn2
+                    ON cn2.id=r.credit_note_id AND cn2.company_id=r.company_id
+                  WHERE r.company_id=$1 GROUP BY cn2.invoice_id) refunded_invoice ON refunded_invoice.invoice_id=cn.invoice_id
        WHERE cn.company_id=$1 ORDER BY cn.created_at DESC`, [user.companyId],
     )).rows;
   }
 
-  async returnCreditedStock(user: AuthUser, id: string, input: { reference: string; reason: string }) {
+  async returnCreditedStock(user: AuthUser, id: string, input: {
+    reference: string; reason: string; lines?: { creditNoteLineId: string; quantity: number }[];
+  }) {
     if (!input || typeof input.reference !== 'string' || !input.reference.trim() || input.reference.length > 64 ||
-        typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000) {
+        typeof input.reason !== 'string' || input.reason.trim().length < 10 || input.reason.length > 1000 ||
+        (input.lines !== undefined && !Array.isArray(input.lines))) {
       throw new BadRequestException('A reference (1 to 64 characters) and reason (10 to 1000) are required.');
     }
     const reference = input.reference.trim(); const reason = input.reason.trim();
@@ -385,9 +699,6 @@ export class AccountingService {
       );
       if (!source.rows[0]) throw new NotFoundException('Credit not found.');
       await client.query('SELECT id FROM sales_orders WHERE id=$1 AND company_id=$2 FOR UPDATE', [source.rows[0].order_id, user.companyId]);
-      const credit = await client.query<{ stock_returned: boolean }>(
-        'SELECT stock_returned FROM sales_credit_notes WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId],
-      );
       await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`sales-stock-return:${user.companyId}:${reference}`]);
       const prior = await client.query<{ id: string; credit_note_id: string; reason: string }>(
         'SELECT id,credit_note_id,reason FROM sales_credit_stock_returns WHERE company_id=$1 AND reference=$2', [user.companyId, reference],
@@ -396,41 +707,163 @@ export class AccountingService {
         if (prior.rows[0].credit_note_id !== id || prior.rows[0].reason !== reason) throw new ConflictException('Return reference already used with different data.');
         await client.query('COMMIT'); return { id: prior.rows[0].id, replayed: true };
       }
-      if (credit.rows[0].stock_returned) throw new ConflictException('Goods were already returned with this credit.');
-      const reservations = await client.query<{ product_id: string; location_code: string; quantity: string }>(
-        `SELECT product_id,location_code,quantity FROM inventory_reservations
-         WHERE company_id=$1 AND sales_order_id=$2 AND status='fulfilled' ORDER BY product_id,location_code,id FOR UPDATE`,
-        [user.companyId, source.rows[0].order_id],
+      await client.query('SELECT id FROM sales_credit_notes WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
+      const creditLines = await client.query<{ id: string; quantity: string; returned: string }>(
+        `SELECT cnl.id,cnl.quantity::text,COALESCE(SUM(srl.quantity),0)::text AS returned
+         FROM sales_credit_note_lines cnl
+         LEFT JOIN sales_credit_stock_return_lines srl ON srl.credit_note_line_id=cnl.id AND srl.company_id=cnl.company_id
+         WHERE cnl.company_id=$1 AND cnl.credit_note_id=$2
+         GROUP BY cnl.id ORDER BY cnl.id`,
+        [user.companyId, id],
       );
-      if (!reservations.rows.length) throw new BadRequestException('No dispatched goods exist to return.');
+      const returnLines = input.lines ?? creditLines.rows
+        .map(line => ({ creditNoteLineId: line.id, quantity: Number(line.quantity) - Number(line.returned) }))
+        .filter(line => line.quantity > 0.00005);
+      if (!returnLines.length) throw new ConflictException('All credited quantities have already been returned physically.');
+      if (new Set(returnLines.map(line => line.creditNoteLineId)).size !== returnLines.length) {
+        throw new BadRequestException('Return creditNoteLineId values must be unique.');
+      }
       const document = await client.query<{ id: string }>(
         `INSERT INTO sales_credit_stock_returns(company_id,credit_note_id,reference,reason,created_by)
          VALUES($1,$2,$3,$4,$5) RETURNING id`, [user.companyId, id, reference, reason, user.sub],
       );
-      for (const row of reservations.rows) {
-        await this.restoreCreditedStock(client, user, id, row, reason);
-      }
-      await client.query('UPDATE sales_credit_notes SET stock_returned=TRUE WHERE id=$1 AND company_id=$2', [id, user.companyId]);
+      await this.restoreCreditedStockLines(client, user, id, document.rows[0].id, returnLines, reason);
       await this.insertAudit(client, user, 'accounting.sales.credit.stock.return', document.rows[0].id,
-        { credit_note_id: id, reference, reason, lines: reservations.rows.length });
+        { credit_note_id: id, reference, reason, lines: returnLines.length });
       await client.query('COMMIT');
       return { id: document.rows[0].id, replayed: false };
     } catch (error) { await client.query('ROLLBACK'); throw error; }
     finally { client.release(); }
   }
 
-  private async restoreCreditedStock(client: DbClient, user: AuthUser, creditId: string,
-    row: { product_id: string; location_code: string; quantity: string }, reason: string) {
-    const stock = await client.query(
-      `UPDATE inventory_stock_balances SET on_hand=on_hand+$1,updated_at=NOW()
-       WHERE company_id=$2 AND product_id=$3 AND location_code=$4 RETURNING id`,
-      [row.quantity, user.companyId, row.product_id, row.location_code],
-    );
-    if (!stock.rows[0]) throw new BadRequestException('Original dispatch stock location is missing. Reconcile before returning goods.');
+  private async restoreCreditedStockLines(client: DbClient, user: AuthUser, creditId: string, returnId: string,
+    lines: { creditNoteLineId: string; quantity: number }[], reason: string) {
+    let restoredCost = 0;
+    for (const requested of lines) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requested.creditNoteLineId) ||
+          typeof requested.quantity !== 'number' || !Number.isFinite(requested.quantity) || requested.quantity <= 0 ||
+          Math.round(requested.quantity * 10000) / 10000 !== requested.quantity) {
+        throw new BadRequestException('Return lines require a valid creditNoteLineId and positive quantity with up to 4 decimals.');
+      }
+      const creditLine = await client.query<{
+        order_line_id: string; product_id: string; quantity: string; returned_for_credit: string;
+      }>(
+        `SELECT cnl.order_line_id,sol.product_id,cnl.quantity::text,
+           COALESCE((SELECT SUM(srl.quantity) FROM sales_credit_stock_return_lines srl
+             WHERE srl.company_id=cnl.company_id AND srl.credit_note_line_id=cnl.id),0)::text AS returned_for_credit
+         FROM sales_credit_note_lines cnl
+         JOIN sales_order_lines sol ON sol.id=cnl.order_line_id
+         WHERE cnl.id=$1 AND cnl.company_id=$2 AND cnl.credit_note_id=$3
+         FOR UPDATE OF cnl`,
+        [requested.creditNoteLineId, user.companyId, creditId],
+      );
+      if (!creditLine.rows[0]) throw new BadRequestException('Credit note line does not belong to this credit.');
+      const orderLineId = creditLine.rows[0].order_line_id;
+      const dispatch = await client.query<{ location_code: string; dispatched: string }>(
+        `SELECT ir.location_code,COALESCE(SUM(ir.quantity),0)::text AS dispatched
+         FROM inventory_reservations ir
+         WHERE ir.company_id=$1 AND ir.sales_order_line_id=$2 AND ir.status='fulfilled'
+         GROUP BY ir.location_code ORDER BY ir.location_code`,
+        [user.companyId, orderLineId],
+      );
+      const dispatched = dispatch.rows.reduce((sum, row) => sum + Number(row.dispatched), 0);
+      const returned = Number(creditLine.rows[0].returned_for_credit);
+      const priorReturns = await client.query<{ quantity: string }>(
+        `SELECT COALESCE(SUM(srl.quantity),0)::text AS quantity
+         FROM sales_credit_stock_return_lines srl
+         JOIN sales_credit_note_lines cnl ON cnl.id=srl.credit_note_line_id AND cnl.company_id=srl.company_id
+         WHERE cnl.company_id=$1 AND cnl.order_line_id=$2`,
+        [user.companyId, orderLineId],
+      );
+      const previouslyReturned = Number(priorReturns.rows[0].quantity);
+      if (requested.quantity > Number(creditLine.rows[0].quantity) - returned + 0.00005 ||
+          requested.quantity > dispatched - previouslyReturned + 0.00005) {
+        throw new BadRequestException('Physical return quantity exceeds credited or not-yet-returned dispatched quantity.');
+      }
+      const layers = await client.query<{
+        id: string; cost_lot_id: string; quantity: string; unit_cost: string; available: string; location_code: string;
+      }>(
+        `SELECT dcl.id,dcl.cost_lot_id,dcl.quantity::text,dcl.unit_cost::text,
+           (dcl.quantity-COALESCE(SUM(srl.quantity),0))::text AS available,dc.location_code
+         FROM inventory_dispatch_cost_layers dcl
+         JOIN inventory_dispatch_costs dc ON dc.id=dcl.dispatch_cost_id AND dc.company_id=dcl.company_id
+         LEFT JOIN sales_credit_stock_return_lines srl
+           ON srl.dispatch_cost_layer_id=dcl.id AND srl.company_id=dcl.company_id
+         WHERE dc.company_id=$1 AND dc.sales_order_line_id=$2
+         GROUP BY dcl.id,dc.location_code,dcl.created_at
+         HAVING dcl.quantity>COALESCE(SUM(srl.quantity),0)
+         ORDER BY dcl.created_at,dcl.id`,
+        [user.companyId, orderLineId],
+      );
+      let remaining = requested.quantity;
+      let lineCost = 0;
+      const allocations: { layerId: string; location: string; quantity: number; unitCost: number; totalCost: number }[] = [];
+      for (const layer of layers.rows) {
+        if (remaining <= 0.00005) break;
+        const quantity = Math.min(remaining, Number(layer.available));
+        if (quantity <= 0) continue;
+        const unitCost = Number(layer.unit_cost);
+        const totalCost = Number((quantity * unitCost).toFixed(4));
+        allocations.push({ layerId: layer.id, location: layer.location_code, quantity, unitCost, totalCost });
+        lineCost = Number((lineCost + totalCost).toFixed(4));
+        remaining = Number((remaining - quantity).toFixed(4));
+      }
+      if (remaining > 0.00005) {
+        throw new BadRequestException('Dispatch cost layers are missing or already fully returned. Reconcile this dispatch before returning goods.');
+      }
+      const location = allocations[0]?.location;
+      if (!location || allocations.some(layer => layer.location !== location)) {
+        throw new BadRequestException('A sale line dispatched from multiple locations requires separate stock-return lines.');
+      }
+      const stock = await client.query(
+        `UPDATE inventory_stock_balances SET on_hand=on_hand+$1,updated_at=NOW()
+         WHERE company_id=$2 AND product_id=$3 AND location_code=$4 RETURNING id`,
+        [requested.quantity, user.companyId, creditLine.rows[0].product_id, location],
+      );
+      if (!stock.rows[0]) throw new BadRequestException('Original dispatch stock location is missing. Reconcile before returning goods.');
+      const unitCost = Number((lineCost / requested.quantity).toFixed(4));
+      const movement = await client.query<{ id: string }>(
+        `INSERT INTO inventory_movements
+          (company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by,
+           unit_cost,total_cost,cost_policy,cost_posted,cost_source)
+         VALUES($1,$2,$3,'adjustment_in',$4,'sales_credit_stock_return',$5,$6,$7,$8,$9,'returned_dispatch_cost',TRUE,'customer_return')
+         RETURNING id`,
+        [user.companyId, location, creditLine.rows[0].product_id, requested.quantity, returnId, reason, user.sub,
+          unitCost, lineCost],
+      );
+      for (const allocation of allocations) {
+        const costLot = await client.query<{ id: string }>(
+          `INSERT INTO inventory_cost_lots
+            (company_id,product_id,location_code,quantity_remaining,unit_cost,source_type,source_id)
+           VALUES($1,$2,$3,$4,$5,'sales_credit_return',$6) RETURNING id`,
+          [user.companyId, creditLine.rows[0].product_id, allocation.location, allocation.quantity,
+            allocation.unitCost, returnId],
+        );
+        await client.query(
+          `INSERT INTO sales_credit_stock_return_lines
+            (company_id,return_id,credit_note_line_id,inventory_movement_id,dispatch_cost_layer_id,cost_lot_id,
+             quantity,unit_cost,total_cost)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [user.companyId, returnId, requested.creditNoteLineId, movement.rows[0].id, allocation.layerId,
+            costLot.rows[0].id, allocation.quantity, allocation.unitCost, allocation.totalCost],
+        );
+      }
+      restoredCost = Number((restoredCost + lineCost).toFixed(4));
+    }
+    if (restoredCost > 0) {
+      const accounts = await this.getSystemAccounts(client, user.companyId, ['1200', '5100']);
+      const entry = await this.createEntryHeader(client, user, 'sales_credit_stock_return', returnId,
+        'Reversion de costo de ventas por devolucion');
+      await this.insertLine(client, entry, accounts['1200'], 'Ingreso de inventario devuelto', restoredCost, 0);
+      await this.insertLine(client, entry, accounts['5100'], 'Reversion de costo de ventas', 0, restoredCost);
+    }
     await client.query(
-      `INSERT INTO inventory_movements(company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by)
-       VALUES($1,$2,$3,'adjustment_in',$4,'sales_credit',$5,$6,$7)`,
-      [user.companyId, row.location_code, row.product_id, row.quantity, creditId, reason, user.sub],
+      `UPDATE sales_credit_notes cn SET stock_returned=NOT EXISTS(
+         SELECT 1 FROM sales_credit_note_lines cnl WHERE cnl.credit_note_id=cn.id
+           AND cnl.quantity>COALESCE((SELECT SUM(srl.quantity) FROM sales_credit_stock_return_lines srl
+             WHERE srl.credit_note_line_id=cnl.id AND srl.company_id=cnl.company_id),0)
+       ) WHERE cn.id=$1 AND cn.company_id=$2`,
+      [creditId, user.companyId],
     );
   }
 
@@ -441,14 +874,20 @@ export class AccountingService {
     const client = await this.db.connect();
     try {
       await client.query('BEGIN');
-      const credit = await client.query<{ invoice_id: string }>(
-        'SELECT invoice_id FROM sales_credit_notes WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId],
+      const credit = await client.query<{ invoice_id: string; grand_total: string }>(
+        'SELECT invoice_id,grand_total::text FROM sales_credit_notes WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId],
       );
       if (!credit.rows[0]) throw new NotFoundException('Credit not found.');
+      await client.query('SELECT id FROM sales_invoices WHERE id=$1 AND company_id=$2 FOR UPDATE',
+        [credit.rows[0].invoice_id, user.companyId]);
       const balance = await client.query<{ due: string }>(
-        `SELECT ((SELECT COALESCE(SUM(amount),0) FROM accounting_payments WHERE company_id=$1 AND invoice_id=$2)
-                 -(SELECT COALESCE(SUM(amount),0) FROM sales_customer_refunds WHERE company_id=$1 AND credit_note_id=$3))::text AS due`,
-        [user.companyId, credit.rows[0].invoice_id, id],
+        `SELECT GREATEST(0,LEAST($4::numeric-
+                   (SELECT COALESCE(SUM(amount),0) FROM sales_customer_refunds WHERE company_id=$1 AND credit_note_id=$3),
+                 (SELECT COALESCE(SUM(amount),0) FROM accounting_payments WHERE company_id=$1 AND invoice_id=$2)
+                   -(SELECT COALESCE(SUM(r.amount),0) FROM sales_customer_refunds r
+                     JOIN sales_credit_notes cn ON cn.id=r.credit_note_id AND cn.company_id=r.company_id
+                     WHERE r.company_id=$1 AND cn.invoice_id=$2)))::text AS due`,
+        [user.companyId, credit.rows[0].invoice_id, id, credit.rows[0].grand_total],
       );
       if (input.amount > Number(balance.rows[0].due)) throw new BadRequestException('Refund exceeds amount actually paid by the customer.');
       const refund = await client.query<{ id: string }>(
@@ -776,12 +1215,38 @@ export class AccountingService {
            FROM purchase_receipt_lines rl WHERE rl.id=$1`, [row.id, quantity],
         );
         if (!allowance.rows[0].valid) throw new ConflictException('Return exceeds the unreturned receipt quantity.');
+        const costLots = await client.query<{ id: string; quantity_remaining: string; unit_cost: string }>(
+          `SELECT id,quantity_remaining::text,unit_cost::text
+           FROM inventory_cost_lots
+           WHERE company_id=$1 AND purchase_receipt_line_id=$2 AND quantity_remaining>0
+           ORDER BY source_at,id
+           FOR UPDATE`,
+          [user.companyId, row.id],
+        );
+        const valuedAvailable = costLots.rows.reduce((sum, lot) => sum + Number(lot.quantity_remaining), 0);
+        if (valuedAvailable + 0.00005 < quantity) {
+          throw new BadRequestException('Returned receipt quantity has no matching valued cost layer. Reconcile inventory before returning it.');
+        }
         const stock = await client.query(
           `UPDATE inventory_stock_balances SET on_hand=on_hand-$1,updated_at=NOW()
            WHERE company_id=$2 AND product_id=$3 AND location_code=$4 AND on_hand-reserved>=$1 RETURNING id`,
           [quantity, user.companyId, row.product_id, row.location_code],
         );
         if (!stock.rows[0]) throw new BadRequestException('Insufficient available stock at the original receipt location. Reserved stock cannot be returned.');
+        let costQuantityRemaining = quantity;
+        let returnedCost = 0;
+        for (const lot of costLots.rows) {
+          if (costQuantityRemaining <= 0.00005) break;
+          const allocated = Math.min(costQuantityRemaining, Number(lot.quantity_remaining));
+          const layerCost = Number((allocated * Number(lot.unit_cost)).toFixed(4));
+          returnedCost = Number((returnedCost + layerCost).toFixed(4));
+          costQuantityRemaining = Number((costQuantityRemaining - allocated).toFixed(4));
+          await client.query(
+            `UPDATE inventory_cost_lots SET quantity_remaining=quantity_remaining-$1
+             WHERE id=$2 AND company_id=$3 AND quantity_remaining >= $1`,
+            [allocated, lot.id, user.companyId],
+          );
+        }
         await client.query(
           `INSERT INTO purchase_supplier_return_lines(return_id,receipt_line_id,quantity,subtotal)
            SELECT $1,$2,$3,
@@ -792,10 +1257,15 @@ export class AccountingService {
              JOIN purchase_receipt_lines rl ON rl.id=ret.receipt_line_id WHERE rl.order_line_id=$4
            ) ret ON TRUE WHERE l.id=$4`, [created.rows[0].id, row.id, quantity, row.order_line_id],
         );
-        await client.query(
+        const returnMovement = await client.query<{ id: string }>(
           `INSERT INTO inventory_movements(company_id,location_code,product_id,movement_type,quantity,reference_type,reference_id,notes,created_by)
-           VALUES($1,$2,$3,'supplier_return',$4,'supplier_return',$5,$6,$7)`,
+           VALUES($1,$2,$3,'supplier_return',$4,'supplier_return',$5,$6,$7) RETURNING id`,
           [user.companyId, row.location_code, row.product_id, quantity, created.rows[0].id, payload.reason, user.sub],
+        );
+        await client.query(
+          `UPDATE inventory_movements SET unit_cost=$1,total_cost=$2,cost_policy='receipt',cost_source='supplier_return'
+           WHERE id=$3`,
+          [Number((returnedCost / quantity).toFixed(4)), returnedCost.toFixed(4), returnMovement.rows[0].id],
         );
       }
       const amounts = await client.query<{ subtotal: string; tax_total: string; grand_total: string }>(

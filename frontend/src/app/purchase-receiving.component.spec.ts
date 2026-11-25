@@ -5,6 +5,7 @@ import { TestBed } from '@angular/core/testing';
 import { API_BASE_URL } from './core/api';
 import { AuthUser, SessionService } from './core/session.service';
 import { PurchaseReceivingComponent } from './purchase-receiving.component';
+import { AssistantContextService } from './core/assistant-context.service';
 
 describe('Purchase receiving lifecycle and quantities', () => {
   const admin: AuthUser = { id: 'user-1', companyId: 'company-1', email: 'admin@example.test', fullName: 'Demo admin', roles: ['admin'] };
@@ -95,5 +96,20 @@ describe('Purchase receiving lifecycle and quantities', () => {
     await unknown;
     expect(component.receipt.locationCode).toBe('MAIN');
     expect(component.destinationDiffers).toBeFalse();
+  });
+  it('opens diagnostics only for the selected order when requested', async () => {
+    const fixture = TestBed.createComponent(PurchaseReceivingComponent);
+    user.set(admin); fixture.detectChanges();
+    http.expectOne(orders).flush([{ purchase_order_id: 'order-1', purchase_order_status: 'ordered' }]);
+    await fixture.whenStable();
+    const selection = spyOn(TestBed.inject(AssistantContextService), 'select');
+    const pending = fixture.componentInstance.selectOrder('order-1');
+    http.expectOne(detailUrl).flush(detail); await pending; fixture.detectChanges();
+    expect(selection).not.toHaveBeenCalled();
+    const button = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('button'))
+      .find(element => element.textContent?.includes('Analizar orden'));
+    expect(button).toBeDefined();
+    button!.click();
+    expect(selection).toHaveBeenCalledOnceWith({ kind: 'purchase-order', id: 'order-1' }, '/receiving');
   });
 });

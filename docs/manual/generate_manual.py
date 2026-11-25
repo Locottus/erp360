@@ -31,7 +31,7 @@ for name in ["Title", "Heading 1", "Heading 2", "Heading 3"]:
     doc.styles[name].paragraph_format.keep_with_next = True
 doc.styles["Heading 1"].paragraph_format.page_break_before = True
 header = section.header.paragraphs[0]
-header.text = "ERP360  |  Operación y configuración  |  Edición 3.20"
+header.text = "ERP360  |  Operación y configuración  |  Edición 3.22"
 header.style = doc.styles["Caption"]
 footer = section.footer.paragraphs[0]
 footer.alignment = WD_ALIGN_PARAGRAPH.RIGHT
@@ -140,7 +140,7 @@ def flow(title, purpose, prerequisites, operations, result, controls):
 doc.add_heading("ERP360", 0)
 p("MANUAL DE OPERACIÓN Y CONFIGURACIÓN", "Subtitle")
 p("Guía de usuario, administración funcional e integración")
-p(f"Edición 3.20 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
+p(f"Edición 3.22 · Generado {datetime.now():%Y-%m-%d} · Idioma: español")
 p("Audiencia: usuarios, responsables de empresa, integradores y soporte.")
 note("Este manual describe la implementación existente, no una promesa de paridad con otro ERP. "
      "Distingue pantallas web de operaciones disponibles solo por API. Fiscal es simulación sandbox; "
@@ -158,16 +158,16 @@ p("ERP360 utiliza Angular para experiencia web, NestJS para servicios y PostgreS
 table(["Área", "Canal existente", "Límites relevantes"], [
     ("Empresas y usuarios", "Mi empresa, Usuarios y Acceso", "Perfil e identidad revisionados con motivo/auditoría, invitaciones, revocación y MFA TOTP cifrado. Recuperación visual y membresías multiempresa siguen pendientes."),
     ("Maestros", "Catálogos, Operaciones y API", "Alta, edición, desactivación, exportación JSON e importación atómica de hasta 200 altas."),
-    ("Ventas / compras", "Operaciones, Recepciones y API", "Recepciones parciales con ingreso físico atómico; devengo al completar y devolución con crédito proporcional."),
-    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias, conteos, reposición y almacenes autorizados. Política de costo y snapshot COGS en 0035; lotes FIFO completos e series siguen pendientes."),
-    ("Facturación comercial", "Facturación, Control operativo y API", "Folio automático opcional, moneda en documentos nuevos, PDF, crédito total y reembolso registrado. Sin certificación fiscal."),
-    ("Contabilidad", "Libro mayor, Operaciones y API", "Plan base, asientos por origen, pagos, COGS, conciliación bancaria inicial y cierre. Importación bancaria masiva y estados certificados siguen pendientes."),
+    ("Ventas / compras", "Operaciones, Recepciones y API", "Recepciones parciales con ingreso físico atómico; devengo al completar, devoluciones con costo de recepción y planes de compra por línea."),
+    ("Inventario", "Inventario, Control operativo y API", "Saldos, kardex, reservas, despacho, transferencias, conteos, reposición y almacenes autorizados. Capas de costo FIFO/promedio ponderado y snapshot COGS; históricos sin trazabilidad suficiente requieren conciliación."),
+    ("Facturación comercial", "Facturación, Control operativo y API", "Folio automático opcional, moneda en documentos nuevos, PDF, crédito parcial por línea, reembolsos registrados y retorno físico separado. Sin certificación fiscal."),
+    ("Contabilidad", "Libro mayor, Operaciones y API", "Plan base, asientos por origen, pagos, COGS, importación CSV bancaria, conciliación manual y estados financieros operativos no certificados."),
     ("Fiscal GT/SV/DO", "API sandbox", "Adaptadores simulados; producción bloqueada, sin certificación legal."),
     ("RRHH", "Operaciones, Personas y API", "Empleados, bajas, jornadas y cancelación auditada de ausencias. No nómina ni saldos legales."),
     ("eCommerce", "Estudio, tienda pública y Control operativo", "Checkout idempotente, reserva MAIN, dirección, seguimiento manual y baja privada. Sin cobro, flete ni transportista externo."),
     ("Portal", "Consulta web + API administrativa", "Token temporal, hasta 20 cotizaciones/pedidos/facturas recientes por categoría."),
     ("XML-RPC", "API", "Solo los métodos compatibles documentados; no todos los de un ERP legado."),
-    ("Ayuda y asistente", "Agente de solo lectura en todas las áreas", "Resúmenes autorizados, evidencia y guía; investigación por solicitud de compra, pedido o saldo. OpenAI/DeepSeek/Claude con consentimiento adicional; sin escrituras."),
+    ("Ayuda y asistente", "Agente de solo lectura en todas las áreas", "Resúmenes autorizados, evidencia y guía; investigación por solicitud u orden de compra, pedido o saldo. OpenAI/DeepSeek/Claude con consentimiento adicional; sin escrituras."),
     ("Cartera SaaS", "Consola de plataforma y Mi suscripción", "Contratos por módulos, facturas internas, ingresos recibidos y seguimiento. Sin cobro bancario ni bloqueo automático."),
 ])
 p("Identificadores: los IDs internos son UUID devueltos por la API; códigos y números visibles son "
@@ -194,7 +194,11 @@ code("Set-Location C:\\angular\\erp360\\erp360-modernizado\\api\n"
 code("Set-Location C:\\angular\\erp360\\erp360-modernizado\\frontend\n"
      "npm start -- --host 127.0.0.1 --port 4201")
 p("Verifica http://127.0.0.1:3001/health/ready y "
-  "http://127.0.0.1:4201/api/health/live antes de abrir la aplicación.")
+  "http://127.0.0.1:4201/api/health/live antes de abrir la aplicación. "
+  "Live solo indica que responde la API; ready consulta PostgreSQL con SELECT 1 y devuelve 503 si no puede hacerlo. "
+  "Ready no verifica migraciones, datos, otros servicios ni disponibilidad fiscal o de IA.")
+p("En instalaciones nuevas Docker publica PostgreSQL en 127.0.0.1 por defecto. Un contenedor ya creado "
+  "con otra publicación conserva esa configuración hasta que el responsable lo modifique; no reiniciarlo sin plan y respaldo.")
 h("2.3 Parámetros", 2)
 table(["Variable", "Uso", "Cuidado"], [
     ("PORT", "Puerto de la API; ejemplo local 3001", "Es PORT, no API_PORT."),
@@ -536,19 +540,19 @@ h("10.4 Cancelar, acreditar y devolver", 2)
 steps(["Antes de facturar/despachar, abre Control operativo → Cancelar pedido sin entrega y elige venta o compra.",
        "Escribe un motivo de 10 a 1000 caracteres y confirma. La venta libera reservas sin cambiar el físico.",
        "Una venta facturada/despachada o una compra recibida/contabilizada no admite cancelación simple.",
-       "Para una factura CONTABILIZADA usa Nota de crédito total. Selecciona factura y motivo.",
-       "Marca devolución física SOLO si se recibió toda la mercancía despachada. Si no hubo despacho, las reservas se liberan sin sumar físico.",
-       "Confirma: se crea AUTO-CN, reversión contable, factura void y pedido cancelled en una transacción.",
+       "En Nota de crédito parcial o total selecciona una factura contabilizada. Carga sus líneas y elige solo las cantidades a acreditar; el sistema muestra el máximo acumulado aún disponible.",
+       "Escribe un motivo de 10 a 1000 caracteres. Marca retorno físico solo si ya recibiste todas las cantidades seleccionadas y acreditadas que se despacharon.",
+       "Confirma. Se crea AUTO-CN con reversión de ingreso/impuesto. La factura y pedido solo pasan a void/cancelled cuando ya se acreditó todo el subtotal original.",
        "Los cobros anteriores se conservan. Consulta Saldos a devolver y registra cada reembolso realmente efectuado con referencia e importe.",
        "El importe de reembolso no puede exceder lo cobrado menos lo ya devuelto. Se registra su asiento; no se envía dinero.",
-       "Si acreditaste sin retorno y la mercancía llega después, en la tabla de notas usa Retorno físico posterior: referencia única, motivo y confirmación de recepción TOTAL.",
-       "Confirma Registrar retorno físico total. Se repone una sola vez en las ubicaciones originales del despacho, sin volver a acreditar ni reembolsar."])
-note("Crédito y retorno físico solo TOTALES, una vez por factura. No hay crédito ni retorno parcial "
-     "de venta. No anula documentos fiscales. El crédito requiere período abierto "
-     "y cuentas contables base. Para una factura no contabilizada, revisar/postear antes de acreditar.")
-note("El retorno físico posterior no crea asiento financiero adicional: registra la fecha real del "
-     "movimiento de almacén, incluso si el crédito pertenece a un mes cerrado. La valoración/COGS "
-     "sigue pendiente. Sin despacho no se ofrece retorno; si ya se devolvió al acreditar, se rechaza repetirlo.")
+       "Si la mercancía llega después, usa Retorno físico posterior con referencia única y motivo. Registra únicamente cantidades ya acreditadas, despachadas y físicamente recibidas; verifica antes de confirmar.",
+       "Un retorno físico repone stock en la ubicación original y revierte el COGS según el costo de despacho guardado. No crea un segundo crédito ni reembolso."])
+note("Los créditos son acumulables por línea y no pueden superar la cantidad ni el importe pendiente de la factura. El impuesto se prorratea y el último crédito absorbe el residuo de redondeo. La casilla de retorno al emitir la nota devuelve físicamente todas las cantidades de esa nota; para entregas posteriores utiliza el flujo separado. No anula documentos fiscales. El crédito requiere período abierto y cuentas base.")
+note("Un crédito comercial sin retorno físico revierte ingreso e impuesto, pero no repone inventario ni revierte COGS. La devolución física posterior conserva la trazabilidad del despacho; los documentos históricos sin costos/líneas verificables se rechazan para conciliación, no se asigna costo cero.")
+p("En la pantalla, Retorno físico posterior intenta devolver todas las cantidades restantes de esa nota; úsalo solo si ya recibiste todas. "
+  "Una devolución parcial por línea se puede registrar por API: POST /accounting/credits/:id/stock-return con "
+  "{reference, reason, lines:[{creditNoteLineId, quantity}]}. La cantidad debe estar acreditada, despachada y aún no retornada; "
+  "la ubicación y el costo se recuperan del despacho.")
 code('POST /commerce/sales/quotations\n'
      '{"quotationNumber":"COT-DEMO-001","customerId":"<UUID cliente>",'
      '"taxRateCode":"IVA13","lines":[{"productId":"<UUID producto>","quantity":2,"unitPrice":25}]}')
@@ -643,10 +647,11 @@ image("18-receiving.png", "Recepciones parciales, lotes, devolución a proveedor
 h("11.5 Planificar destino y fecha de una compra", 2)
 steps(["En Operaciones → Compras completa proveedor, productos y cantidades como de costumbre.",
        "Destino previsto de compra y Fecha comprometida de recepción (UTC) son opcionales; un campo vacío queda sin definir, no equivale a MAIN ni a una confirmación del proveedor.",
+       "En cada renglón puedes conservar el plan general o indicar un destino/fecha distintos. El valor de la línea prevalece; si queda vacío, hereda el campo general.",
        "Los códigos de destino se normalizan a mayúsculas y admiten hasta 32 caracteres sin controles. Son códigos lógicos: todavía no hay catálogo de almacenes ni validación de rutas.",
        "La fecha debe existir y usar YYYY-MM-DD. Una fecha pasada se admite como compromiso registrado, no como caducidad.",
-       "Crea la solicitud, consulta Ver detalle y revisa el plan antes de aprobar. La orden copia ese plan en el momento de aprobación.",
-       "En Seguimiento de compras se muestra el plan de la orden cuando existe; el detalle y Plan e historial de solicitud conservan el de la solicitud original.",
+       "Crea la solicitud, consulta Ver detalle para revisar el plan efectivo por línea y revisa el plan general antes de aprobar. La orden copia esos valores en el momento de aprobación.",
+       "En Seguimiento de compras se muestra el plan general de la orden cuando existe; el detalle muestra el destino/fecha de cada renglón.",
        "Una orden abierta con fecha anterior a hoy UTC muestra Fecha comprometida superada. El día actual no se considera superado; completar/cancelar quita el aviso, sin borrar la fecha.",
        "En Recepciones verifica siempre el lugar físico real. Actualizar el detalle no reemplaza la ubicación que ya estabas introduciendo."])
 note("Planificar no crea stock, reservas, movimientos ni asientos. Los históricos permanecen sin destino/fecha "
@@ -676,8 +681,9 @@ p("API: GET/PATCH /commerce/purchases/requests/:id/delivery-plan y "
 code('PATCH /commerce/purchases/orders/<UUID orden>/delivery-plan\n'
      '{"destinationLocationCode":"WH-B","expectedReceiptDate":null,'
      '"expectedRevision":0,"reason":"Fecha pendiente de confirmar con proveedor"}')
-note("No equivale a fechas por línea, calendario laboral, aceptación por correo del proveedor ni automatización "
-     "de rutas de Odoo. No existe cierre automático del remanente ni revalorización al reprogramar.")
+note("La reprogramación cambia el plan general del documento, no los overrides de líneas ya registrados; "
+     "tampoco ofrece calendario laboral, aceptación por correo del proveedor ni automatización de rutas. "
+     "No existe cierre automático del remanente ni revalorización al reprogramar.")
 image("39-purchase-rescheduling.png", "Plan de orden parcial: revisión 2 tras retirar destino/fecha e historial antes/después")
 
 h("12. Inventario, reservas y ubicación")
@@ -761,7 +767,7 @@ steps(["En Inventario → Reposición pulsa Ver órdenes del producto.",
        "Comprueba la fecha/hora de consulta UTC, total verificable de empresa y número de órdenes excluidas.",
        "Revisa cada grupo de destino previsto y fecha UTC. No definido/No definida conserva la falta de datos; no se asigna MAIN ni una fecha ficticia.",
        "Una fecha anterior a hoy UTC se marca superada; hoy todavía no. Confirma la entrega con el proveedor: no bloquea la recepción.",
-       "Cada orden del producto pertenece a un solo grupo aunque tenga varias líneas. No sumes el total empresarial otra vez al desglose ni entre reglas.",
+       "Las líneas se agrupan por destino/fecha efectivos. Una orden puede aparecer en varios grupos si sus renglones tienen planes distintos; no sumes el total empresarial otra vez al desglose ni entre reglas.",
        "Pulsa Actualizar planificación para releer el detalle. Actualizar reposición renueva las reglas y cierra el detalle, que puedes volver a abrir."])
 p("Resumen, grupos, órdenes y solicitudes abiertas provienen de una sola instantánea SQL. La tabla de reglas "
   "se consulta por separado y puede ser anterior. Cantidades exactas calculadas en PostgreSQL y devueltas como "
@@ -780,6 +786,9 @@ steps(["Dentro de Ver órdenes revisa Solicitudes sin orden: borradores y enviad
 p("La cantidad solicitada no aprobada está separada del pendiente verificable de órdenes: no se suman ni se descuentan "
   "de la sugerencia. Al aprobar una solicitud desaparece de esta lista y aparece su orden abierta; al rechazar deja de contarse. "
   "No se incluyen solicitudes con una orden asociada, incluso ante un histórico de estado inconsistente. "
+  "La columna Solicitudes similares cuenta documentos abiertos con el mismo destino y fecha; es una advertencia, no un bloqueo "
+  "ni una prueba de que correspondan a la misma necesidad. Revisa proveedor, producto, origen y cantidades. "
+  "Una solicitud con renglones del mismo producto y planes distintos puede aparecer en más de un grupo. "
   "Estas lecturas conservan permisos de administrador y empresa de la sesión; no amplían el rol purchases.")
 h("12.4 Exportación CSV de planificación", 2)
 steps(["Abre Ver órdenes del producto y pulsa Exportar planificación CSV.",
@@ -788,11 +797,31 @@ steps(["Abre Ver órdenes del producto y pulsa Exportar planificación CSV.",
        "Separa document_type=order de request. Suma únicamente verifiable_pending_quantity para órdenes verificables; no combines unapproved_request_quantity.",
        "Una celda vacía de pendiente en una orden excluida no equivale a cero: revisa legacy_receipt, over_received y excluded_from_pending.",
        "Si falla la consulta/exportación se muestra un error. Reintenta explícitamente; no se presenta un archivo vacío como éxito."])
+p("Cada fila representa un grupo de plan por documento/producto/destino/fecha; un pedido o solicitud puede aparecer "
+  "en más de una fila cuando sus líneas tienen planes distintos. La columna similar_open_request_count es informativa "
+  "y cuenta solicitudes con el mismo destino/fecha; no combina cantidades ni cancela propuestas. "
+  "El CSV es una exportación de consulta, no una orden de compra.")
 p("GET /inventory/replenishment/:productId/purchase-planning.csv requiere la misma identidad administradora y producto "
-  "de la empresa. Realiza una consulta nueva, por lo que puede diferir de la pantalla. Exporta una fila por orden o solicitud "
-  "del producto, no una fila por línea ni por regla, y no incluye filas de subtotales/totales. Si no existen documentos, "
-  "el CSV solo tiene encabezados. Columnas de fecha/hora de consulta y fecha UTC de referencia acompañan cada documento. "
+  "de la empresa. Realiza una consulta nueva, por lo que puede diferir de la pantalla. Exporta una fila por grupo "
+  "de plan del documento/producto y no incluye filas de subtotales/totales. Si no existen documentos, el CSV solo "
+  "tiene encabezados. Columnas de fecha/hora de consulta y fecha UTC de referencia acompañan cada fila. "
   "Origen vacío en una orden no significa una solicitud manual. Los planes ausentes se exportan vacíos.")
+
+h("12.5 Política de costo y trazabilidad de despachos", 2)
+steps(["Antes de habilitar costeo, revisa y concilia los saldos iniciales y documentos históricos con contabilidad.",
+       "Inicializa y revisa el plan de cuentas con un administrador antes de despachar: para registrar COGS positivo deben existir las cuentas 1200 y 5100.",
+       "Consulta GET /companies/cost-policy. Para cambiar, usa PATCH /companies/cost-policy con policy weighted_average o fifo, expectedRevision y motivo de 10 a 1000 caracteres.",
+       "Registra costos unitarios en las entradas físicas y revisa por producto/ubicación las capas disponibles antes de transferir o despachar.",
+       "El despacho conserva costo y política por línea; cuando el asiento de costo de ventas sea calculable, débito 5100 y crédito 1200 se publican sin duplicar el origen.",
+       "Para devolución de proveedor, transfiere mercancía a su ubicación de recepción si hace falta y registra la devolución; se consumen capas vinculadas al recibo original.",
+       "Para retorno físico de cliente, verifica la nota, la cantidad despachada todavía no retornada y la ubicación original antes de confirmar."])
+p("FIFO consume primero las capas más antiguas; promedio ponderado usa el costo promedio disponible en la ubicación. "
+  "Las transferencias conservan cantidad, costo unitario y vínculo al recibo. Los retornos de cliente restauran el costo "
+  "de despacho y revierten COGS; los retornos a proveedor reducen inventario/crédito con costo trazable. "
+  "No cambiar la política para corregir diferencias históricas.")
+note("El cambio de política se versiona y audita, pero no revaloriza movimientos anteriores. Cualquier histórico "
+     "sin capas/costo/línea de despacho suficiente necesita conciliación autorizada; el flujo falla de forma explícita "
+     "en lugar de asignar cero. El reporte de valoración/COGS no sustituye conciliación ni estados financieros certificados.")
 p("Las celdas están entre comillas, las comillas internas se duplican y los saltos/tabuladores se convierten en espacios. "
   "Los textos que podrían iniciar una fórmula se neutralizan con apóstrofo. Es una exportación informativa, "
   "no un archivo de importación ni un documento fiscal.")
@@ -800,11 +829,12 @@ p("Las celdas están entre comillas, las comillas internas se duplican y los sal
 h("13. Contabilidad, cobros y cierre")
 h("13.1 Preparación del plan base", 2)
 p("POST /accounting/bootstrap-accounts inicializa cuentas de sistema por empresa, sin recrear "
-  "las que ya existan. Este plan base no sustituye el plan legal específico de cada organización.")
+  "las que ya existan. Un despacho con COGS positivo se rechaza si faltan 1200 o 5100; "
+  "no se debe cambiar el costo para forzar la operación. Este plan base no sustituye el plan legal específico de cada organización.")
 table(["Código", "Cuenta"], [
     ("1100", "Cuentas por cobrar"), ("1110", "Caja y bancos"), ("1200", "Inventario"),
     ("1300", "Crédito fiscal"), ("2100", "Cuentas por pagar"), ("2200", "IVA por pagar"),
-    ("4100", "Ingresos por ventas"),
+    ("4100", "Ingresos por ventas"), ("5100", "Costo de ventas"),
 ])
 flow("13.2 Contabilizar y cobrar", "Registrar partida por origen y cobro de una factura.",
      "Factura emitida, plan base inicializado y período habilitado.",
@@ -832,7 +862,8 @@ p("Balanceado significa igualdad aritmética de débitos/créditos, no exactitud
   "El balance filtrado presenta movimientos del intervalo, no saldos de apertura; las cuentas sin movimientos "
   "en el intervalo aparecen con cero. Las fechas deben ser válidas y el inicio no puede superar el fin. "
   "La consulta requiere administrador. La contabilidad actual es un núcleo: no incluye toda la planificación, activos, bancos, consolidación "
-  "y obligaciones de una suite financiera completa.")
+  "y obligaciones de una suite financiera completa. Los estados de resultados y situación financiera son vistas operativas, "
+  "no certificadas, y dependen de la clasificación del plan y los asientos publicados.")
 h("13.3.1 Consultar el libro mayor desde Contabilidad", 3)
 steps(["Abre Contabilidad con rol administrador. Las cuentas se cargan sin ejecutar el balance completo.",
        "Selecciona cuenta, Desde y Hasta (ambas fechas incluidas). Pulsa Consultar libro mayor.",
@@ -847,7 +878,8 @@ p("API: GET /accounting/accounts lista el plan de la empresa. "
   "page comienza en 1 y pageSize admite 1–100 (por defecto 25). Devuelve account, summary "
   "(opening/debit/credit/closing), items (con running_balance), total, page, pageSize y fechas. "
   "Los importes son cadenas decimales exactas y cálculo, totales y página comparten una instantánea SQL. "
-  "No se inventa moneda base ni se ofrece estado financiero certificado o conciliación bancaria.")
+  "El libro mayor no inventa moneda base. Consulta también Estados financieros operativos en Contabilidad; "
+  "sus valores no son estados certificados ni sustituyen conciliación profesional.")
 image("28-general-ledger.png", "Libro mayor con factura y abono de 0.0001; cierre exacto de 12.3455")
 h("13.4 Tesorería e inventario en Control operativo", 2)
 steps(["Cuentas por pagar muestra compras, proveedor, total, pagado y saldo. Recibe y contabiliza la compra antes de registrar un pago.",
@@ -856,10 +888,9 @@ steps(["Cuentas por pagar muestra compras, proveedor, total, pagado y saldo. Rec
        "Una transferencia conserva el total físico y no mueve unidades reservadas. Repetir referencia con los mismos datos no duplica; otros datos se rechazan.",
        "Para conteo selecciona saldo, introduce físico contado y referencia. No puede ser menor a reservado.",
        "Si cambió el físico esperado, actualiza y vuelve a contar. No reintentes con una referencia distinta para ocultar el conflicto."])
-note("No hay extractos bancarios, conciliación bancaria completa ni lotes/series "
-     "de trazabilidad de producto. Los lotes documentales de recepción no sustituyen series/lotes de fabricación. "
-     "La valoración y COGS disponibles en GET /inventory/reports/valuation-cogs son provisionales (promedio ponderado por recepción/devolución), "
-     "útiles para control operativo pero no equivalen a una política final certificada.")
+note("Los extractos CSV y conciliación manual se documentan en 13.6. No hay conexión directa con bancos ni "
+     "lotes/series de fabricación. Los lotes de costo son capas de valoración, no números de serie. "
+     "La consulta GET /inventory/reports/valuation-cogs es operativa; verifica y concilia sus cifras antes de reportes oficiales.")
 image("14-controls.png", "Controles de inventario, tesorería, créditos y entregas")
 h("13.5 Recuperar un crédito del proveedor", 2)
 p("Disponible para el administrador en Control operativo. Una devolución de mercancía reduce la "
@@ -888,6 +919,33 @@ note("Registra dinero en la moneda original, sin conversión ni fecha contable r
      "Las referencias incorrectas no se borran desde UI: exige conciliación con el responsable; "
      "no registres otro movimiento para ocultar el error.")
 image("19-supplier-recovery.png", "Recuperación parcial del crédito del proveedor e historial de ingresos")
+
+h("13.6 Importar extractos y conciliar líneas bancarias", 2)
+p("La pantalla Contabilidad permite importar un CSV genérico y conciliar manualmente líneas bancarias. "
+  "Primero debe existir una cuenta bancaria activa en la empresa; un administrador puede registrarla/actualizarla "
+  "por API con POST /accounting/bank-accounts {code, bankName, iban?, currencyCode?}. La pantalla solo ofrece cuentas activas.")
+steps(["Obtén el CSV original del banco y no lo edites después de verificarlo. Máximo 1 MB y de 1 a 5000 movimientos.",
+       "Prepara exactamente este encabezado y orden: reference,line_type,amount,booked_at,counterpart_reference. line_type es debit o credit; amount es positivo y admite hasta cuatro decimales; booked_at es fecha ISO 8601 con zona horaria. counterpart_reference puede quedar vacío.",
+       "En Contabilidad elige cuenta bancaria, referencia única del extracto, fecha, saldo inicial, saldo final y archivo CSV.",
+       "Comprueba que saldo inicial + créditos − débitos = saldo final antes de pulsar Importar extracto.",
+       "Revisa las líneas pendientes en Conciliación manual. Para emparejar o reconciliar indica el UUID de un pago contable existente, importe coincidente y motivo de 10 a 1000 caracteres.",
+       "Si hay diferencia, elige Diferencia, indica importe no negativo y motivo. Guarda para registrar la decisión auditada; la línea reconciliada no puede editarse.",
+       "Actualiza las líneas y verifica el resultado. La importación no crea pagos ni concilia automáticamente; registra únicamente lo declarado por el CSV y el operador."])
+code("reference,line_type,amount,booked_at,counterpart_reference\n"
+     "BANK-001,credit,125.5000,2026-11-18T10:15:00-06:00,INV-100")
+note("El formato debe tener exactamente cinco columnas, 1–5000 filas de datos y referencias de movimiento no repetidas "
+     "dentro del archivo. Cada importe debe ser positivo, hasta cuatro decimales; los saldos son no negativos. "
+     "Un reintento con la misma referencia e idéntico CSV es idempotente (SHA-256); reutilizar referencia o archivo "
+     "con contenido distinto devuelve conflicto. Conserva el archivo original y comprueba la moneda de la cuenta. "
+     "No hay conexión bancaria, carga OFX ni detección automática de pagos.")
+p("Para estado Emparejado o Reconciliado, el pago debe pertenecer a la empresa y tener el mismo importe. "
+  "Vincularlo actualiza su estado a reconciliado; la línea Reconciliado además guarda actor y fecha. "
+  "Diferencia conserva el motivo e importe indicado, sin crear ni modificar pagos. "
+  "La pantalla muestra hasta 1000 líneas recientes; consulta por API/auditoría si necesitas revisar un histórico mayor.")
+p("Estados financieros operativos se consultan desde Contabilidad con fechas Desde/Hasta. La situación financiera "
+  "usa los asientos publicados hasta la fecha final; resultados usa el intervalo inclusivo. El resultado acumulado "
+  "se incluye en patrimonio para mostrar la ecuación. Verifica los rangos y el plan contable con el responsable; "
+  "no son informes certificados.")
 
 h("14. Fiscal regional: solo homologación simulada")
 note("Los adaptadores GT FEL, SV DTE y DO e-CF son simuladores. Un estado accepted en sandbox "
@@ -1125,8 +1183,11 @@ steps(["Con sesión empresarial, abre la pantalla involucrada y pulsa Asistente 
        "Requiere permisos del área, no proveedor ni servicio IA. Sin sesión continúa disponible la guía local.",
        "Lee el resumen autorizado, los hechos citados [E1], [E2] y los pasos propuestos. Los recuentos "
        "son contexto de área, no prueba de una causa individual.",
-       "Para investigar un documento, usa Analizar solicitud en Compras, Analizar pedido en Ventas "
-       "o Inventario, o Analizar saldo junto al producto/ubicación. Se abre el agente con esa selección.",
+       "Para investigar un documento, usa Analizar solicitud u orden en Compras, Analizar orden en "
+       "Recepciones, Analizar pedido en Ventas o Inventario, o Analizar saldo junto al producto/ubicación. "
+       "El análisis de orden requiere administrador. Se abre el agente con esa selección.",
+       "Comprobar conexión API verifica únicamente que el endpoint live responda en ese momento; "
+       "no comprueba PostgreSQL, otras APIs, DeepSeek ni la causa de un error previo.",
        "Despliega Evidencia y límites para revisar la referencia local, fuentes y fecha de la instantánea. "
        "Las lecturas no corrigen datos ni ejecutan reserva, despacho, aprobación o ajustes.",
        "Si quieres razonamiento externo, despliega IA y privacidad, consiente Usar [proveedor] y marca "
@@ -1138,8 +1199,8 @@ table(["Área", "Apoyo disponible", "Alcance y permisos"], [
     ("Catálogos", "Productos activos, impuestos y recuentos autorizados", "No muestra nombres ni importa, edita o reactiva registros."),
     ("Inventario", "Saldos inválidos; por saldo compara reserva acumulada", "Stock de tu empresa; no modifica existencias."),
     ("Ventas / Facturación", "Cotizaciones, pedidos, facturas; por pedido demanda agrupada, reserva y ubicación", "Lectura admin/sales; ejecución operativa sigue siendo admin."),
-    ("Compras", "Solicitudes/órdenes; por solicitud estado, líneas y aprobación independiente", "Lectura admin/purchases; no aprueba ni cambia creador."),
-    ("Recepciones", "Recuentos por estado y guía de entregas/devoluciones", "admin; no comprueba físicamente mercancía."),
+    ("Compras", "Por solicitud, aprobación independiente; por orden, estado, líneas, recepciones y asiento", "Solicitud admin/purchases; diagnóstico de orden solo admin. No aprueba ni cambia creador."),
+    ("Recepciones", "Recuentos y diagnóstico de orden, fecha comprometida y recepción documentada", "admin; históricos sin líneas no permiten inferir pendientes. No comprueba físicamente mercancía."),
     ("Control operativo", "Recuentos de operaciones/pagos y guía de corrección", "admin; no verifica bancos ni produce créditos/reembolsos."),
     ("Contabilidad", "Asientos publicados, períodos cerrados y cuentas activas", "admin; no valida un asiento individual ni certifica balances."),
     ("Personas / RRHH", "Expedientes activos, jornadas abiertas y solicitudes pendientes", "admin; solo agregados, sin información personal/médica."),
@@ -1478,15 +1539,16 @@ table(["Término", "Significado"], [
     ("API-first / headless", "Lógica expuesta por servicios; no implica que exista pantalla para toda operación."),
     ("RAG", "Consulta de conocimiento documentado para asistencia IA futura, con fuentes y control de acceso."),
 ])
-h("22. Continuación operativa 0035 y 0036", 1)
-p("La edición 3.20 incorpora la base operativa agregada por las migraciones 0035 y 0036.")
+h("22. Continuación operativa 0035 a 0037", 1)
+p("La edición 3.21 documenta capacidades operativas contables y de compras validadas sobre una base de prueba aislada. "
+  "No afirma que la migración 0037 se haya aplicado a la base operativa.")
 h("22.1 Costo, COGS y conciliación", 2)
 bullets([
-    "Mi empresa puede seleccionar promedio ponderado o FIFO para la valoración futura.",
-    "Cada despacho de venta conserva costo unitario, costo total, política, origen y asiento COGS asociado.",
-    "Contabilidad usa las cuentas 1200 Inventario y 5100 Costo de ventas. Ejecuta bootstrap de cuentas si faltan.",
-    "La conciliación bancaria registra pendiente, emparejado, reconciliado o diferencia. Un pago debe coincidir por importe.",
-    "Importar extractos masivos, matching automático y estados financieros certificados siguen pendientes.",
+    "La política empresarial de costo puede configurarse por API como promedio ponderado o FIFO; el cambio versionado/auditado no revaloriza el pasado.",
+    "Despachos conservan costo por línea y reservas; el COGS usa 1200 Inventario y 5100 Costo de ventas cuando es calculable.",
+    "Devoluciones de proveedor consumen capas con linaje de recepción, incluso después de transferencias; retornos de cliente restauran el costo despachado y revierten COGS.",
+    "El CSV bancario genérico y la conciliación manual están disponibles; no hay conexión bancaria ni matching automático.",
+    "Estados financieros operativos se consultan desde Contabilidad, pero no son certificados. Históricos sin costo verificable requieren conciliación.",
 ])
 h("22.2 Identidad MFA y pagos", 2)
 bullets([
@@ -1500,7 +1562,8 @@ h("22.3 Operación, SaaS y entidades", 2)
 bullets([
     "0036 crea ledger de migraciones, respaldo/restauración operativa y outbox SaaS.",
     "Entitlements pueden persistirse por empresa/módulo con vigencia, gracia y revisión.",
-    "Al crear propuestas se bloquea otra solicitud abierta del mismo producto y proveedor.",
+    "Las solicitudes similares se muestran como advertencias informativas por destino/fecha; no se bloquean por similitud.",
+    "Los planes de compra admiten destino/fecha por línea, con herencia del plan general y copia al aprobar.",
     "Los almacenes deben registrarse por código normalizado antes de usarse como catálogo autorizado.",
     "Checkout mantiene una reserva de 30 minutos y registra el estado de cotización de envío.",
     "RRHH admite paginación y vínculo/desvínculo auditado de empleado con una cuenta activa.",
@@ -1520,6 +1583,13 @@ bullets(["docs/DESPLIEGUE_LOCAL.md: arranque, entorno y operación segura.",
 p("Capturas: navegador Chrome con API y DB locales; solo el asistente usa respuestas mock explícitas. Se renovaron las imágenes "
   "antiguas; no se incluyen tokens visibles, contraseñas ni datos reales. Los conteos de demostración "
   "pueden variar tras repetir pruebas y no constituyen una plantilla de saldos iniciales.")
+p("Edición 3.22: comprobación real de conexión PostgreSQL en readiness, publicación local por defecto en Docker "
+  "y diagnóstico explícito de orden de compra y conexión API. La recuperación de producción y la validación "
+  "de un proveedor IA real siguen pendientes.")
+p("Edición 3.21: costo FIFO/promedio con linaje para retornos, crédito parcial por línea, devolución física separada, "
+  "importación CSV bancaria con idempotencia SHA-256, conciliación manual auditada y estados financieros operativos no certificados. "
+  "Incluye planes de compra por línea con herencia y conteo informativo de solicitudes similares. La migración 0037 "
+  "solo se validó en una base aislada; no se afirma aplicada a la base operativa.")
 p("Edición 3.20: migraciones 0035 y 0036, capítulos operativos de costo/COGS, conciliación inicial, MFA TOTP, "
   "webhooks idempotentes, ledger de migraciones, outbox SaaS, almacenes, deduplicación básica y paginación RRHH. "
   "Los certificados fiscales, proveedores bancarios, cobros y correos reales siguen externos.")

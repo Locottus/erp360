@@ -43,7 +43,7 @@ describe('Operational controls and financial reversals', () => {
     customerId = (await post('/masters/customers', { code: 'CUSTOMER', name: 'Customer' }).expect(201)).body.id;
     supplierId = (await post('/masters/suppliers', { code: 'SUPPLIER', name: 'Supplier' }).expect(201)).body.id;
     productId = (await post('/masters/products', { sku: 'CONTROL', name: 'Controlled product', unitPrice: 50 }).expect(201)).body.id;
-    await post('/inventory/adjustments', { productId, quantity: 20, direction: 'in', locationCode: 'WH-A' }).expect(201);
+    await post('/inventory/adjustments', { productId, quantity: 20, unitCost: 5, direction: 'in', locationCode: 'WH-A' }).expect(201);
     await post('/accounting/bootstrap-accounts', {}).expect(201);
   });
   afterAll(async () => { await app.close(); });
@@ -71,7 +71,7 @@ describe('Operational controls and financial reversals', () => {
     const after = await get('/inventory/stock?locationCode=WH-A').expect(200);
     expect(Number(after.body[0].on_hand)).toBe(17);
     expect(Number(after.body[0].reserved)).toBe(0);
-    await post('/inventory/counts', { productId, locationCode: 'WH-A', quantity: 18, expectedOnHand: 17, reference: 'COUNT-1' }).expect(201);
+    await post('/inventory/counts', { productId, locationCode: 'WH-A', quantity: 18, expectedOnHand: 17, unitCost: 5, reference: 'COUNT-1' }).expect(201);
   });
 
   it('generates a real PDF and atomically credits, returns stock and records bounded refunds across closed periods', async () => {
@@ -149,7 +149,7 @@ describe('Operational controls and financial reversals', () => {
     expect(Number(payables.body.find((row: { id: string }) => row.id === id).balance_due)).toBe(20);
   });
 
-  it('receives all goods after an earlier credit once, without another credit, refund or accounting entry', async () => {
+  it('receives all goods after an earlier credit once and reverses the dispatched COGS', async () => {
     const id = await sale();
     await post(`/inventory/sales/orders/${id}/reserve`, { locationCode: 'WH-A' }).expect(201);
     await post(`/inventory/sales/orders/${id}/dispatch`, {}).expect(201);
@@ -177,7 +177,20 @@ describe('Operational controls and financial reversals', () => {
     const after = await db.query<{ total: string }>(
       'SELECT COUNT(*)::text total FROM accounting_journal_entries WHERE company_id=(SELECT company_id FROM sales_credit_notes WHERE id=$1)', [creditId],
     );
-    expect(after.rows[0].total).toBe(before);
+    expect(Number(after.rows[0].total)).toBe(Number(before) + 1);
+    const reversal = await db.query<{ debit: string; credit: string }>(
+      `SELECT SUM(jl.debit)::text AS debit,SUM(jl.credit)::text AS credit
+       FROM accounting_journal_entries je JOIN accounting_journal_lines jl ON jl.journal_entry_id=je.id
+       WHERE je.company_id=(SELECT company_id FROM sales_credit_notes WHERE id=$1)
+         AND je.source_type='sales_credit_stock_return' AND je.source_id=$2`,
+      [creditId, (await db.query<{ id: string }>(
+        'SELECT id FROM sales_credit_stock_returns WHERE credit_note_id=$1', [creditId],
+      )).rows[0].id],
+    );
+    const dispatchCost = await db.query<{ total: string }>(
+      'SELECT SUM(total_cost)::text AS total FROM inventory_dispatch_costs WHERE sales_order_id=$1', [id],
+    );
+    expect(reversal.rows[0]).toEqual({ debit: dispatchCost.rows[0].total, credit: dispatchCost.rows[0].total });
     const listing = (await get('/accounting/credits')).body.find((row: { id: string }) => row.id === creditId);
     expect(listing.stock_returned).toBe(true);
     expect(listing.can_return_stock).toBe(false);

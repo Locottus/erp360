@@ -1,6 +1,6 @@
 # ERP360: continuidad del desarrollo
 
-Fecha de corte: 17 de noviembre de 2026. Repositorio de trabajo:
+Fecha de corte: 18 de noviembre de 2026. Repositorio de trabajo:
 `C:\angular\erp360\erp360-modernizado`.
 
 Este documento permite retomar el desarrollo. No afirma que el ERP esté
@@ -15,12 +15,25 @@ Angular, NestJS y PostgreSQL 16. API local `http://127.0.0.1:3001`,
 frontend `http://127.0.0.1:4201`, proxy frontend `/api`.
 Contenedor de datos `erp360-db`: conservar su volumen.
 
-Migraciones incrementales disponibles hasta `0034_purchase_delivery_plan_revision.sql`.
-Respaldar antes de migrar; no volver a inicializar datos existentes.
+El código incluye migraciones incrementales hasta `0037_operational_accounting_completion.sql`;
+0037 se aplicó solo a la base aislada de validación, no a la base operativa.
+Respaldar y validar antes de migrar; no volver a inicializar datos existentes.
 El directorio padre contiene Odoo como referencia de lógica, no es la aplicación
 que se está ejecutando.
 
-### Última continuación: tres bloques de planificación de compras
+### Continuación más reciente: contabilidad operativa y planes de compra
+
+Implementados y validados en base aislada: FIFO/promedio ponderado con linaje
+de costos, retorno de cliente con reversión COGS, devoluciones a proveedor
+trazables, crédito parcial por línea, importación CSV bancaria con idempotencia,
+conciliación manual auditada y estados financieros operativos no certificados.
+Compras admiten destino/fecha por línea, valores generales heredables y
+advertencias de similitud por destino/fecha; no se bloquea por similitud.
+Regresión: seis suites API (47 e2e), build API/Angular y 99 pruebas Angular.
+La edición 3.21 del manual se regeneró; la migración 0037 no fue aplicada a
+la base operativa.
+
+### Continuación anterior: tres bloques de planificación de compras
 
 1. **Resumen por destino/fecha:** Ver órdenes muestra total empresarial, grupos
    mutuamente excluyentes, fecha/hora UTC y órdenes excluidas para revisión.
@@ -39,8 +52,10 @@ GET `inventory/replenishment/:productId/purchase-planning` y sufijo `.csv`,
 solo admin de la empresa; no se amplía purchases. Resumen/grupos/documentos de
 la pantalla comparten una instantánea SQL. Reglas y exportación son consultas
 independientes y pueden diferir; Actualizar planificación renueva el detalle.
-No se descuenta tránsito/solicitudes de la sugerencia ni se bloquean duplicados
-manuales o entre reglas. No hay fechas por línea ni confirmación del proveedor.
+No se descuenta tránsito/solicitudes de la sugerencia. Se informa cuántas
+solicitudes abiertas comparten destino/fecha, pero no se infiere que sean una
+misma necesidad ni se bloquean duplicados manuales o entre reglas. Las fechas
+por línea y el fallback al plan general se completaron en la continuación actual.
 
 Builds API/Angular, **42 e2e en tres suites** y **32 pruebas Angular en tres suites**
 correctos. Navegador: tres flujos, tres anchos 375/768/1280, sin overflow global
@@ -54,10 +69,12 @@ Sin migración: se reinició solo la API ERP; frontend sigue en 4201 y proxy/hea
 893 asientos. Copia/API temporales retiradas, respaldo privado conservado.
 Ayuda, manual Word **3.19** (12.2–12.4) y notas actualizados al final de los tres bloques.
 
-**Pendiente siguiente:** deduplicación transversal de necesidades (definir qué
-solicitudes satisfacen la misma necesidad antes de bloquear), catálogo autorizado
-de almacenes y fechas por línea. Cierre de remanentes parciales, devengos y
-políticas monetarias requieren definición contable: no se habilitaron por inferencia.
+**Pendientes anotados en ese corte anterior (17 nov; actualizados en la continuación
+0037 al inicio de este documento):** política de deduplicación transversal,
+catálogo autorizado de almacenes y fechas por línea. Ya se entregaron conteos
+informativos y planes por línea; no se infiere que dos solicitudes satisfagan
+la misma necesidad. Cierre de remanentes, devengos y política monetaria aún
+requieren definición contable y autorización.
 
 ### Continuación anterior: carga automática de Operaciones al restaurar sesión
 
@@ -381,21 +398,37 @@ manual; su ejecución no implica que alguien contactó al cliente.
 
 | Prioridad | Pendiente | Criterio mínimo |
 |---|---|---|
-| P0 | Valoración y costo de ventas | Elegir FIFO/promedio por empresa con responsable contable; costos históricos revisados y asientos/reversiones coherentes |
-| P0 | Compras por lotes avanzadas | Devengo por entrega parcial, cierre de remanente, conciliación/devolución de históricos y compensación de crédito entre compras |
-| P0 | Crédito/retorno parcial de venta | Vínculos a línea/despacho, acumulados, impuesto/redondeo exactos y dinero separado de mercancía |
-| P0 | Bancos y estados financieros | Extractos deduplicados, matches parciales, balances/flujo con aperturas y fechas; cruzar contra libro |
+| P0 | Conciliación de valoración histórica | FIFO/promedio, capas trazables, transferencias y COGS implementados. Aún requiere elegir política por empresa con responsable contable, conciliar saldos/capas históricos y validar importes antes de operación oficial |
+| P0 | Devengo y cierre de compras | Recepciones parciales físicas y devoluciones con costo trazable disponibles. Pendientes: devengo contable por cada entrega parcial, cierre autorizado de remanentes, conciliación de históricos y compensación entre compras |
+| P0 | Crédito y retorno histórico de ventas | Crédito parcial por línea, impuesto/redondeo acumulados, reembolso y retorno físico separados, y reversión de COGS implementados. Históricos sin vínculo/costo verificable requieren conciliación; emisión fiscal y devoluciones automáticas siguen fuera de alcance |
+| P0 | Reportes financieros oficiales | CSV genérico idempotente, conciliación manual auditada y estados operativos por fechas disponibles. Pendientes: aperturas/flujo certificados, política contable/monetaria aprobada y conciliación contra libros oficiales |
 | P0 | Política monetaria transversal | Moneda base/país y migración histórica autorizados, decimal exacto, monedas 0/2/3 decimales; no completar históricos con USD ficticio |
 | P0 | Fiscal real | País/proveedor y homologación; transmisión/anulación legal auditada, créditos comerciales separados |
 | P0 | Identidad y seguridad productiva | MFA, correo seguro, recuperación autoservicio, permisos finos, HTTPS/CSP, secretos y rate limit distribuido |
 | P0 | Operación y restauración | Ledger de migraciones, backups cifrados/retención, restauración probada y monitoreo |
+
+### Avance operativo 0037 — validación aislada
+
+- Implementados importación bancaria CSV genérica con balance de extracto,
+  referencias únicas, deduplicación SHA-256 e inicio pendiente; conciliación
+  manual por pago existente o diferencia con motivo/auditoría.
+- Implementados estados financieros operativos no certificados, crédito parcial
+  por línea, devoluciones/reembolsos acumulados y retorno físico separado con
+  restauración de costo de despacho y reversión COGS.
+- Devuelve proveedor ahora conserva costo de recepción por transferencias y
+  puede consumir varias capas. Compras registran plan por línea con herencia del
+  plan general y muestran conteos similares como advertencia no bloqueante.
+- Build API/Angular, 47 e2e en seis suites y 99 pruebas Angular correctos.
+  Migración 0037 aplicada solo a `erp360_validation2`; no se modificó la base
+  operativa ni se publicó información certificada.
 
 ### Avance operativo 0035
 
 - Completado: política `weighted_average`/`fifo`, snapshot de costo por
   despacho, asiento COGS en 1200/5100 y protección contra asiento duplicado.
 - Completado: conciliación bancaria con estados, pago vinculado y diferencia
-  auditada. Importación bancaria masiva y matching automático siguen pendientes.
+  auditada, ahora complementada por importación CSV genérica y registro manual
+  (avance 0037). Matching automático sigue pendiente.
 - Completado: MFA TOTP cifrado en API y código MFA en el login.
   Falta el flujo visual completo de alta, recuperación y revocación de factor.
 - Completado: gateway de pagos de entrada con firma HMAC e idempotencia por
@@ -410,8 +443,9 @@ manual; su ejecución no implica que alguien contactó al cliente.
 
 - Completado: ledger de migraciones, respaldo/restauración operativa y tablas
   de entitlements/outbox SaaS.
-- Completado: catálogo de almacenes autorizados y bloqueo transversal básico
-  de solicitudes abiertas por producto/proveedor.
+- Completado: catálogo de almacenes autorizados. El bloqueo transversal básico
+  de solicitudes abiertas por producto/proveedor fue retirado en 0037; la
+  planificación solo muestra similitud informativa por destino/fecha.
 - Completado: expiración de reserva de tienda a 30 minutos, cuenta cliente
   verificable y estado de cotización de envío.
 - Completado: paginación opcional en empleados, asistencia y ausencias, más

@@ -30,8 +30,8 @@ let AccountingController = class AccountingController {
     generalLedger(request, accountCode, fromDate, toDate, page, pageSize) {
         return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
     }
-    financialStatements(request, asOfDate) {
-        return this.accountingService.getFinancialStatements(request.user, asOfDate);
+    financialStatements(request, asOfDate, fromDate, toDate) {
+        return this.accountingService.getFinancialStatements(request.user, asOfDate, fromDate, toDate);
     }
     bankAccounts(request) {
         return this.accountingService.listBankAccounts(request.user);
@@ -45,11 +45,17 @@ let AccountingController = class AccountingController {
     upsertBankAccount(request, input) {
         return this.accountingService.upsertBankAccount(request.user, input);
     }
+    importBankStatement(request, id, input) {
+        return this.accountingService.importBankStatement(request.user, id, input);
+    }
     returnToSupplier(request, id, input) {
         return this.accountingService.returnToSupplier(request.user, id, input);
     }
     credit(request, id, input) {
         return this.accountingService.creditInvoice(request.user, id, input);
+    }
+    creditableInvoiceLines(request, id) {
+        return this.accountingService.creditableInvoiceLines(request.user, id);
     }
     credits(request) { return this.accountingService.listCredits(request.user); }
     refund(request, id, input) {
@@ -118,8 +124,10 @@ __decorate([
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('asOfDate')),
+    __param(2, (0, common_1.Query)('fromDate')),
+    __param(3, (0, common_1.Query)('toDate')),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:paramtypes", [Object, String, String, String]),
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "financialStatements", null);
 __decorate([
@@ -158,6 +166,16 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "upsertBankAccount", null);
 __decorate([
+    (0, common_1.Post)('bank-accounts/:id/statements/import'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "importBankStatement", null);
+__decorate([
     (0, common_1.Post)('purchase-orders/:id/returns'),
     (0, roles_decorator_1.Roles)('admin'),
     __param(0, (0, common_1.Req)()),
@@ -177,6 +195,15 @@ __decorate([
     __metadata("design:paramtypes", [Object, String, Object]),
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "credit", null);
+__decorate([
+    (0, common_1.Get)('sales-invoices/:id/creditable-lines'),
+    (0, roles_decorator_1.Roles)('admin'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "creditableInvoiceLines", null);
 __decorate([
     (0, common_1.Get)('credits'),
     (0, roles_decorator_1.Roles)('admin'),

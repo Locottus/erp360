@@ -74,6 +74,7 @@ describe('eCommerce storefront (e2e)', () => {
         productId,
         direction: 'in',
         quantity: 20,
+        unitCost: 10,
       })
       .expect(201);
 

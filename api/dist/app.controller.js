@@ -12,10 +12,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.AppController = void 0;
 const common_1 = require("@nestjs/common");
 const app_service_1 = require("./app.service");
+const health_service_1 = require("./health.service");
 let AppController = class AppController {
     appService;
-    constructor(appService) {
+    health;
+    constructor(appService, health) {
         this.appService = appService;
+        this.health = health;
     }
     getHello() {
         return this.appService.getHello();
@@ -28,7 +31,8 @@ let AppController = class AppController {
             timestamp: new Date().toISOString(),
         };
     }
-    getReadiness() {
+    async getReadiness() {
+        await this.health.checkReadiness();
         return {
             status: 'ok',
             check: 'readiness',
@@ -46,18 +50,20 @@ __decorate([
 ], AppController.prototype, "getHello", null);
 __decorate([
     (0, common_1.Get)('/health/live'),
+    (0, common_1.Header)('Cache-Control', 'no-store'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], AppController.prototype, "getLiveness", null);
 __decorate([
     (0, common_1.Get)('/health/ready'),
+    (0, common_1.Header)('Cache-Control', 'no-store'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], AppController.prototype, "getReadiness", null);
 exports.AppController = AppController = __decorate([
     (0, common_1.Controller)(),
-    __metadata("design:paramtypes", [app_service_1.AppService])
+    __metadata("design:paramtypes", [app_service_1.AppService, health_service_1.HealthService])
 ], AppController);
 //# sourceMappingURL=app.controller.js.map

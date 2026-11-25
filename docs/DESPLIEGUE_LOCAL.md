@@ -5,7 +5,22 @@
 Node.js 24, npm, Docker Desktop. Ejecutar desde `C:\angular\erp360\erp360-modernizado`.
 No detener contenedores de otros proyectos. La API ERP usa **3001**; 3000 puede estar ocupado.
 
+### Alcance de las comprobaciones de salud
+
+`GET /health/live` verifica únicamente que responde la API. `GET /health/ready`
+consulta PostgreSQL con `SELECT 1`; responde 503 sin detalles internos si no puede
+conectar o consultar. La conexión y consulta tienen límites de dos segundos cada
+una. No valida migraciones, tablas, datos, otros servicios ni proveedores externos.
+No usar `ready` como prueba de contabilidad, integridad o disponibilidad fiscal.
+
 ## Base de datos y configuración
+
+Compose publica PostgreSQL en `127.0.0.1` por defecto. El responsable puede
+definir `POSTGRES_BIND_ADDRESS` si necesita otra interfaz, con reglas de red
+apropiadas. Un contenedor existente mantiene la publicación anterior hasta su
+recreación planificada: cambiar el archivo no la restringe automáticamente.
+Revisar `docker ps` y las reglas del host; no recrear ni detener contenedores
+sin coordinación y respaldo. No exponer PostgreSQL públicamente en producción.
 
 ### Migración 0035
 
@@ -34,6 +49,12 @@ Respaldo: ejecutar `.\scripts\backup.ps1`. Restauración:
 `.\scripts\restore.ps1 -BackupPath <archivo> -DatabaseName erp360`.
 Antes de restaurar sobre producción, detener escrituras y ensayar RPO/RTO
 en una base separada. El script no recrea ni elimina el volumen.
+La restauración usa `pg_restore --clean` sobre la base indicada y puede
+sobrescribir objetos; una falla puede dejarla parcialmente restaurada. El destino
+predeterminado es la base operativa: no ejecutarlo para una prueba sin especificar
+una base aislada. El archivo temporal de restauración tiene nombre fijo; no ejecutar
+restauraciones simultáneas. El respaldo custom y el SQL opcional no están cifrados
+por el script: protegerlos y cifrarlos mediante el procedimiento de la instalación.
 
 ```powershell
 Copy-Item .env.example .env
@@ -281,6 +302,13 @@ no se envían documentos completos ni herramientas de ejecución, no se persiste
 ni se registran API keys. Las credenciales nuevas usan AES-256-GCM vinculadas a
 empresa y proveedor. Las envolturas DeepSeek `v1` previas siguen siendo legibles.
 Revisar privacidad, retención y contrato del proveedor antes de uso real.
+DeepSeek usa `deepseek-flash` o `deepseek-v4-pro` y el endpoint fijo
+`https://api.deepseek.com/chat/completions`, con modo no razonamiento y sin
+herramientas; coincide con el [contrato publicado](https://api-docs.deepseek.com/api/create-chat-completion/).
+Las pruebas usan respuestas sintéticas. Guardar la clave o comprobar conexión
+con la API ERP no prueba la clave, el saldo ni la disponibilidad de DeepSeek.
+Una prueba real requiere autorización, una clave configurada por el operador,
+cuota y una consulta ficticia; puede tener costo. No pegar la clave en el chat.
 
 La cuota compartida es la suma de `monthly_tokens` de servicios asignados a
 usuarios activos y tipos habilitados, más compras del mes **UTC actual**.
@@ -344,6 +372,7 @@ No requiere migración adicional. `POST /assistant/diagnostics` exige JWT y acep
 - `screen`: ruta allowlisted; `area` solo para Operaciones (`overview`, `sales`,
   `purchases`, `masters`, `people`, `accounting`, `fiscal`, `portal`).
 - `purchase-request`: `id` UUID de la solicitud.
+- `purchase-order`: `id` UUID de la orden; solo administrador, como el detalle de recepciones.
 - `sales-order`: `id` UUID del pedido y `locationCode` explícito.
 - `stock`: `id` UUID del producto y `locationCode` explícito.
 
@@ -370,8 +399,11 @@ Solo la auditoría posterior escribe `assistant.diagnostic.read`; no registra
 prompts, respuestas, nombres, importes ni valores de campos.
 
 El informe contiene `target`, `capturedAt`, `readOnly`, `evidence` con IDs E1/E2,
-`findings` con recomendaciones/rutas y `limitations`. Compras reutiliza la regla
-de aprobación independiente. Ventas agrupa demanda de líneas del mismo producto,
+`findings` con recomendaciones/rutas y `limitations`. Solicitud de compra reutiliza la regla
+de aprobación independiente. La orden compara estado, líneas, recepciones
+documentadas, fecha comprometida y asiento publicado; ante recepción histórica
+sin detalle no infiere pendientes. No verifica entrega física ni devoluciones.
+Ventas agrupa demanda de líneas del mismo producto,
 contrasta disponibilidad, reservas, estado y ubicación. Stock compara el saldo
 con la suma de reservas activas. No simula escrituras ni garantiza que una
 operación futura vaya a funcionar.
@@ -385,6 +417,14 @@ autorizada, ignora evidencia enviada por el navegador y añade al prompt únicam
 hechos booleanos/recuentos, reglas y recomendaciones fijas, sin IDs ni nombres.
 La reserva de cuota incluye este prompt enriquecido y se liquida normalmente.
 Sin ese segundo consentimiento el diagnóstico no se adjunta.
+
+En Compras o Recepciones, **Analizar orden** selecciona el documento y abre
+su diagnóstico; la consulta aplica el rol administrador y la empresa de sesión.
+**Comprobar conexión API** consulta explícitamente `/api/health/live` desde el
+navegador con un límite de cinco segundos. Una respuesta válida solo demuestra
+que ese endpoint respondió en ese momento: no verifica PostgreSQL, otras APIs,
+DeepSeek ni la causa de un error previo. Ante error o timeout informa que no pudo
+verificar la conexión, sin afirmar que el servidor esté caído.
 
 No es navegación visual autónoma ni un agente con function-calling libre:
 los flujos de investigación están acotados por el servidor, no elegidos por el

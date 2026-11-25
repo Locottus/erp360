@@ -10,19 +10,22 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DatabaseService = void 0;
+exports.databaseConfig = databaseConfig;
 const common_1 = require("@nestjs/common");
 const pg_1 = require("pg");
+function databaseConfig() {
+    return {
+        host: process.env.POSTGRES_HOST ?? 'localhost',
+        port: Number(process.env.POSTGRES_PORT ?? 5432),
+        database: process.env.POSTGRES_DB ?? 'erp360',
+        user: process.env.POSTGRES_USER ?? 'erp360',
+        password: process.env.POSTGRES_PASSWORD ?? 'erp360_dev_password',
+    };
+}
 let DatabaseService = class DatabaseService {
     pool;
     constructor() {
-        this.pool = new pg_1.Pool({
-            host: process.env.POSTGRES_HOST ?? 'localhost',
-            port: Number(process.env.POSTGRES_PORT ?? 5432),
-            database: process.env.POSTGRES_DB ?? 'erp360',
-            user: process.env.POSTGRES_USER ?? 'erp360',
-            password: process.env.POSTGRES_PASSWORD ?? 'erp360_dev_password',
-            max: 20,
-        });
+        this.pool = new pg_1.Pool({ ...databaseConfig(), max: 20 });
     }
     query(text, params = []) {
         return this.pool.query(text, params);

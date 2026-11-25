@@ -12,6 +12,10 @@ type SupplierRefund = { id: string; reference: string; amount: string; reason: s
 type Period = { period_year: number; period_month: number; status: string };
 type Credit = { id: string; credit_number: string; invoice_number: string; grand_total: string; currency_code: string | null; refund_due: string; stock_returned: boolean; can_return_stock: boolean };
 type Invoice = { id: string; invoice_number: string; is_posted: boolean; status: string };
+type CreditableLine = {
+  order_line_id: string; sku: string; product_name: string; invoiced_quantity: string;
+  unit_price: string; creditable_quantity: string; selected: boolean; quantity: number;
+};
 type Order = { id: string; order_number: string; status: string };
 type Purchase = { purchase_order_id: string | null; purchase_order_number: string | null; purchase_order_status: string | null };
 type Fulfillment = { id: string; order_number: string; customer_name: string; delivery_method: string; address: string | null; phone: string | null; status: string; courier: string | null; tracking_code: string | null };
@@ -47,6 +51,11 @@ type Fulfillment = { id: string; order_number: string; customer_name: string; de
                   <option [ngValue]="row">{{ row.product_name }} · {{ row.location_code }} · físico esperado {{ row.on_hand }}</option>
                 }</select></label>
               <label>Unidades contadas<input name="countQty" [(ngModel)]="count.quantity" type="number" min="0" step="0.0001" required /></label>
+                @if (countedStock && +count.quantity > +countedStock.on_hand) {
+                  <label>Costo unitario de la diferencia positiva
+                    <input name="countUnitCost" [(ngModel)]="count.unitCost" type="number" min="0" step="0.0001" required />
+                  </label>
+                }
               <label>Referencia única<input name="countRef" [(ngModel)]="count.reference" maxlength="64" required /></label>
               <label>Motivo<input name="countNotes" [(ngModel)]="count.notes" maxlength="1000" required /></label>
               <button class="btn btn-primary" type="submit" [disabled]="busy || countForm.invalid">Confirmar conteo</button>
@@ -104,16 +113,31 @@ type Fulfillment = { id: string; order_number: string; customer_name: string; de
               <button class="btn btn-secondary" type="submit" [disabled]="busy || cancelForm.invalid">Cancelar y liberar reservas</button>
             </form>
           </article>
-          <article class="surface-card"><h2>Nota de crédito total</h2>
-            <p>Revierte una factura contabilizada. No anula un comprobante fiscal ni envía dinero. Solo marca devolución física si ya recibiste toda la mercancía despachada.</p>
+          <article class="surface-card"><h2>Nota de crédito parcial o total</h2>
+            <p>Revierte cantidades de una factura contabilizada. No anula un comprobante fiscal ni envía dinero. El retorno físico se registra solo por cantidades acreditadas y ya despachadas.</p>
             <form class="form-grid" #creditForm="ngForm" (ngSubmit)="creditInvoice()">
-              <label>Factura contabilizada<select name="creditInvoice" [(ngModel)]="credit.invoiceId" required><option value="">Selecciona</option>
+              <label>Factura contabilizada<select name="creditInvoice" [(ngModel)]="credit.invoiceId"
+                (ngModelChange)="loadCreditableLines($event)" required [disabled]="busy"><option value="">Selecciona</option>
                 @for (row of creditableInvoices; track row.id) { <option [value]="row.id">{{ row.invoice_number }}</option> }
               </select></label>
+              @if (credit.invoiceId && creditLines.length) {
+                <fieldset class="credit-lines"><legend>Cantidades por línea</legend>
+                  @for (line of creditLines; track line.order_line_id) {
+                    <div class="credit-line">
+                      <label><input type="checkbox" [name]="'credit-line-' + line.order_line_id" [(ngModel)]="line.selected" />
+                        {{ line.sku }} · {{ line.product_name }} · disponible para acreditar {{ line.creditable_quantity }}</label>
+                      @if (line.selected) {
+                        <label>Cantidad a acreditar<input [name]="'credit-quantity-' + line.order_line_id" type="number"
+                          [(ngModel)]="line.quantity" min="0.0001" [max]="+line.creditable_quantity" step="0.0001" required /></label>
+                      }
+                    </div>
+                  }
+                </fieldset>
+              } @else if (credit.invoiceId) { <p>No quedan cantidades disponibles para acreditar.</p> }
               <label>Motivo<input name="creditReason" [(ngModel)]="credit.reason" minlength="10" maxlength="1000" required /></label>
-              <label><input type="checkbox" name="returnStock" [(ngModel)]="credit.returnStock" /> Recibí físicamente todos los productos despachados.</label>
-              <label><input type="checkbox" name="creditConfirmed" [(ngModel)]="credit.confirmed" required /> Confirmo el crédito comercial total e irreversible.</label>
-              <button class="btn btn-secondary" type="submit" [disabled]="busy || creditForm.invalid">Emitir crédito y reversión contable</button>
+              <label><input type="checkbox" name="returnStock" [(ngModel)]="credit.returnStock" /> También recibí físicamente todas las cantidades seleccionadas y acreditadas.</label>
+              <label><input type="checkbox" name="creditConfirmed" [(ngModel)]="credit.confirmed" required /> Confirmo el crédito comercial seleccionado.</label>
+              <button class="btn btn-secondary" type="submit" [disabled]="busy || creditForm.invalid || !hasSelectedCreditLines">Emitir crédito y reversión contable</button>
             </form>
           </article>
         </div>
@@ -176,6 +200,8 @@ type Fulfillment = { id: string; order_number: string; customer_name: string; de
     .payables-table td:nth-child(4),
     .payables-table td:nth-child(5) { white-space: nowrap; }
     .payables-table td:nth-child(6) { min-width: 10rem; }
+    .credit-lines { display: grid; gap: .75rem; border: 1px solid var(--border); border-radius: .75rem; padding: 1rem; }
+    .credit-line { display: grid; gap: .5rem; grid-template-columns: minmax(0, 1fr) minmax(12rem, .5fr); }
   `],
 })
 export class OperationalControlsComponent {
@@ -184,6 +210,7 @@ export class OperationalControlsComponent {
   credits: Credit[] = []; invoices: Invoice[] = []; sales: Order[] = []; purchases: Purchase[] = [];
   cancel = { type: 'sales', id: '', reason: '', confirmed: false };
   credit = { invoiceId: '', reason: '', returnStock: false, confirmed: false };
+  creditLines: CreditableLine[] = [];
   refunds: Record<string, { reference: string; amount: number | null }> = {};
   stockReturns: Record<string, { reference: string; reason: string; confirmed: boolean }> = {};
   supplierRecovery: { orderId: string; reference: string; amount: number | null; reason: string; confirmed: boolean } =
@@ -193,7 +220,7 @@ export class OperationalControlsComponent {
   shipping: Record<string, { courier: string; trackingCode: string }> = {};
   selectedStock: Stock | null = null; countedStock: Stock | null = null; period: Period | null = null;
   transfer = { destinationCode: '', quantity: 1, reference: '', notes: '' };
-  count = { quantity: 0, reference: '', notes: '' };
+  count = { quantity: 0, unitCost: 0, reference: '', notes: '' };
   payments: Record<string, { reference: string; amount: number | null }> = {};
   reason = ''; busy = false; error = ''; message = '';
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
@@ -201,6 +228,7 @@ export class OperationalControlsComponent {
   get recoverablePayables() { return this.payables.filter(row => row.is_posted && +row.balance_due < 0); }
   get supplierRecoveryLimit() { return -Number(this.payables.find(row => row.id === this.supplierRecovery.orderId)?.balance_due ?? 0); }
   get creditableInvoices() { return this.invoices.filter(row => row.is_posted && row.status !== 'void'); }
+  get hasSelectedCreditLines() { return this.creditLines.some(line => line.selected); }
   get cancellableOrders(): Order[] {
     return this.cancel.type === 'sales' ? this.sales.filter(row => row.status === 'confirmed')
       : this.purchases.filter(row => row.purchase_order_id && row.purchase_order_status === 'ordered')
@@ -268,12 +296,33 @@ export class OperationalControlsComponent {
     });
   }
   async creditInvoice() {
-    if (!this.credit.confirmed) { this.error = 'Confirma la nota de crédito total.'; return; }
+    if (!this.credit.confirmed) { this.error = 'Confirma la nota de crédito seleccionada.'; return; }
+    const lines = this.creditLines.filter(line => line.selected);
+    if (!lines.length || lines.some(line => !Number.isFinite(line.quantity) || line.quantity <= 0 ||
+        line.quantity > Number(line.creditable_quantity))) {
+      this.error = 'Selecciona cantidades válidas que no excedan lo aún acreditable.'; return;
+    }
     await this.perform(async () => {
       await firstValueFrom(this.http.post(`${API_BASE_URL}/accounting/sales-invoices/${this.credit.invoiceId}/credit`,
-        { reason: this.credit.reason, returnStock: this.credit.returnStock }));
+        { reason: this.credit.reason, returnStock: this.credit.returnStock,
+          lines: lines.map(line => ({ orderLineId: line.order_line_id, quantity: Number(line.quantity) })) }));
       this.credit = { invoiceId: '', reason: '', returnStock: false, confirmed: false };
+      this.creditLines = [];
       this.message = 'Crédito emitido y asiento revertido. Revisa si corresponde devolver dinero.'; await this.load();
+    });
+  }
+  async loadCreditableLines(invoiceId: string) {
+    this.creditLines = [];
+    if (!invoiceId || this.busy) return;
+    const user = this.session.user();
+    await this.perform(async () => {
+      const result = await firstValueFrom(this.http.get<Omit<CreditableLine, 'selected' | 'quantity'>[]>(
+        `${API_BASE_URL}/accounting/sales-invoices/${invoiceId}/creditable-lines`));
+      if (this.session.user() === user && this.credit.invoiceId === invoiceId) {
+        this.creditLines = result.map(line => ({
+          ...line, selected: true, quantity: Number(line.creditable_quantity),
+        }));
+      }
     });
   }
   async refund(row: Credit) {
@@ -326,7 +375,13 @@ export class OperationalControlsComponent {
       const input = operation === 'transfer' ? this.transfer : this.count;
       const response = await firstValueFrom(this.http.post<{ replayed: boolean }>(
         `${API_BASE_URL}/inventory/${operation === 'transfer' ? 'transfers' : 'counts'}`,
-        { ...input, productId: row.product_id, locationCode: row.location_code, expectedOnHand: Number(row.on_hand) }));
+        {
+          ...input,
+          ...(operation === 'count' && Number(this.count.quantity) > Number(row.on_hand)
+            ? { unitCost: Number(this.count.unitCost) }
+            : {}),
+          productId: row.product_id, locationCode: row.location_code, expectedOnHand: Number(row.on_hand),
+        }));
       this.message = response.replayed ? 'Esta referencia ya se había aplicado. No se repitió el movimiento.' : 'Movimiento registrado en kardex.';
       await this.load();
     });

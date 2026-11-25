@@ -1,5 +1,6 @@
 import { OnModuleDestroy } from '@nestjs/common';
-import { type PoolClient, type QueryResultRow } from 'pg';
+import { type PoolClient, type PoolConfig, type QueryResultRow } from 'pg';
+export declare function databaseConfig(): PoolConfig;
 export declare class DatabaseService implements OnModuleDestroy {
     private readonly pool;
     constructor();

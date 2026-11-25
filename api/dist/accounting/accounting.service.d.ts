@@ -32,16 +32,31 @@ export declare class AccountingService {
         currencyCode: string;
         isActive: boolean;
     }>;
-    getFinancialStatements(user: AuthUser, asOfDate?: string): Promise<{
+    importBankStatement(user: AuthUser, bankAccountId: string, input: {
+        statementReference: string;
+        statementDate: string;
+        openingBalance: string;
+        closingBalance: string;
+        csv: string;
+    }): Promise<{
+        id: string;
+        importedLines: number;
+        replayed: boolean;
+    }>;
+    getFinancialStatements(user: AuthUser, asOfDate?: string, fromDate?: string, toDate?: string): Promise<{
+        basis: string;
         balanceSheet: {
-            asOfDate: string | null;
+            asOfDate: string;
             assets: number;
             liabilities: number;
             equity: number;
+            accumulatedNetIncome: number;
             totalLiabilitiesAndEquity: number;
             balancesMatch: boolean;
         };
         incomeStatement: {
+            fromDate: string;
+            toDate: string;
             revenue: number;
             expenses: number;
             netIncome: number;
@@ -83,22 +98,35 @@ export declare class AccountingService {
         }[];
         total: number;
     }>;
+    creditableInvoiceLines(user: AuthUser, invoiceId: string): Promise<import("pg").QueryResultRow[]>;
     creditInvoice(user: AuthUser, invoiceId: string, input: {
         reason: string;
         returnStock: boolean;
+        lines?: {
+            orderLineId: string;
+            quantity: number;
+        }[];
     }): Promise<{
         id: string;
         creditNumber: string;
+        subtotal: number;
+        taxTotal: number;
+        grandTotal: number;
+        fullyCredited: boolean;
     }>;
     listCredits(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     returnCreditedStock(user: AuthUser, id: string, input: {
         reference: string;
         reason: string;
+        lines?: {
+            creditNoteLineId: string;
+            quantity: number;
+        }[];
     }): Promise<{
         id: string;
         replayed: boolean;
     }>;
-    private restoreCreditedStock;
+    private restoreCreditedStockLines;
     refundCredit(user: AuthUser, id: string, input: RegisterInvoicePaymentInput): Promise<{
         id: string;
     }>;

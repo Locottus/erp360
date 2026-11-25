@@ -1,7 +1,99 @@
 # Bitácora de implementación y continuidad de ERP360
 
-Fecha de corte vigente: 2026-11-17 UTC y local UTC-6.
+Fecha de corte vigente: 2026-11-25 UTC y local UTC-6.
 Proyecto: `C:\angular\erp360\erp360-modernizado`.
+
+## Preparación operativa inicial — 25 de noviembre de 2026
+
+- `/health/ready` dejó de devolver éxito incondicional: usa un pool dedicado,
+  misma configuración de PostgreSQL, conexión/consulta acotadas y respuesta 503
+  redactada. `/health/live` permanece independiente. Ninguno certifica datos.
+- Compose prefiere loopback para publicaciones nuevas; no se recreó el
+  contenedor existente y su exposición previa debe revisarse por separado.
+- `.gitignore` protege archivos de entorno y respaldos futuros. Existe repositorio
+  Git anidado con cambios preexistentes y 31038 archivos de dependencias ya
+  rastreados; no se cambiaron índices ni se retiraron archivos rastreados.
+- En un contenedor efímero distinto se aplicaron 38 migraciones y pasaron 13 e2e
+  focalizados de salud/asistente. Una restauración con `pg_dump`/`pg_restore`
+  comparó 94 tablas y un registro sintético; no se ejecutaron scripts de
+  respaldo/restauración contra datos reales ni se midió RPO/RTO.
+- Otras 39 pruebas e2e pasaron en siete suites de contabilidad, recepciones,
+  inventario, identidad y seguridad. La primera ejecución mostró que el test
+  inventario/facturación preparaba las cuentas después de un despacho que las
+  requiere; se corrigió el fixture y se comprobó primero el rechazo por ausencia
+  de cuentas. No se modificó la lógica de despacho.
+- Pasaron 10 unitarias y build API. La primera ejecución del e2e del asistente
+  agotó el timeout por defecto; con 45 segundos se completó correctamente.
+  Un primer negativo de salud usó puerto 0, que el cliente puede convertir a
+  5432, y pudo intentar autenticación sintética contra la base local; no consultó
+  ni escribió datos. Se sustituyó por un servidor TCP aislado y volvió a pasar.
+- Manual de usuario regenerado como edición 3.22. No se efectuaron migraciones
+  ni escrituras en la base operativa y no se reiniciaron otros servicios.
+
+## Continuación asistente — 25 de noviembre de 2026
+
+Se mantuvieron cuotas en tokens, chat sin persistencia y selección explícita de
+diagnósticos. El modelo no obtiene herramientas ni permisos nuevos.
+
+- `purchase-order` agrega diagnóstico solo para administrador: líneas pendientes,
+  sobrerrecepción, estado, fecha UTC y existencia de asiento publicado, dentro
+  de la empresa autenticada. Si hay una recepción histórica sin líneas, los
+  recuentos se presentan como desconocidos. Se accede desde Compras/Recepciones.
+- `Comprobar conexión API` consulta liveness desde el navegador con timeout;
+  no comprueba base, APIs adicionales ni proveedor IA.
+- El adaptador DeepSeek se contrastó con su documentación oficial y se probó
+  con respuestas sintéticas; no se enviaron claves ni datos reales a proveedores.
+- Builds API/Angular correctos, 9 pruebas unitarias API y 39 Angular focalizadas
+  correctas. La prueba e2e no se ejecutó en ese corte porque Docker y PostgreSQL
+  no estaban disponibles; pasó posteriormente en la base aislada anterior.
+- El typecheck global de pruebas encontró un error anterior en
+  `test/core-management.e2e-spec.ts:219`; no se modificó ese archivo.
+- No se aplicaron migraciones, cambiaron datos ni reiniciaron servicios.
+
+## Continuación 0037 — cierre de contabilidad, inventario y compras
+
+Trabajo validado sin modificar la base operativa. Se creó/actualizó la migración
+`0037_operational_accounting_completion.sql` y se aplicó junto con `0001–0037`
+solo a la base PostgreSQL aislada `erp360_validation2` en puerto 55432.
+
+- Contabilidad: importación CSV genérica limitada, saldo inicial + créditos −
+  débitos, tamaño/fila/referencias validadas, idempotencia SHA-256 y líneas
+  pendientes. Conciliación manual empareja/reconcilia un pago de igual importe
+  o conserva diferencia; las decisiones quedan auditadas. No crea pagos ni se
+  conecta al banco.
+- Ventas: créditos parciales por renglón con límites acumulados por factura,
+  prorrateo de impuesto, reembolso separado de crédito y devolución física.
+  Los retornos restauran costo de despacho y reversan COGS; historiales sin
+  costo/línea trazable no se convierten en costo cero.
+- Proveedores: devoluciones consumen una o varias capas que conservan el
+  vínculo a recepción tras transferencias; pago y crédito siguen separados.
+- Compras: destino/fecha por línea prevalecen sobre plan general, las líneas
+  sin override siguen el plan general y el detalle muestra plan efectivo.
+  Solicitudes abiertas con el mismo destino/fecha se cuentan como advertencia,
+  nunca como bloqueo.
+- Angular agrega controles para crédito por línea, bancos/estados operativos y
+  planes de compras. Se corrigieron errores de compilación y mocks de pruebas;
+  una prueba detectó también que el grupo de planificación no respetaba los
+  cambios del plan general en líneas sin override.
+- Verificación final completada: build API y Angular, seis suites API focalizadas
+  (47 e2e) y batería Angular completa (99 pruebas). Manual fuente/Word 3.21 y
+  estado/backlog actualizados; DOCX comprobado en su estructura, tablas y
+  secciones de contabilidad, compras y costo.
+
+La migración 0037 NO se ha aplicado al contenedor/base operativa. No se reinició
+ni restauró el volumen ERP, no se cambió otra aplicación y no se hizo commit.
+El worktree contiene artefactos no versionados: inspeccionar y separar por lote,
+no agregarlo completo.
+
+### Pendientes para la siguiente etapa
+
+- Definir alcance contable y autorización antes de aplicar 0037 fuera de la
+  base aislada; respaldar, ensayar rollback/restore y conciliar históricos.
+- Completar devengo/cierre de remanentes parciales, aperturas oficiales,
+  política monetaria transversal, matching automático o integración bancaria
+  solo si el negocio lo autoriza. Los estados actuales no están certificados.
+- Revisar permisos, accesibilidad y escritura de formularios con operadores;
+  siguen fuera de alcance bancos reales, fiscal homologado y conexiones de pago.
 
 ## Tres bloques posteriores: planificación de compras y manual 3.19
 

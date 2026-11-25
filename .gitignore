@@ -1,2 +1,7 @@
 .env
-api/.env
+.env.*
+!.env.example
+/api/node_modules/
+/backups/
+*.backup
+*.dump

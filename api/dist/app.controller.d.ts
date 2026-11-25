@@ -1,7 +1,9 @@
 import { AppService } from './app.service';
+import { HealthService } from './health.service';
 export declare class AppController {
     private readonly appService;
-    constructor(appService: AppService);
+    private readonly health;
+    constructor(appService: AppService, health: HealthService);
     getHello(): string;
     getLiveness(): {
         status: string;
@@ -9,10 +11,10 @@ export declare class AppController {
         service: string;
         timestamp: string;
     };
-    getReadiness(): {
+    getReadiness(): Promise<{
         status: string;
         check: string;
         service: string;
         timestamp: string;
-    };
+    }>;
 }

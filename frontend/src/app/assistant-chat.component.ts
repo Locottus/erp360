@@ -75,10 +75,12 @@ type ChatMessage = { id: number; author: 'user' | 'assistant'; text: string; lin
         @if (error()) { <p class="chat-error" role="alert">{{ error() }}</p> }
         @if (loadingAI()) { <p class="chat-context" role="status">Consultando al proveedor de IA…</p> }
         @if (loadingDiagnostic()) { <p class="chat-context" role="status">Consultando herramientas de solo lectura…</p> }
+        @if (checkingApi()) { <p class="chat-context" role="status">Comprobando conexión con la API…</p> }
         <div class="chat-tools">
           @if (session.isAuthenticated()) {
             <button type="button" (click)="inspectScreen()" [disabled]="busy()">Analizar pantalla</button>
             @if (selectedTarget(); as target) { <button type="button" (click)="inspect(target)" [disabled]="busy()">Analizar registro seleccionado</button> }
+            <button type="button" (click)="checkApi()" [disabled]="busy()">Comprobar conexión API</button>
           }
           <button type="button" (click)="diagnose()" [disabled]="busy()">Diagnosticar último error</button>
           <button type="button" (click)="showContext.set(!showContext())" [attr.aria-expanded]="showContext()">Contexto seguro</button>
@@ -118,13 +120,14 @@ export class AssistantChatComponent {
   readonly navigating = signal(false);
   readonly loadingAI = signal(false);
   readonly loadingDiagnostic = signal(false);
+  readonly checkingApi = signal(false);
   readonly diagnosticReport = signal<DiagnosticReport | null>(null);
   readonly shareDiagnostic = signal(false);
   readonly usageLoading = signal(false);
   readonly usageError = signal('');
   readonly useAI = signal(false);
   readonly usage = signal<AiUsage | null>(null);
-  readonly busy = computed(() => this.navigating() || this.loadingAI() || this.loadingDiagnostic());
+  readonly busy = computed(() => this.navigating() || this.loadingAI() || this.loadingDiagnostic() || this.checkingApi());
   readonly providerLabel = computed(() => ({ openai: 'OpenAI', deepseek: 'DeepSeek', claude: 'Claude' })[this.usage()?.provider ?? 'deepseek']);
   readonly error = signal('');
   readonly showContext = signal(false);
@@ -165,7 +168,7 @@ export class AssistantChatComponent {
     this.router.events.pipe(takeUntilDestroyed()).subscribe(event => {
       if (event instanceof NavigationEnd) {
         if (this.route() !== event.urlAfterRedirects) {
-          this.contextRevision++; this.loadingDiagnostic.set(false); this.loadingAI.set(false);
+          this.contextRevision++; this.loadingDiagnostic.set(false); this.loadingAI.set(false); this.checkingApi.set(false);
           this.diagnosticReport.set(null); this.shareDiagnostic.set(false);
         }
         this.route.set(event.urlAfterRedirects);
@@ -188,6 +191,7 @@ export class AssistantChatComponent {
     this.identityRevision++;
     this.navigating.set(false);
     this.loadingAI.set(false);
+    this.checkingApi.set(false);
     this.loadingDiagnostic.set(false); this.diagnosticReport.set(null); this.shareDiagnostic.set(false);
     this.usageLoading.set(false);
     this.draft = '';
@@ -211,6 +215,20 @@ export class AssistantChatComponent {
   inspectScreen() {
     const area = this.context().screen === '/operations' ? new URLSearchParams(this.route().split('?')[1]).get('tab') : null;
     return this.inspect({ kind: 'screen', screen: this.context().screen, ...(area ? { area } : {}) });
+  }
+  async checkApi() {
+    if (this.busy() || !this.session.isAuthenticated()) return;
+    const revision = this.identityRevision, scope = this.contextRevision;
+    this.error.set(''); this.checkingApi.set(true);
+    try {
+      await this.api.checkApi();
+      if (revision !== this.identityRevision || scope !== this.contextRevision) return;
+      this.append({ author: 'assistant', text: 'La API respondió a la comprobación de conexión. Esto no comprueba la base de datos, otras APIs ni la causa de un error previo.', links: [] });
+    } catch {
+      if (revision === this.identityRevision && scope === this.contextRevision) {
+        this.error.set('No se pudo verificar la conexión con la API. Revisa la red y el servicio con soporte; esto no identifica la causa ni confirma el estado de la base de datos.');
+      }
+    } finally { if (revision === this.identityRevision && scope === this.contextRevision) this.checkingApi.set(false); }
   }
   async inspect(target: DiagnosticTarget) {
     if (this.busy() || !this.session.isAuthenticated()) return;

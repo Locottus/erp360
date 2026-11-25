@@ -24,6 +24,7 @@ const ecommerce_module_1 = require("./ecommerce/ecommerce.module");
 const dashboard_module_1 = require("./dashboard/dashboard.module");
 const saas_module_1 = require("./saas/saas.module");
 const assistant_module_1 = require("./assistant/assistant.module");
+const health_service_1 = require("./health.service");
 let AppModule = class AppModule {
 };
 exports.AppModule = AppModule;
@@ -46,7 +47,7 @@ exports.AppModule = AppModule = __decorate([
             assistant_module_1.AssistantModule,
         ],
         controllers: [app_controller_1.AppController],
-        providers: [app_service_1.AppService],
+        providers: [app_service_1.AppService, health_service_1.HealthService],
     })
 ], AppModule);
 //# sourceMappingURL=app.module.js.map

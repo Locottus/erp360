@@ -39,7 +39,7 @@ export declare class FiscalController {
     }>;
     submitFiscalDocument(request: AuthenticatedRequest, fiscalDocumentId: string): Promise<{
         id: string;
-        status: "rejected" | "submitted" | "error" | "accepted";
+        status: "error" | "rejected" | "submitted" | "accepted";
         providerTrackId: string;
         message: string;
     }>;

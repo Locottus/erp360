@@ -5,6 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
+import { AssistantContextService } from './core/assistant-context.service';
 
 type Purchase = { purchase_order_id: string | null; purchase_order_number: string | null; purchase_order_status: string | null; supplier_name: string; is_posted: boolean };
 type ReceiptDetails = {
@@ -42,6 +43,7 @@ type ReceiptDetails = {
         </article>
         @if (details; as data) {
           <article class="surface-card"><h2>{{ data.order.order_number }} · {{ statusLabel(data.order.status) }}</h2>
+            <button class="btn btn-secondary" type="button" (click)="assistant.select({kind: 'purchase-order', id: data.order.id}, '/receiving')">Analizar orden</button>
             <p>Moneda: {{ data.order.currency_code || 'No definida (histórico)' }}. El costo de cada lote se conserva desde la orden aprobada.</p>
             <p>Destino previsto: {{ data.order.destination_location_code || 'No definido' }}.
               Fecha comprometida UTC: {{ data.order.expected_receipt_date || 'No definida' }}.
@@ -116,6 +118,7 @@ type ReceiptDetails = {
 export class PurchaseReceivingComponent {
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
+  readonly assistant = inject(AssistantContextService);
   purchases: Purchase[] = [];
   details: ReceiptDetails | null = null;
   orderId = '';

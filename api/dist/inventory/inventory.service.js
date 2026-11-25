@@ -20,7 +20,9 @@ const purchase_plan_1 = require("../common/purchase-plan");
 const csv_1 = require("../common/csv");
 const document_sequence_1 = require("../common/document-sequence");
 const purchaseCommitmentCtes = `open_lines AS (
-  SELECT l.product_id,l.order_id,l.quantity,
+  SELECT l.id AS order_line_id,l.product_id,l.order_id,l.quantity,
+    COALESCE(l.destination_location_code,po.destination_location_code) AS destination_location_code,
+    COALESCE(l.expected_receipt_date,po.expected_receipt_date) AS expected_receipt_date,
     EXISTS (SELECT 1 FROM purchase_receipts pr
             WHERE pr.company_id=po.company_id AND pr.purchase_order_id=po.id AND pr.payload IS NULL) AS has_legacy,
     COALESCE((SELECT SUM(rl.quantity) FROM purchase_receipt_lines rl
@@ -123,23 +125,33 @@ let InventoryService = class InventoryService {
     async purchasePlanning(user, productId) {
         const result = await this.db.query(`WITH ${purchaseCommitmentCtes}, orders AS (
         SELECT po.id AS order_id,po.order_number,po.status,s.name AS supplier_name,
-          po.destination_location_code,po.expected_receipt_date::text,
-          COALESCE(po.expected_receipt_date < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,FALSE) AS is_receipt_overdue,
-          op.ordered::text AS ordered_quantity,op.received::text AS documented_received_quantity,
-          CASE WHEN op.requires_review THEN NULL ELSE op.pending::text END AS pending_quantity,
-          op.has_legacy,op.over_received
-        FROM order_products op JOIN purchase_orders po ON po.id=op.order_id AND po.company_id=$1
+          COALESCE(ol.destination_location_code,po.destination_location_code) AS destination_location_code,
+          COALESCE(ol.expected_receipt_date,po.expected_receipt_date)::text AS expected_receipt_date,
+          COALESCE(COALESCE(ol.expected_receipt_date,po.expected_receipt_date) < (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,FALSE) AS is_receipt_overdue,
+          SUM(ol.quantity)::text AS ordered_quantity,SUM(ol.received)::text AS documented_received_quantity,
+          CASE WHEN BOOL_OR(ol.has_legacy OR ol.received>ol.quantity) THEN NULL
+            ELSE SUM(ol.quantity-ol.received)::text END AS pending_quantity,
+          BOOL_OR(ol.has_legacy) AS has_legacy,BOOL_OR(ol.received>ol.quantity) AS over_received
+        FROM open_lines ol
+        JOIN purchase_orders po ON po.id=ol.order_id AND po.company_id=$1
         JOIN suppliers s ON s.id=po.supplier_id AND s.company_id=po.company_id
-        WHERE op.product_id=$2 AND (op.requires_review OR op.pending>0)
+        WHERE ol.product_id=$2
+        GROUP BY po.id,po.order_number,po.status,s.name,
+          COALESCE(ol.destination_location_code,po.destination_location_code),
+          COALESCE(ol.expected_receipt_date,po.expected_receipt_date)
+        HAVING BOOL_OR(ol.has_legacy OR ol.received>ol.quantity)
+          OR SUM(ol.quantity-ol.received)>0
       ), plan_groups AS (
         SELECT destination_location_code,expected_receipt_date,is_receipt_overdue,
           ROUND(COALESCE(SUM(pending_quantity::numeric),0),4)::text AS pending_quantity,
-          COUNT(pending_quantity)::integer AS pending_orders,
-          COUNT(*) FILTER (WHERE pending_quantity IS NULL)::integer AS review_orders
+          COUNT(DISTINCT order_id) FILTER (WHERE pending_quantity IS NOT NULL)::integer AS pending_orders,
+          COUNT(DISTINCT order_id) FILTER (WHERE pending_quantity IS NULL)::integer AS review_orders
         FROM orders GROUP BY destination_location_code,expected_receipt_date,is_receipt_overdue
-      ), requests AS (
+      ), request_groups AS (
         SELECT pr.id AS request_id,pr.request_number,pr.status,s.name AS supplier_name,
-          SUM(l.quantity)::text AS quantity,pr.destination_location_code,pr.expected_receipt_date::text,
+          SUM(l.quantity)::text AS quantity,
+          COALESCE(l.destination_location_code,pr.destination_location_code) AS destination_location_code,
+          COALESCE(l.expected_receipt_date,pr.expected_receipt_date)::text AS expected_receipt_date,
           CASE WHEN rp.request_id IS NULL THEN 'manual' ELSE 'replenishment' END AS origin,
           rp.location_code AS source_location_code
         FROM purchase_requests pr JOIN purchase_request_lines l ON l.request_id=pr.id
@@ -147,18 +159,25 @@ let InventoryService = class InventoryService {
         LEFT JOIN replenishment_purchase_proposals rp ON rp.request_id=pr.id AND rp.company_id=pr.company_id
         WHERE pr.company_id=$1 AND l.product_id=$2 AND pr.status IN ('draft','submitted')
           AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.request_id=pr.id AND po.company_id=pr.company_id)
-        GROUP BY pr.id,s.name,rp.request_id,rp.location_code
+        GROUP BY pr.id,s.name,rp.request_id,rp.location_code,
+          COALESCE(l.destination_location_code,pr.destination_location_code),
+          COALESCE(l.expected_receipt_date,pr.expected_receipt_date)
+      ), requests AS (
+        SELECT request_groups.*,
+          COUNT(*) OVER (PARTITION BY destination_location_code,expected_receipt_date)::integer
+            AS similar_open_request_count
+        FROM request_groups
       )
       SELECT jsonb_build_object(
         'product_id',p.id,'sku',p.sku,'product_name',p.name,
         'as_of',CURRENT_TIMESTAMP,'as_of_date',(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date,
         'pending_quantity',(SELECT ROUND(COALESCE(SUM(pending_quantity::numeric),0),4)::text FROM orders),
-        'pending_orders',(SELECT COUNT(pending_quantity)::integer FROM orders),
-        'review_orders',(SELECT COUNT(*)::integer FROM orders WHERE pending_quantity IS NULL),
+        'pending_orders',(SELECT COUNT(DISTINCT order_id)::integer FROM orders WHERE pending_quantity IS NOT NULL),
+        'review_orders',(SELECT COUNT(DISTINCT order_id)::integer FROM orders WHERE pending_quantity IS NULL),
         'groups',COALESCE((SELECT jsonb_agg(g ORDER BY destination_location_code NULLS LAST,expected_receipt_date NULLS LAST) FROM plan_groups g),'[]'::jsonb),
         'orders',COALESCE((SELECT jsonb_agg(o ORDER BY order_number,order_id) FROM orders o),'[]'::jsonb),
         'open_request_quantity',(SELECT ROUND(COALESCE(SUM(quantity::numeric),0),4)::text FROM requests),
-        'open_requests',(SELECT COUNT(*)::integer FROM requests),
+        'open_requests',(SELECT COUNT(DISTINCT request_id)::integer FROM requests),
         'requests',COALESCE((SELECT jsonb_agg(r ORDER BY request_number,request_id) FROM requests r),'[]'::jsonb)
       ) AS planning FROM products p WHERE p.company_id=$1 AND p.id=$2`, [user.companyId, productId]);
         if (!result.rows[0])
@@ -170,16 +189,16 @@ let InventoryService = class InventoryService {
         const headers = ['as_of_utc', 'reference_date_utc', 'sku', 'product', 'document_type', 'document_number',
             'status', 'supplier', 'origin', 'source_location', 'planned_destination', 'expected_receipt_date_utc',
             'ordered_quantity', 'documented_received_quantity', 'verifiable_pending_quantity', 'unapproved_request_quantity',
-            'legacy_receipt', 'over_received', 'excluded_from_pending'];
+            'legacy_receipt', 'over_received', 'excluded_from_pending', 'similar_open_request_count'];
         const prefix = [plan.as_of, plan.as_of_date, plan.sku, plan.product_name];
         const rows = [
             ...plan.orders.map(order => [...prefix, 'order', order.order_number, order.status, order.supplier_name,
                 '', '', order.destination_location_code, order.expected_receipt_date, order.ordered_quantity,
                 order.documented_received_quantity, order.pending_quantity, '', order.has_legacy, order.over_received,
-                order.pending_quantity === null]),
+                order.pending_quantity === null, '']),
             ...plan.requests.map(item => [...prefix, 'request', item.request_number, item.status, item.supplier_name,
                 item.origin, item.source_location_code, item.destination_location_code, item.expected_receipt_date,
-                '', '', '', item.quantity, '', '', '']),
+                '', '', '', item.quantity, '', '', '', item.similar_open_request_count]),
         ];
         return '\uFEFF' + [headers, ...rows].map(row => row.map(csv_1.csvCell).join(',')).join('\r\n') + '\r\n';
     }
@@ -219,21 +238,6 @@ let InventoryService = class InventoryService {
          WHERE rp.company_id=$1 AND rp.rule_id=$2 AND pr.status IN ('draft','submitted') LIMIT 1`, [user.companyId, rule.rows[0].id]);
             if (existing.rows[0])
                 throw new common_1.ConflictException('An open proposal already exists for this rule.');
-            const crossRequest = await client.query(`SELECT pr.id,pr.request_number
-         FROM purchase_requests pr
-         JOIN purchase_request_lines l ON l.request_id=pr.id
-         WHERE pr.company_id=$1
-           AND pr.supplier_id=$2
-           AND pr.status IN ('draft','submitted')
-           AND l.product_id=$3
-           AND NOT EXISTS (
-             SELECT 1 FROM purchase_orders po
-             WHERE po.request_id=pr.id AND po.company_id=pr.company_id
-           )
-         LIMIT 1`, [user.companyId, input.supplierId, productId]);
-            if (crossRequest.rows[0]) {
-                throw new common_1.ConflictException(`An open purchase request already exists for this product and supplier: ${crossRequest.rows[0].request_number}.`);
-            }
             const amount = await client.query(`SELECT ROUND($1::numeric*$2::numeric,4)::text AS total,
           ROUND($1::numeric*$2::numeric,4)<100000000000000::numeric AS valid`, [quantity, unitCost]);
             if (!amount.rows[0].valid)
@@ -380,12 +384,13 @@ let InventoryService = class InventoryService {
            FROM purchase_order_lines l WHERE l.id=$1`, [line.id, selected.quantity]);
                 if (!available.rows[0].valid)
                     throw new common_1.ConflictException('Receipt exceeds pending quantity. Refresh before retrying.');
-                await client.query(`INSERT INTO purchase_receipt_lines(receipt_id,order_line_id,location_code,quantity,unit_cost)
-           VALUES($1,$2,$3,$4,$5)`, [receipt.rows[0].id, line.id, location, selected.quantity, line.unit_cost]);
+                const receiptLine = await client.query(`INSERT INTO purchase_receipt_lines(receipt_id,order_line_id,location_code,quantity,unit_cost)
+           VALUES($1,$2,$3,$4,$5) RETURNING id`, [receipt.rows[0].id, line.id, location, selected.quantity, line.unit_cost]);
+                await this.createCostLot(client, user.companyId, line.product_id, location, selected.quantity, Number(line.unit_cost), 'purchase_receipt', receiptLine.rows[0].id, receiptLine.rows[0].id);
                 await this.ensureStockBalanceRow(client, user.companyId, line.product_id, location);
                 await client.query(`UPDATE inventory_stock_balances SET on_hand=on_hand+$1,updated_at=NOW()
            WHERE company_id=$2 AND product_id=$3 AND location_code=$4`, [selected.quantity, user.companyId, line.product_id, location]);
-                await this.insertMovement(client, user, line.product_id, location, 'purchase_receipt', selected.quantity, 'purchase_receipt', receipt.rows[0].id, document.reference);
+                await this.insertMovement(client, user, line.product_id, location, 'purchase_receipt', selected.quantity, 'purchase_receipt', receipt.rows[0].id, document.reference, Number(line.unit_cost), Number((Number(line.unit_cost) * selected.quantity).toFixed(4)), 'receipt', 'purchase_receipt');
             }
             const pending = await client.query(`SELECT EXISTS(SELECT 1 FROM purchase_order_lines l WHERE l.order_id=$1
          AND l.quantity>COALESCE((SELECT SUM(rl.quantity) FROM purchase_receipt_lines rl WHERE rl.order_line_id=l.id),0)) AS pending`, [id]);
@@ -426,12 +431,25 @@ let InventoryService = class InventoryService {
         if (input.notes !== undefined && (typeof input.notes !== 'string' || input.notes.length > 1000)) {
             throw new common_1.BadRequestException('notes must not exceed 1000 characters.');
         }
+        if (operation === 'count' && input.quantity > (input.expectedOnHand ?? 0) &&
+            (typeof input.unitCost !== 'number' || !Number.isFinite(input.unitCost) ||
+                input.unitCost < 0 || Math.round(input.unitCost * 10000) / 10000 !== input.unitCost)) {
+            throw new common_1.BadRequestException('A count increase requires an explicit unitCost with up to 4 decimals.');
+        }
+        if (operation === 'transfer' && input.unitCost !== undefined) {
+            throw new common_1.BadRequestException('A transfer preserves existing cost layers; unitCost is not accepted.');
+        }
+        if (operation === 'count' && input.quantity <= (input.expectedOnHand ?? 0) && input.unitCost !== undefined) {
+            throw new common_1.BadRequestException('unitCost is only accepted when a count increases inventory.');
+        }
         const source = this.normalizeLocation(input.locationCode);
         const destination = operation === 'transfer' ? this.normalizeLocation(input.destinationCode) : null;
         if (source === destination)
             throw new common_1.BadRequestException('Source and destination must differ.');
         const payload = { productId: input.productId, source, destination, quantity: input.quantity,
-            expectedOnHand: operation === 'count' ? input.expectedOnHand : null, notes: input.notes?.trim() ?? '' };
+            expectedOnHand: operation === 'count' ? input.expectedOnHand : null,
+            unitCost: operation === 'count' && input.quantity > (input.expectedOnHand ?? 0) ? input.unitCost : null,
+            notes: input.notes?.trim() ?? '' };
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
@@ -464,16 +482,29 @@ let InventoryService = class InventoryService {
          VALUES($1,$2,$3,$4,$5) RETURNING id`, [user.companyId, input.reference.trim(), operation, JSON.stringify(payload), user.sub]);
             const id = created.rows[0].id;
             if (operation === 'transfer') {
+                const costPolicy = await this.getInventoryCostPolicy(client, user.companyId);
+                const cost = await this.consumeCostLots(client, user.companyId, input.productId, source, input.quantity, costPolicy.policy);
                 await client.query(`UPDATE inventory_stock_balances SET on_hand=on_hand+CASE WHEN location_code=$1 THEN -$2::numeric ELSE $2::numeric END,updated_at=NOW()
            WHERE company_id=$3 AND product_id=$4 AND location_code=ANY($5::text[])`, [source, input.quantity, user.companyId, input.productId, locations]);
-                await this.insertMovement(client, user, input.productId, source, 'transfer_out', input.quantity, 'inventory_operation', id, payload.notes);
-                await this.insertMovement(client, user, input.productId, destination, 'transfer_in', input.quantity, 'inventory_operation', id, payload.notes);
+                await this.insertMovement(client, user, input.productId, source, 'transfer_out', input.quantity, 'inventory_operation', id, payload.notes, cost.unitCost, cost.totalCost, costPolicy.policy, cost.source);
+                await this.insertMovement(client, user, input.productId, destination, 'transfer_in', input.quantity, 'inventory_operation', id, payload.notes, cost.unitCost, cost.totalCost, costPolicy.policy, cost.source);
+                for (const layer of cost.allocations) {
+                    await this.createCostLot(client, user.companyId, input.productId, destination, layer.quantity, layer.unitCost, 'inventory_transfer', id, layer.purchaseReceiptLineId ?? undefined);
+                }
             }
             else {
                 const delta = Number((input.quantity - onHand).toFixed(4));
                 await client.query('UPDATE inventory_stock_balances SET on_hand=$1,updated_at=NOW() WHERE company_id=$2 AND product_id=$3 AND location_code=$4', [input.quantity, user.companyId, input.productId, source]);
-                if (delta !== 0)
-                    await this.insertMovement(client, user, input.productId, source, delta > 0 ? 'count_in' : 'count_out', Math.abs(delta), 'inventory_operation', id, payload.notes);
+                if (delta > 0) {
+                    const totalCost = Number((delta * input.unitCost).toFixed(4));
+                    await this.insertMovement(client, user, input.productId, source, 'count_in', delta, 'inventory_operation', id, payload.notes, input.unitCost, totalCost, 'explicit', 'count');
+                    await this.createCostLot(client, user.companyId, input.productId, source, delta, input.unitCost, 'inventory_count', id);
+                }
+                else if (delta < 0) {
+                    const costPolicy = await this.getInventoryCostPolicy(client, user.companyId);
+                    const cost = await this.consumeCostLots(client, user.companyId, input.productId, source, -delta, costPolicy.policy);
+                    await this.insertMovement(client, user, input.productId, source, 'count_out', -delta, 'inventory_operation', id, payload.notes, cost.unitCost, cost.totalCost, costPolicy.policy, cost.source);
+                }
             }
             await this.insertAudit(client, user, `inventory.${operation}`, id, { reference: input.reference.trim(), ...payload });
             await client.query('COMMIT');
@@ -516,7 +547,7 @@ let InventoryService = class InventoryService {
             if (alreadyApplied.rows[0]) {
                 throw new common_1.BadRequestException('Purchase order receipt was already applied to inventory.');
             }
-            const lines = await client.query(`SELECT product_id, quantity
+            const lines = await client.query(`SELECT id,product_id, quantity,unit_cost
          FROM purchase_order_lines
          WHERE order_id = $1`, [purchaseOrderId]);
             if (lines.rows.length === 0) {
@@ -527,7 +558,10 @@ let InventoryService = class InventoryService {
                 await client.query(`UPDATE inventory_stock_balances
            SET on_hand = on_hand + $1, updated_at = NOW()
            WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [line.quantity, user.companyId, location, line.product_id]);
-                await this.insertMovement(client, user, line.product_id, location, 'purchase_receipt', Number(line.quantity), 'purchase_order', purchaseOrderId, null);
+                const movement = await this.insertMovement(client, user, line.product_id, location, 'purchase_receipt', Number(line.quantity), 'purchase_order', purchaseOrderId, null);
+                await this.createCostLot(client, user.companyId, line.product_id, location, Number(line.quantity), Number(line.unit_cost), 'purchase_order', purchaseOrderId);
+                await client.query(`UPDATE inventory_movements SET unit_cost=$1,total_cost=$2,cost_policy='receipt',cost_source='purchase_order'
+           WHERE id=$3`, [line.unit_cost, (Number(line.quantity) * Number(line.unit_cost)).toFixed(4), movement.id]);
             }
             await this.insertAudit(client, user, 'inventory.purchase.receipt.apply', purchaseOrderId, {
                 lines: lines.rows.length,
@@ -567,7 +601,7 @@ let InventoryService = class InventoryService {
             if (activeReservation.rows[0]) {
                 throw new common_1.BadRequestException('Sales order already has inventory reservations processed.');
             }
-            const lines = await client.query(`SELECT product_id, quantity
+            const lines = await client.query(`SELECT id,product_id, quantity
          FROM sales_order_lines
          WHERE order_id = $1`, [salesOrderId]);
             if (lines.rows.length === 0) {
@@ -589,8 +623,9 @@ let InventoryService = class InventoryService {
                 await client.query(`UPDATE inventory_stock_balances
            SET reserved = reserved + $1, updated_at = NOW()
            WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [quantity, user.companyId, location, line.product_id]);
-                await client.query(`INSERT INTO inventory_reservations (company_id, sales_order_id, product_id, location_code, quantity, status)
-           VALUES ($1,$2,$3,$4,$5,'reserved')`, [user.companyId, salesOrderId, line.product_id, location, quantity]);
+                await client.query(`INSERT INTO inventory_reservations
+             (company_id,sales_order_id,sales_order_line_id,product_id,location_code,quantity,status)
+           VALUES ($1,$2,$3,$4,$5,$6,'reserved')`, [user.companyId, salesOrderId, line.id, line.product_id, location, quantity]);
                 await this.insertMovement(client, user, line.product_id, location, 'sale_reservation', quantity, 'sales_order', salesOrderId, null);
             }
             await this.insertAudit(client, user, 'inventory.sales.reservation.apply', salesOrderId, {
@@ -627,7 +662,7 @@ let InventoryService = class InventoryService {
             if (!['confirmed', 'invoiced'].includes(order.rows[0].status)) {
                 throw new common_1.BadRequestException('Sales order must be confirmed or invoiced.');
             }
-            const reservations = await client.query(`SELECT id, product_id, quantity, status, location_code
+            const reservations = await client.query(`SELECT id,sales_order_line_id,product_id,quantity,status,location_code
          FROM inventory_reservations
          WHERE company_id = $1 AND sales_order_id = $2 AND status = 'reserved'`, [user.companyId, salesOrderId]);
             if (reservations.rows.length === 0) {
@@ -652,7 +687,7 @@ let InventoryService = class InventoryService {
                 if (reserved < quantity || onHand < quantity) {
                     throw new common_1.BadRequestException(`Invalid stock state for product ${reservation.product_id}.`);
                 }
-                const cost = await this.resolveDispatchUnitCost(client, user.companyId, reservation.product_id, location, costPolicy, quantity);
+                const cost = await this.consumeCostLots(client, user.companyId, reservation.product_id, location, quantity, costPolicy);
                 await client.query(`UPDATE inventory_stock_balances
            SET on_hand = on_hand - $1, reserved = reserved - $1, updated_at = NOW()
            WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [quantity, user.companyId, location, reservation.product_id]);
@@ -660,6 +695,19 @@ let InventoryService = class InventoryService {
            SET status = 'fulfilled', updated_at = NOW()
            WHERE id = $1`, [reservation.id]);
                 const movement = await this.insertMovement(client, user, reservation.product_id, location, 'sale_dispatch', quantity, 'sales_order', salesOrderId, null, cost.unitCost, cost.totalCost, costPolicy, cost.source);
+                const dispatchCost = await client.query(`INSERT INTO inventory_dispatch_costs
+             (company_id,sales_order_id,sales_order_line_id,inventory_movement_id,product_id,location_code,quantity,unit_cost,total_cost,cost_policy,cost_revision,source)
+           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT(inventory_movement_id) DO NOTHING
+           RETURNING id`, [user.companyId, salesOrderId, reservation.sales_order_line_id, movement.id, reservation.product_id,
+                    location, quantity, cost.unitCost, cost.totalCost, costPolicy, costRevision, cost.source]);
+                if (!dispatchCost.rows[0])
+                    throw new common_1.ConflictException('Dispatch cost was already recorded.');
+                for (const layer of cost.allocations) {
+                    await client.query(`INSERT INTO inventory_dispatch_cost_layers
+               (company_id,dispatch_cost_id,cost_lot_id,quantity,unit_cost,total_cost)
+             VALUES($1,$2,$3,$4,$5,$6)`, [user.companyId, dispatchCost.rows[0].id, layer.costLotId, layer.quantity, layer.unitCost, layer.totalCost]);
+                }
                 dispatchCosts.push({
                     movementId: movement.id,
                     productId: reservation.product_id,
@@ -668,11 +716,6 @@ let InventoryService = class InventoryService {
                     unitCost: cost.unitCost,
                     totalCost: cost.totalCost,
                 });
-                await client.query(`INSERT INTO inventory_dispatch_costs
-             (company_id,sales_order_id,inventory_movement_id,product_id,location_code,quantity,unit_cost,total_cost,cost_policy,cost_revision,source)
-           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           ON CONFLICT(inventory_movement_id) DO NOTHING`, [user.companyId, salesOrderId, movement.id, reservation.product_id, location, quantity,
-                    cost.unitCost, cost.totalCost, costPolicy, costRevision, cost.source]);
             }
             const cogsTotal = dispatchCosts.reduce((sum, row) => sum + row.totalCost, 0);
             if (cogsTotal > 0) {
@@ -707,6 +750,14 @@ let InventoryService = class InventoryService {
         if (typeof input.quantity !== 'number' || !Number.isFinite(input.quantity) || input.quantity <= 0) {
             throw new common_1.BadRequestException('quantity must be greater than zero.');
         }
+        if (input.direction === 'in' &&
+            (typeof input.unitCost !== 'number' || !Number.isFinite(input.unitCost) ||
+                input.unitCost < 0 || Math.round(input.unitCost * 10000) / 10000 !== input.unitCost)) {
+            throw new common_1.BadRequestException('An inventory increase requires an explicit unitCost with up to 4 decimals.');
+        }
+        if (input.direction === 'out' && input.unitCost !== undefined) {
+            throw new common_1.BadRequestException('unitCost is calculated from the company inventory cost policy for an inventory decrease.');
+        }
         const location = this.normalizeLocation(input.locationCode);
         const client = await this.db.connect();
         try {
@@ -721,10 +772,22 @@ let InventoryService = class InventoryService {
                 throw new common_1.BadRequestException('Insufficient stock for adjustment out.');
             }
             const operation = input.direction === 'in' ? '+' : '-';
+            const costPolicy = await this.getInventoryCostPolicy(client, user.companyId);
+            const cost = input.direction === 'out'
+                ? await this.consumeCostLots(client, user.companyId, input.productId, location, input.quantity, costPolicy.policy)
+                : {
+                    unitCost: input.unitCost,
+                    totalCost: Math.round((input.unitCost * input.quantity + Number.EPSILON) * 10000) / 10000,
+                    source: 'explicit_adjustment',
+                    allocations: [],
+                };
             await client.query(`UPDATE inventory_stock_balances
          SET on_hand = on_hand ${operation} $1, updated_at = NOW()
          WHERE company_id = $2 AND location_code = $3 AND product_id = $4`, [input.quantity, user.companyId, location, input.productId]);
-            await this.insertMovement(client, user, input.productId, location, input.direction === 'in' ? 'adjustment_in' : 'adjustment_out', input.quantity, 'manual_adjustment', null, input.notes ?? null);
+            await this.insertMovement(client, user, input.productId, location, input.direction === 'in' ? 'adjustment_in' : 'adjustment_out', input.quantity, 'manual_adjustment', null, input.notes ?? null, cost.unitCost, cost.totalCost, input.direction === 'in' ? 'explicit' : costPolicy.policy, cost.source);
+            if (input.direction === 'in') {
+                await this.createCostLot(client, user.companyId, input.productId, location, input.quantity, input.unitCost, 'manual_adjustment');
+            }
             await this.insertAudit(client, user, 'inventory.adjustment.create', input.productId, {
                 direction: input.direction,
                 quantity: input.quantity,
@@ -957,42 +1020,68 @@ let InventoryService = class InventoryService {
        VALUES ($1,$2,$3)
        ON CONFLICT (company_id, location_code, product_id) DO NOTHING`, [companyId, locationCode, productId]);
     }
-    async resolveDispatchUnitCost(client, companyId, productId, locationCode, policy, quantity) {
-        const receiptBasis = await client.query(`SELECT COALESCE(SUM(rl.quantity),0)::text AS quantity,
-              COALESCE(SUM(rl.quantity*rl.unit_cost),0)::text AS cost
-       FROM purchase_receipt_lines rl
-       JOIN purchase_receipts pr ON pr.id=rl.receipt_id
-       JOIN purchase_order_lines l ON l.id=rl.order_line_id
-       WHERE pr.company_id=$1 AND l.product_id=$2 AND rl.location_code=$3`, [companyId, productId, locationCode]);
-        const returned = await client.query(`SELECT COALESCE(SUM(ret.quantity),0)::text AS quantity,
-              COALESCE(SUM(ret.subtotal),0)::text AS cost
-       FROM purchase_supplier_return_lines ret
-       JOIN purchase_supplier_returns r ON r.id=ret.return_id
-       JOIN purchase_receipt_lines rl ON rl.id=ret.receipt_line_id
-       JOIN purchase_order_lines l ON l.id=rl.order_line_id
-       WHERE r.company_id=$1 AND l.product_id=$2 AND rl.location_code=$3`, [companyId, productId, locationCode]);
-        const receiptQuantity = Number(receiptBasis.rows[0].quantity);
-        const receiptCost = Number(receiptBasis.rows[0].cost);
-        const returnedQuantity = Number(returned.rows[0].quantity);
-        const returnedCost = Number(returned.rows[0].cost);
-        const netQuantity = Math.max(0, receiptQuantity - returnedQuantity);
-        let unitCost = netQuantity > 0 ? Math.max(0, (receiptCost - returnedCost) / netQuantity) : 0;
-        let source = 'weighted_receipts_returns';
-        if (policy === 'fifo' && netQuantity > 0) {
-            const fifo = await client.query(`SELECT rl.unit_cost::text
-         FROM purchase_receipt_lines rl
-         JOIN purchase_receipts pr ON pr.id=rl.receipt_id
-         JOIN purchase_order_lines l ON l.id=rl.order_line_id
-         WHERE pr.company_id=$1 AND l.product_id=$2 AND rl.location_code=$3
-         ORDER BY pr.received_at,rl.id LIMIT 1`, [companyId, productId, locationCode]);
-            if (fifo.rows[0]) {
-                unitCost = Number(fifo.rows[0].unit_cost);
-                source = 'fifo_oldest_receipt';
-            }
+    async getInventoryCostPolicy(client, companyId) {
+        const result = await client.query('SELECT inventory_cost_policy,inventory_cost_policy_revision FROM companies WHERE id=$1', [companyId]);
+        return {
+            policy: result.rows[0]?.inventory_cost_policy ?? 'weighted_average',
+            revision: result.rows[0]?.inventory_cost_policy_revision ?? 0,
+        };
+    }
+    async createCostLot(client, companyId, productId, locationCode, quantity, unitCost, sourceType, sourceId, purchaseReceiptLineId) {
+        await client.query(`INSERT INTO inventory_cost_lots
+         (company_id,product_id,location_code,purchase_receipt_line_id,quantity_remaining,unit_cost,source_at,source_type,source_id)
+       VALUES($1,$2,$3,$4,$5,$6,NOW(),$7,$8)`, [companyId, productId, locationCode, purchaseReceiptLineId ?? null, quantity,
+            unitCost.toFixed(4), sourceType, sourceId ?? null]);
+    }
+    async consumeCostLots(client, companyId, productId, locationCode, quantity, policy) {
+        const lots = await client.query(`SELECT id,purchase_receipt_line_id,quantity_remaining::text,unit_cost::text
+       FROM inventory_cost_lots
+       WHERE company_id=$1 AND product_id=$2 AND location_code=$3 AND quantity_remaining>0
+       ORDER BY source_at,id
+       FOR UPDATE`, [companyId, productId, locationCode]);
+        const available = lots.rows.reduce((sum, lot) => sum + Number(lot.quantity_remaining), 0);
+        if (available + 0.00005 < quantity) {
+            throw new common_1.BadRequestException('Insufficient costed inventory. Reconcile this location balance before dispatching or reducing stock.');
         }
-        unitCost = Math.round((unitCost + Number.EPSILON) * 10000) / 10000;
-        const totalCost = Math.round((unitCost * quantity + Number.EPSILON) * 10000) / 10000;
-        return { unitCost, totalCost, source };
+        const value = lots.rows.reduce((sum, lot) => sum + Number(lot.quantity_remaining) * Number(lot.unit_cost), 0);
+        const average = Math.round((value / available + Number.EPSILON) * 10000) / 10000;
+        let remaining = quantity;
+        let allocatedValue = 0;
+        const allocations = [];
+        for (let index = 0; index < lots.rows.length && remaining > 0; index++) {
+            const lot = lots.rows[index];
+            const lotQuantity = Number(lot.quantity_remaining);
+            const proportional = policy === 'weighted_average' && index < lots.rows.length - 1
+                ? Math.round((quantity * lotQuantity / available + Number.EPSILON) * 10000) / 10000
+                : remaining;
+            const consumed = Math.min(lotQuantity, remaining, proportional);
+            if (consumed <= 0)
+                continue;
+            const unitCost = policy === 'weighted_average' ? average : Number(lot.unit_cost);
+            const totalCost = Math.round((consumed * unitCost + Number.EPSILON) * 10000) / 10000;
+            allocations.push({
+                costLotId: lot.id,
+                purchaseReceiptLineId: lot.purchase_receipt_line_id,
+                quantity: consumed,
+                unitCost,
+                totalCost,
+            });
+            remaining = Math.round((remaining - consumed + Number.EPSILON) * 10000) / 10000;
+            allocatedValue += totalCost;
+            await client.query(`UPDATE inventory_cost_lots SET quantity_remaining=quantity_remaining-$1
+         WHERE id=$2 AND company_id=$3 AND quantity_remaining >= $1`, [consumed, lot.id, companyId]);
+        }
+        if (remaining > 0.00005) {
+            throw new common_1.BadRequestException('Cost layers do not cover the inventory quantity. Reconcile before continuing.');
+        }
+        const totalCost = Math.round((allocatedValue + Number.EPSILON) * 10000) / 10000;
+        const unitCost = Math.round((totalCost / quantity + Number.EPSILON) * 10000) / 10000;
+        return {
+            unitCost,
+            totalCost,
+            source: policy === 'fifo' ? 'fifo_cost_lots' : 'weighted_average_cost_lots',
+            allocations,
+        };
     }
     async postSaleDispatchCogs(client, user, salesOrderId, cogsTotal, costPolicy, costRevision) {
         const existing = await client.query(`SELECT id FROM accounting_journal_entries

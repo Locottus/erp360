@@ -14,6 +14,18 @@ type Ledger = {
     source_type: string; source_id: string | null; debit: string; credit: string; running_balance: string }[];
   total: number; page: number; pageSize: number; fromDate: string; toDate: string;
 };
+type BankAccount = { id: string; code: string; bank_name: string; currency_code: string; is_active: boolean };
+type BankLine = {
+  id: string; reference: string; line_type: 'debit' | 'credit'; amount: string; booked_at: string;
+  counterpart_reference: string | null; reconciliation_status: string; statement_reference: string;
+  bank_account_code: string; bank_name: string;
+};
+type FinancialStatements = {
+  basis: string;
+  balanceSheet: { asOfDate: string; assets: number; liabilities: number; equity: number;
+    accumulatedNetIncome: number; totalLiabilitiesAndEquity: number; balancesMatch: boolean };
+  incomeStatement: { fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number };
+};
 
 @Component({
   selector: 'app-accounting', standalone: true, imports: [CommonModule, FormsModule],
@@ -22,6 +34,7 @@ type Ledger = {
       <header class="page-header"><p class="eyebrow">CONTABILIDAD</p><h1>Libro mayor</h1>
         <p>Rastrea asientos contabilizados por cuenta, con saldo anterior, movimientos y saldo de cierre.</p></header>
       @if (error) { <p class="status status-error" role="alert">{{ error }}</p> }
+      @if (message) { <p class="status status-success" role="status">{{ message }}</p> }
       @if (!isAdmin) { <p role="alert">Requiere administrador de empresa.</p> }
       @else {
         <article class="surface-card">
@@ -64,6 +77,63 @@ type Ledger = {
             </div>
           </article>
         }
+        <article class="surface-card"><h2>Importar extracto bancario</h2>
+          <p>Formato CSV genérico: <code>reference,line_type,amount,booked_at,counterpart_reference</code>. Las filas se importan como pendientes; no crean pagos ni los concilian automáticamente.</p>
+          <form class="toolbar-grid" #statementForm="ngForm" (ngSubmit)="importStatement()">
+            <label>Cuenta bancaria<select name="bankAccountId" [(ngModel)]="statement.bankAccountId" required [disabled]="busy">
+              <option value="">Selecciona</option>@for (account of bankAccounts; track account.id) {
+                <option [value]="account.id">{{ account.code }} · {{ account.bank_name }} · {{ account.currency_code }}</option>
+              }</select></label>
+            <label>Referencia del extracto<input name="statementReference" [(ngModel)]="statement.statementReference" maxlength="64" required [disabled]="busy" /></label>
+            <label>Fecha del extracto<input name="statementDate" type="date" [(ngModel)]="statement.statementDate" required [disabled]="busy" /></label>
+            <label>Saldo inicial<input name="openingBalance" type="number" min="0" step="0.0001" [(ngModel)]="statement.openingBalance" required [disabled]="busy" /></label>
+            <label>Saldo final<input name="closingBalance" type="number" min="0" step="0.0001" [(ngModel)]="statement.closingBalance" required [disabled]="busy" /></label>
+            <label>Archivo CSV<input type="file" accept=".csv,text/csv" (change)="readStatementFile($event)" [disabled]="busy" required /></label>
+            <p aria-live="polite">{{ statementFileName || 'Sin archivo seleccionado' }}</p>
+            <button type="submit" class="btn btn-primary" [disabled]="busy || statementForm.invalid || !statement.csv">Importar extracto</button>
+          </form>
+        </article>
+        <article class="surface-card"><h2>Conciliación manual de extractos</h2>
+          <p>Empareja una línea con un pago existente o registra una diferencia con motivo. La importación nunca altera los pagos.</p>
+          <button type="button" class="btn btn-secondary" (click)="loadBankLines()" [disabled]="busy">Actualizar líneas bancarias</button>
+          <div class="table-scroll"><table class="table-list"><caption>Hasta 1000 líneas importadas, por fecha y referencia</caption>
+            <thead><tr><th>Extracto / referencia</th><th>Fecha / contraparte</th><th>Importe</th><th>Estado</th><th>Acción</th></tr></thead>
+            <tbody>@for (line of bankLines; track line.id) { <tr><th scope="row">{{ line.statement_reference }}<br>{{ line.reference }}</th>
+              <td>{{ line.booked_at | date:'short' }}<br>{{ line.counterpart_reference }}</td>
+              <td>{{ line.line_type }} · {{ line.amount }}</td><td>{{ line.reconciliation_status }}</td>
+              <td>@if (line.reconciliation_status !== 'reconciled') {
+                <form class="form-grid" #reconcileForm="ngForm" (ngSubmit)="reconcile(line)">
+                  <label>Resultado<select [name]="'reconcile-status-' + line.id" [(ngModel)]="reconciliation[line.id].status" required>
+                    <option value="matched">Emparejado</option><option value="reconciled">Reconciliado</option><option value="difference">Diferencia</option>
+                  </select></label>
+                  @if (reconciliation[line.id].status !== 'difference') {
+                    <label>UUID de pago existente<input [name]="'payment-' + line.id" [(ngModel)]="reconciliation[line.id].matchedPaymentId" required /></label>
+                  } @else {
+                    <label>Importe de diferencia<input [name]="'difference-' + line.id" type="number" min="0" step="0.0001"
+                      [(ngModel)]="reconciliation[line.id].differenceAmount" required /></label>
+                  }
+                  <label>Motivo<input [name]="'reason-' + line.id" [(ngModel)]="reconciliation[line.id].reason" minlength="10" maxlength="1000" required /></label>
+                  <button type="submit" class="btn btn-secondary" [disabled]="busy || reconcileForm.invalid">Guardar con auditoría</button>
+                </form>
+              } @else { Reconciliado }</td></tr>
+            } @empty { <tr><td colspan="5">No hay líneas bancarias importadas.</td></tr> }</tbody>
+          </table></div>
+        </article>
+        <article class="surface-card"><h2>Estados financieros operativos</h2>
+          <p>Vista interna no certificada, basada en asientos publicados; el resultado acumulado se incluye en el patrimonio para mostrar la ecuación contable.</p>
+          <form class="toolbar-grid" #statementReportForm="ngForm" (ngSubmit)="loadFinancialStatements()">
+            <label>Desde<input name="financialFrom" type="date" [(ngModel)]="statementReport.fromDate" required [disabled]="busy" /></label>
+            <label>Hasta<input name="financialTo" type="date" [(ngModel)]="statementReport.toDate" required [disabled]="busy" /></label>
+            <button type="submit" class="btn btn-primary" [disabled]="busy || statementReportForm.invalid">Consultar estados</button>
+          </form>
+          @if (financialStatements; as report) {
+            <h3>Situación financiera al {{ report.balanceSheet.asOfDate }}</h3>
+            <p>Activos {{ report.balanceSheet.assets }} · Pasivos {{ report.balanceSheet.liabilities }} · Patrimonio {{ report.balanceSheet.equity }}
+              · Resultado acumulado {{ report.balanceSheet.accumulatedNetIncome }} · Ecuación {{ report.balanceSheet.balancesMatch ? 'cuadrada' : 'no cuadrada' }}</p>
+            <h3>Resultados del {{ report.incomeStatement.fromDate }} al {{ report.incomeStatement.toDate }}</h3>
+            <p>Ingresos {{ report.incomeStatement.revenue }} · Gastos {{ report.incomeStatement.expenses }} · Resultado {{ report.incomeStatement.netIncome }}</p>
+          }
+        </article>
       }
     </section>
   `,
@@ -73,8 +143,17 @@ export class AccountingComponent {
   private readonly session = inject(SessionService);
   accounts: Account[] = [];
   ledger: Ledger | null = null;
+  bankAccounts: BankAccount[] = [];
+  bankLines: BankLine[] = [];
+  reconciliation: Record<string, { status: 'matched' | 'reconciled' | 'difference'; reason: string;
+    matchedPaymentId: string; differenceAmount: number | null }> = {};
+  financialStatements: FinancialStatements | null = null;
+  statementFileName = '';
+  statement = { bankAccountId: '', statementReference: '', statementDate: new Date().toISOString().slice(0, 10),
+    openingBalance: '0', closingBalance: '0', csv: '' };
+  statementReport = { fromDate: `${new Date().getFullYear()}-01-01`, toDate: new Date().toISOString().slice(0, 10) };
   filter = { accountCode: '', fromDate: '', toDate: '' };
-  busy = false; error = '';
+  busy = false; error = ''; message = '';
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   get pages() { return this.ledger ? Math.max(1, Math.ceil(this.ledger.total / this.ledger.pageSize)) : 1; }
   constructor() {
@@ -82,7 +161,12 @@ export class AccountingComponent {
       const identity = this.session.user();
       untracked(() => {
         const today = new Date().toISOString().slice(0, 10);
-        this.accounts = []; this.ledger = null;
+        this.accounts = []; this.ledger = null; this.bankAccounts = []; this.bankLines = [];
+        this.reconciliation = {}; this.financialStatements = null;
+        this.statement = { bankAccountId: '', statementReference: '', statementDate: new Date().toISOString().slice(0, 10),
+          openingBalance: '0', closingBalance: '0', csv: '' };
+        this.statementFileName = '';
+        this.statementReport = { fromDate: `${new Date().getFullYear()}-01-01`, toDate: new Date().toISOString().slice(0, 10) };
         this.filter = { accountCode: '', fromDate: `${today.slice(0, 7)}-01`, toDate: today };
         this.error = ''; this.busy = false;
         if (identity?.roles.includes('admin')) void this.loadAccounts();
@@ -94,12 +178,94 @@ export class AccountingComponent {
     const identity = this.session.user();
     this.busy = true; this.error = '';
     try {
-      const result = await firstValueFrom(this.http.get<Account[]>(`${API_BASE_URL}/accounting/accounts`));
-      if (identity === this.session.user()) this.accounts = result;
-    } catch { if (identity === this.session.user()) this.error = 'No se pudo cargar el plan de cuentas. Reintenta o comprueba tus permisos.'; }
+      const [accounts, bankAccounts, bankLines] = await Promise.all([
+        firstValueFrom(this.http.get<Account[]>(`${API_BASE_URL}/accounting/accounts`)),
+        firstValueFrom(this.http.get<BankAccount[]>(`${API_BASE_URL}/accounting/bank-accounts`)),
+        firstValueFrom(this.http.get<BankLine[]>(`${API_BASE_URL}/accounting/bank-reconciliation-lines`)),
+      ]);
+      if (identity === this.session.user()) {
+        this.accounts = accounts; this.bankAccounts = bankAccounts; this.bankLines = bankLines;
+        for (const line of bankLines) this.reconciliation[line.id] ??= {
+          status: 'matched', reason: '', matchedPaymentId: '', differenceAmount: null,
+        };
+      }
+    } catch { if (identity === this.session.user()) this.error = 'No se pudieron cargar cuentas contables y bancarias. Reintenta o comprueba tus permisos.'; }
     finally { if (identity === this.session.user()) this.busy = false; }
   }
   async search() { await this.loadLedger({ ...this.filter, page: 1 }); }
+  async readStatementFile(event: Event) {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    this.statement.csv = ''; this.statementFileName = '';
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      this.error = 'El CSV supera el límite de 1 MB.'; input.value = ''; return;
+    }
+    const identity = this.session.user();
+    try {
+      const csv = await file.text();
+      if (identity !== this.session.user()) return;
+      this.statement.csv = csv; this.statementFileName = file.name; this.error = '';
+    } catch {
+      if (identity === this.session.user()) this.error = 'No se pudo leer el CSV; selecciona el archivo nuevamente.';
+    } finally { input.value = ''; }
+  }
+  async importStatement() {
+    const input = { ...this.statement };
+    await this.perform(async () => {
+      const result = await firstValueFrom(this.http.post<{ replayed: boolean; importedLines: number }>(
+        `${API_BASE_URL}/accounting/bank-accounts/${input.bankAccountId}/statements/import`, input));
+      this.statement.statementReference = ''; this.statement.csv = ''; this.statementFileName = '';
+      this.message = result.replayed ? 'El extracto ya estaba importado; no se duplicaron líneas.' :
+        `Extracto importado: ${result.importedLines} líneas quedan pendientes de conciliación.`;
+      await this.loadBankData();
+    });
+  }
+  async loadBankLines() {
+    if (this.busy || !this.isAdmin) return;
+    await this.perform(() => this.loadBankData());
+  }
+  private async loadBankData() {
+    const identity = this.session.user();
+    const [accounts, lines] = await Promise.all([
+      firstValueFrom(this.http.get<BankAccount[]>(`${API_BASE_URL}/accounting/bank-accounts`)),
+      firstValueFrom(this.http.get<BankLine[]>(`${API_BASE_URL}/accounting/bank-reconciliation-lines`)),
+    ]);
+    if (identity !== this.session.user()) return;
+    this.bankAccounts = accounts; this.bankLines = lines;
+    for (const line of lines) this.reconciliation[line.id] ??= {
+      status: 'matched', reason: '', matchedPaymentId: '', differenceAmount: null,
+    };
+  }
+  async reconcile(line: BankLine) {
+    const input = this.reconciliation[line.id];
+    if (input.status !== 'difference' && !input.matchedPaymentId.trim()) {
+      this.error = 'Indica el UUID del pago existente para marcar la línea como emparejada o reconciliada.'; return;
+    }
+    await this.perform(async () => {
+      await firstValueFrom(this.http.post(`${API_BASE_URL}/accounting/bank-reconciliation-lines/${line.id}/reconcile`, {
+        status: input.status, reason: input.reason,
+        ...(input.status === 'difference' ? { differenceAmount: input.differenceAmount } : { matchedPaymentId: input.matchedPaymentId.trim() }),
+      }));
+      this.message = 'Estado bancario actualizado con motivo y auditoría.';
+      await this.loadBankData();
+    });
+  }
+  async loadFinancialStatements() {
+    if (this.statementReport.fromDate > this.statementReport.toDate) {
+      this.error = 'La fecha inicial no puede ser posterior a la fecha final.'; return;
+    }
+    if (this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.financialStatements = null;
+    try {
+      const report = await firstValueFrom(this.http.get<FinancialStatements>(
+        `${API_BASE_URL}/accounting/reports/financial-statements`, { params: this.statementReport }));
+      if (identity === this.session.user()) this.financialStatements = report;
+    } catch {
+      if (identity === this.session.user()) this.error = 'No se pudieron consultar los estados operativos; no se muestran valores sustitutos.';
+    } finally { if (identity === this.session.user()) this.busy = false; }
+  }
   async changePage(delta: number) {
     if (!this.ledger) return;
     const page = this.ledger.page + delta;
@@ -122,5 +288,19 @@ export class AccountingComponent {
       this.error = error instanceof HttpErrorResponse && error.status === 400
         ? 'Revisa la cuenta, el rango de fechas y la página.' : 'No se pudo consultar el libro mayor. No se muestran saldos como cero.';
     } finally { if (identity === this.session.user()) this.busy = false; }
+  }
+  private async perform(action: () => Promise<void>) {
+    if (this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = ''; this.message = '';
+    try { await action(); }
+    catch (error) {
+        if (this.session.user() !== identity) return;
+        this.error = error instanceof HttpErrorResponse && error.status === 409
+          ? 'El extracto, la referencia o el saldo cambió. Actualiza los datos antes de reintentar.'
+          : error instanceof HttpErrorResponse && error.status === 400
+            ? 'Revisa las columnas CSV, los importes, las fechas y el motivo de conciliación.'
+            : 'No se pudo completar la operación contable. Verifica el estado antes de reintentar.';
+    } finally { if (this.session.user() === identity) this.busy = false; }
   }
 }

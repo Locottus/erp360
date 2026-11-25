@@ -65,11 +65,11 @@ let CompaniesService = class CompaniesService {
          WHERE id=$1
          RETURNING inventory_cost_policy,inventory_cost_policy_revision`, [user.companyId, input.policy]);
             await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
-         VALUES($1,$2,'company.inventory_cost_policy.update','companies',$1,$3)`, [user.companyId, user.sub, JSON.stringify({
+         VALUES($1,$2,'company.inventory_cost_policy.update','companies',$4,$3)`, [user.companyId, user.sub, JSON.stringify({
                     before: before.rows[0],
                     after: updated.rows[0],
                     reason,
-                })]);
+                }), user.companyId]);
             await client.query('COMMIT');
             return { policy: updated.rows[0].inventory_cost_policy, revision: updated.rows[0].inventory_cost_policy_revision };
         }
