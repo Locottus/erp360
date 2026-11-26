@@ -6,7 +6,8 @@ import { firstValueFrom } from 'rxjs';
 import { API_BASE_URL } from './core/api';
 import { SessionService } from './core/session.service';
 
-type User = { id: string; email: string; full_name: string; is_active: boolean; roles: string[]; management_revision: number };
+type User = { id: string; email: string; full_name: string; is_active: boolean; roles: string[]; management_revision: number; mfa_enabled?: boolean };
+type RbacPermission = { code: string; resource: string; action: string; description: string };
 
 @Component({
   selector: 'app-users',
@@ -51,16 +52,42 @@ type User = { id: string; email: string; full_name: string; is_active: boolean; 
         </article>
         <article class="surface-card"><div class="header-with-action"><h2>Cuentas de la empresa</h2>
           <button type="button" class="btn btn-secondary" (click)="load()" [disabled]="busy">Actualizar</button></div>
+          <label>Motivo del restablecimiento MFA
+            <input name="mfaResetReason" [(ngModel)]="mfaResetReason" minlength="10" maxlength="1000" required />
+          </label>
           <div class="table-scroll"><table class="table-list"><caption>Sin contraseñas ni tokens recuperables</caption>
-            <thead><tr><th>Usuario</th><th>Roles</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Usuario</th><th>Roles</th><th>Estado</th><th>MFA</th><th>Acciones</th></tr></thead>
             <tbody>@for (user of users; track user.id) { <tr><th scope="row">{{ user.full_name }}<br>{{ user.email }}</th>
               <td>{{ user.roles.join(', ') }}</td><td>{{ user.is_active ? 'Activo' : 'Inactivo' }}</td>
+              <td>{{ user.mfa_enabled ? 'Activado' : 'Desactivado' }}</td>
               <td><div class="quick-actions">
                 <button class="btn btn-secondary" type="button" (click)="edit(user)" [disabled]="busy">Editar</button>
                 <button class="btn btn-secondary" type="button" (click)="revoke(user)" [disabled]="busy">Revocar sesiones</button>
                 <button class="btn btn-secondary" type="button" (click)="issueReset(user)" [disabled]="busy || !user.is_active">Recuperación</button>
+                <button class="btn btn-secondary" type="button" (click)="resetMfa(user)" [disabled]="busy || !user.is_active || !user.mfa_enabled || mfaResetReason.trim().length < 10">Restablecer MFA</button>
               </div></td></tr> }</tbody>
           </table></div>
+        </article>
+        <article class="surface-card">
+          <h2>Permisos extraordinarios de la empresa</h2>
+          <p class="muted">Los overrides se aplican sobre los roles globales. Denegar tiene prioridad sobre el permiso heredado.</p>
+          <label>Motivo del cambio<input [(ngModel)]="rbacReason" name="rbacReason" minlength="10" maxlength="1000" required /></label>
+          <div class="table-scroll"><table class="table-list">
+            <thead><tr><th>Permiso</th><th>Descripción</th><th>Efecto</th></tr></thead>
+            <tbody>
+              @for (permission of rbacPermissions; track permission.code) {
+                <tr><th scope="row">{{ permission.code }}</th><td>{{ permission.description }}</td>
+                  <td><select [ngModel]="overrideEffects[permission.code] || ''"
+                    (ngModelChange)="setOverride(permission.code, $event)">
+                    <option value="">Predeterminado del rol</option>
+                    <option value="grant">Otorgar</option>
+                    <option value="deny">Denegar</option>
+                  </select></td></tr>
+              }
+            </tbody>
+          </table></div>
+          <button type="button" class="btn btn-primary" (click)="saveRbac()"
+            [disabled]="busy || rbacReason.trim().length < 10">Guardar permisos</button>
         </article>
       }
     </section>
@@ -72,9 +99,13 @@ export class UsersComponent {
   readonly availableRoles = [{ code: 'admin', label: 'Administrador' }, { code: 'sales', label: 'Ventas' },
     { code: 'purchases', label: 'Compras' }, { code: 'employee', label: 'Consulta' }];
   users: User[] = [];
+  rbacPermissions: RbacPermission[] = [];
+  rbacRevision = 0;
+  rbacReason = '';
+  overrideEffects: Record<string, 'grant' | 'deny'> = {};
   form = { email: '', fullName: '', roles: ['employee'], isActive: true };
   editingId = ''; error = ''; message = ''; secret = ''; busy = false;
-  expectedRevision = 0; reason = '';
+  expectedRevision = 0; reason = ''; mfaResetReason = '';
   get isAdmin() { return this.session.user()?.roles.includes('admin') ?? false; }
   constructor() {
     effect(() => {
@@ -90,8 +121,41 @@ export class UsersComponent {
     if (!this.isAdmin) return;
     try {
       const users = await firstValueFrom(this.http.get<User[]>(`${API_BASE_URL}/auth/users`));
-      if (this.session.user() === user) this.users = users;
+      if (this.session.user() !== user) return;
+      const rbac = await firstValueFrom(this.http.get<{
+        revision: number;
+        permissions: RbacPermission[];
+        overrides: Array<{ permission_code: string; effect: 'grant' | 'deny' }>;
+      }>(`${API_BASE_URL}/auth/rbac`));
+      if (this.session.user() === user) {
+        this.users = users;
+        this.rbacPermissions = rbac.permissions;
+        this.rbacRevision = rbac.revision;
+        this.overrideEffects = {};
+        for (const override of rbac.overrides)
+          this.overrideEffects[override.permission_code] = override.effect;
+      }
     } catch { if (this.session.user() === user) this.error = 'No se pudieron cargar los usuarios.'; }
+  }
+  setOverride(code: string, effect: '' | 'grant' | 'deny') {
+    if (!effect) delete this.overrideEffects[code];
+    else this.overrideEffects = { ...this.overrideEffects, [code]: effect };
+  }
+  async saveRbac() {
+    if (this.busy || this.rbacReason.trim().length < 10) return;
+    await this.perform(async () => {
+      await firstValueFrom(this.http.patch(`${API_BASE_URL}/auth/rbac/overrides`, {
+        expectedRevision: this.rbacRevision,
+        reason: this.rbacReason,
+        overrides: Object.entries(this.overrideEffects).map(([permissionCode, effect]) => ({
+          permissionCode,
+          effect,
+        })),
+      }));
+      this.rbacReason = '';
+      await this.load();
+      return { clearForm: false };
+    });
   }
   toggleRole(code: string, checked: boolean) {
     this.form.roles = checked ? [...this.form.roles, code] : this.form.roles.filter(role => role !== code);
@@ -128,7 +192,23 @@ export class UsersComponent {
       return { secret: result.resetToken };
     });
   }
-  private async perform(action: () => Promise<{ secret?: string; logout?: boolean; clearForm?: boolean }>) {
+  async resetMfa(user: User) {
+    if (this.mfaResetReason.trim().length < 10) {
+      this.error = 'Indica un motivo de al menos 10 caracteres para restablecer MFA.';
+      return;
+    }
+    await this.perform(async () => {
+      await firstValueFrom(this.http.post(`${API_BASE_URL}/auth/users/${user.id}/reset-mfa`, {
+        expectedRevision: user.management_revision,
+        reason: this.mfaResetReason,
+      }));
+      this.mfaResetReason = '';
+      user.mfa_enabled = false;
+      user.management_revision++;
+      return { logout: user.id === this.session.user()?.id, reload: false };
+    });
+  }
+  private async perform(action: () => Promise<{ secret?: string; logout?: boolean; clearForm?: boolean; reload?: boolean }>) {
     if (this.busy || !this.isAdmin) return;
     const identity = this.session.user();
     this.busy = true; this.error = ''; this.message = ''; this.secret = '';
@@ -138,7 +218,7 @@ export class UsersComponent {
       if (result.logout) { this.session.logout(); return; }
       this.secret = result.secret ?? '';
       if (result.clearForm) this.resetForm();
-      await this.load();
+      if (result.reload !== false) await this.load();
       if (this.session.user() === identity && !this.error) this.message = 'Operación registrada.';
     }
     catch (error) {

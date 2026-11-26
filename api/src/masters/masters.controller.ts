@@ -1,6 +1,17 @@
-import { Body, Controller, Get, Post, Patch, Param, ParseUUIDPipe, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Param,
+  ParseUUIDPipe,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
+import { Permissions } from '../auth/permissions.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
 import type {
   CreateCustomerInput,
@@ -17,61 +28,90 @@ export class MastersController {
 
   @Patch(':kind/:id')
   @Roles('admin')
-  update(@Req() request: AuthenticatedRequest, @Param('kind') kind: string,
-    @Param('id', ParseUUIDPipe) id: string, @Body() input: unknown) {
+  @Permissions('masters.update')
+  update(
+    @Req() request: AuthenticatedRequest,
+    @Param('kind') kind: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: unknown,
+  ) {
     return this.mastersService.updateRecord(request.user, kind, id, input);
   }
 
   @Post(':kind/import')
   @Roles('admin')
-  import(@Req() request: AuthenticatedRequest, @Param('kind') kind: string,
-    @Body() body: { records: unknown }) {
+  @Permissions('masters.import')
+  import(
+    @Req() request: AuthenticatedRequest,
+    @Param('kind') kind: string,
+    @Body() body: { records: unknown },
+  ) {
     return this.mastersService.importRecords(request.user, kind, body.records);
   }
 
   @Get('customers')
   @Roles('admin', 'sales')
+  @Permissions('masters.customers.read')
   listCustomers(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listCustomers(request.user);
   }
 
   @Post('customers')
   @Roles('admin')
-  createCustomer(@Req() request: AuthenticatedRequest, @Body() body: CreateCustomerInput) {
+  @Permissions('masters.customers.create')
+  createCustomer(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateCustomerInput,
+  ) {
     return this.mastersService.createCustomer(request.user, body);
   }
 
   @Get('products')
+  @Permissions('masters.products.read')
   listProducts(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listProducts(request.user);
   }
 
   @Post('products')
   @Roles('admin')
-  createProduct(@Req() request: AuthenticatedRequest, @Body() body: CreateProductInput) {
+  @Permissions('masters.products.create')
+  createProduct(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateProductInput,
+  ) {
     return this.mastersService.createProduct(request.user, body);
   }
 
   @Get('suppliers')
   @Roles('admin', 'purchases')
+  @Permissions('masters.suppliers.read')
   listSuppliers(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listSuppliers(request.user);
   }
 
   @Post('suppliers')
   @Roles('admin')
-  createSupplier(@Req() request: AuthenticatedRequest, @Body() body: CreateSupplierInput) {
+  @Permissions('masters.suppliers.create')
+  createSupplier(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateSupplierInput,
+  ) {
     return this.mastersService.createSupplier(request.user, body);
   }
 
   @Get('tax-rates')
+  @Permissions('masters.tax-rates.read')
   listTaxRates(@Req() request: AuthenticatedRequest) {
     return this.mastersService.listTaxRates(request.user);
   }
 
   @Post('tax-rates')
   @Roles('admin')
-  createTaxRate(@Req() request: AuthenticatedRequest, @Body() body: CreateTaxRateInput) {
+  @Permissions('masters.tax-rates.create')
+  createTaxRate(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateTaxRateInput,
+  ) {
     return this.mastersService.createTaxRate(request.user, body);
   }
 }

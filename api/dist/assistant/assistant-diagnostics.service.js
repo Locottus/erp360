@@ -23,10 +23,17 @@ let AssistantDiagnosticsService = class AssistantDiagnosticsService {
     }
     async inspect(user, input) {
         const target = (0, assistant_inputs_1.diagnosticTarget)(input);
-        const allowed = target.kind === 'purchase-order' ? ['admin']
-            : target.kind === 'purchase-request' ? ['admin', 'purchases'] : ['admin', 'sales'];
-        if (target.kind !== 'stock' && target.kind !== 'screen' && !allowed.some(role => user.roles.includes(role))) {
-            throw new common_1.ForbiddenException('Tu rol no permite consultar este tipo de documento.');
+        const permissions = new Set(user.permissions ?? []);
+        const hasPermission = (permission) => permissions.has('*') || permissions.has(permission);
+        const required = target.kind === 'purchase-order' || target.kind === 'purchase-request'
+            ? 'purchases.read'
+            : target.kind === 'sales-order'
+                ? 'sales.read'
+                : 'inventory.read';
+        if (target.kind !== 'stock' &&
+            target.kind !== 'screen' &&
+            !hasPermission(required)) {
+            throw new common_1.ForbiddenException('Tu permiso no permite consultar este tipo de documento.');
         }
         const client = await this.db.connect();
         const report = {
@@ -41,7 +48,8 @@ let AssistantDiagnosticsService = class AssistantDiagnosticsService {
             await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
             await client.query("SET LOCAL statement_timeout = '3000ms'");
             this.evidence(report, 'Permisos de la sesión verificados por el servidor', {
-                canExecuteOperationalWrites: user.roles.includes('admin'),
+                canExecuteOperationalWrites: (user.permissions ?? []).includes('*') ||
+                    (user.permissions ?? []).includes('accounting.post'),
             });
             if (target.kind === 'screen')
                 await this.screen(client, user, target, report);
@@ -84,8 +92,23 @@ let AssistantDiagnosticsService = class AssistantDiagnosticsService {
     }
     async screen(client, user, target, report) {
         const area = (0, assistant_knowledge_1.diagnosticArea)(target), knowledge = assistant_knowledge_1.diagnosticKnowledge[area];
-        if (knowledge.roles.length && !knowledge.roles.some(role => user.roles.includes(role))) {
-            throw new common_1.ForbiddenException('Tu rol no permite consultar los datos de esta área.');
+        const permissions = new Set(user.permissions ?? []);
+        const hasPermission = (permission) => permissions.has('*') || permissions.has(permission);
+        const areaPermissions = {
+            sales: 'sales.read',
+            purchases: 'purchases.read',
+            receiving: 'purchases.confirm',
+            controls: 'inventory.write',
+            accounting: 'accounting.read',
+            people: 'hr.read',
+            users: 'identity.users.read',
+            ecommerce: 'ecommerce.manage',
+            portal: 'portal.manage',
+            fiscal: 'fiscal.read',
+        };
+        const required = areaPermissions[area];
+        if (required && !hasPermission(required)) {
+            throw new common_1.ForbiddenException('Tu permiso no permite consultar los datos de esta área.');
         }
         if (area === 'platform') {
             const membership = await client.query(`SELECT o.role FROM platform_saas_operators o
@@ -93,11 +116,15 @@ let AssistantDiagnosticsService = class AssistantDiagnosticsService {
             if (!membership.rows.length)
                 throw new common_1.ForbiddenException('Se requiere membresía SaaS activa.');
         }
-        const admin = user.roles.includes('admin');
+        const admin = permissions.has('*');
         let dataId;
         if (knowledge.query) {
             const parameterCount = knowledge.query.includes('$3') ? 3 : knowledge.query.includes('$2') ? 2 : 1;
-            const params = [user.companyId, admin || user.roles.includes('sales'), admin || user.roles.includes('purchases')];
+            const params = [
+                user.companyId,
+                admin || permissions.has('sales.read'),
+                admin || permissions.has('purchases.read'),
+            ];
             const result = await client.query(knowledge.query, params.slice(0, parameterCount));
             if (!result.rows[0])
                 throw new common_1.NotFoundException('No hay contexto de empresa disponible.');

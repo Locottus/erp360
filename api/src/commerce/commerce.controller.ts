@@ -1,8 +1,24 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards, StreamableFile } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+  StreamableFile,
+} from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
+import { Permissions } from '../auth/permissions.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
-import type { CreatePurchaseRequestInput, CreateQuotationInput, RevisePurchaseDeliveryPlanInput } from './commerce.types';
+import type {
+  CreatePurchaseRequestInput,
+  CreateQuotationInput,
+  RevisePurchaseDeliveryPlanInput,
+} from './commerce.types';
 import { CommerceService } from './commerce.service';
 
 @Controller('commerce')
@@ -12,145 +28,250 @@ export class CommerceController {
 
   @Post('sales/orders/:id/cancel')
   @Roles('admin')
-  cancelSale(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() input: { reason: string }) {
-    return this.commerceService.cancelOrder(request.user, id, 'sales', input.reason);
+  @Permissions('sales.confirm')
+  cancelSale(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string },
+  ) {
+    return this.commerceService.cancelOrder(
+      request.user,
+      id,
+      'sales',
+      input.reason,
+    );
   }
 
   @Post('purchases/orders/:id/cancel')
   @Roles('admin')
-  cancelPurchase(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string, @Body() input: { reason: string }) {
-    return this.commerceService.cancelOrder(request.user, id, 'purchase', input.reason);
+  @Permissions('purchases.confirm')
+  cancelPurchase(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string },
+  ) {
+    return this.commerceService.cancelOrder(
+      request.user,
+      id,
+      'purchase',
+      input.reason,
+    );
   }
 
   @Get('sales/invoices/:id/pdf')
   @Roles('admin', 'sales')
-  async invoicePdf(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
-    return new StreamableFile(await this.commerceService.invoicePdf(request.user, id),
-      { type: 'application/pdf', disposition: 'attachment; filename="factura-comercial.pdf"' });
+  @Permissions('sales.read')
+  async invoicePdf(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return new StreamableFile(
+      await this.commerceService.invoicePdf(request.user, id),
+      {
+        type: 'application/pdf',
+        disposition: 'attachment; filename="factura-comercial.pdf"',
+      },
+    );
   }
 
   @Post('sales/quotations')
   @Roles('admin')
-  createQuotation(@Req() request: AuthenticatedRequest, @Body() body: CreateQuotationInput) {
+  @Permissions('sales.create')
+  createQuotation(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateQuotationInput,
+  ) {
     return this.commerceService.createQuotation(request.user, body);
   }
 
   @Get('sales/quotations')
   @Roles('admin', 'sales')
+  @Permissions('sales.read')
   listQuotations(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listQuotations(request.user);
   }
 
   @Get('sales/orders')
   @Roles('admin', 'sales')
+  @Permissions('sales.read')
   listSalesOrders(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listSalesOrders(request.user);
   }
 
   @Get('sales/invoices')
   @Roles('admin', 'sales')
+  @Permissions('sales.read')
   listSalesInvoices(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listSalesInvoices(request.user);
   }
 
   @Post('sales/quotations/:id/confirm')
   @Roles('admin')
+  @Permissions('sales.confirm')
   confirmQuotation(
     @Req() request: AuthenticatedRequest,
     @Param('id') quotationId: string,
     @Body() body: { orderNumber: string },
   ) {
-    return this.commerceService.confirmQuotation(request.user, quotationId, body?.orderNumber);
+    return this.commerceService.confirmQuotation(
+      request.user,
+      quotationId,
+      body?.orderNumber,
+    );
   }
 
   @Patch('sales/quotations/:id/validity')
   @Roles('admin')
+  @Permissions('sales.confirm')
   reviseQuotationValidity(
     @Req() request: AuthenticatedRequest,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() body: { validUntil: string | null; expectedRevision: number; reason: string },
+    @Body()
+    body: {
+      validUntil: string | null;
+      expectedRevision: number;
+      reason: string;
+    },
   ) {
     return this.commerceService.reviseQuotationValidity(request.user, id, body);
   }
 
   @Post('sales/orders/:id/invoice')
   @Roles('admin')
+  @Permissions('sales.confirm')
   issueInvoice(
     @Req() request: AuthenticatedRequest,
     @Param('id') salesOrderId: string,
     @Body() body: { invoiceNumber: string },
   ) {
-    return this.commerceService.issueInvoice(request.user, salesOrderId, body?.invoiceNumber);
+    return this.commerceService.issueInvoice(
+      request.user,
+      salesOrderId,
+      body?.invoiceNumber,
+    );
   }
 
   @Post('purchases/requests')
   @Roles('admin')
-  createPurchaseRequest(@Req() request: AuthenticatedRequest, @Body() body: CreatePurchaseRequestInput) {
+  @Permissions('purchases.create')
+  createPurchaseRequest(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreatePurchaseRequestInput,
+  ) {
     return this.commerceService.createPurchaseRequest(request.user, body);
   }
 
   @Get('purchases/requests')
   @Roles('admin', 'purchases')
+  @Permissions('purchases.read')
   listPurchaseRequests(@Req() request: AuthenticatedRequest) {
     return this.commerceService.listPurchaseRequests(request.user);
   }
 
   @Get('purchases/requests/:id')
   @Roles('admin', 'purchases')
-  purchaseRequestDetails(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  @Permissions('purchases.read')
+  purchaseRequestDetails(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.commerceService.purchaseRequestDetails(request.user, id);
   }
 
   @Get('purchases/requests/:id/delivery-plan')
   @Roles('admin', 'purchases')
-  purchaseRequestDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
-    return this.commerceService.purchaseDeliveryPlan(request.user, id, 'request');
+  @Permissions('purchases.read')
+  purchaseRequestDeliveryPlan(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.commerceService.purchaseDeliveryPlan(
+      request.user,
+      id,
+      'request',
+    );
   }
 
   @Get('purchases/orders/:id/delivery-plan')
   @Roles('admin', 'purchases')
-  purchaseOrderDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string) {
+  @Permissions('purchases.read')
+  purchaseOrderDeliveryPlan(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
     return this.commerceService.purchaseDeliveryPlan(request.user, id, 'order');
   }
 
   @Patch('purchases/requests/:id/delivery-plan')
   @Roles('admin')
-  revisePurchaseRequestDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() input: RevisePurchaseDeliveryPlanInput) {
-    return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'request', input);
+  @Permissions('purchases.confirm')
+  revisePurchaseRequestDeliveryPlan(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: RevisePurchaseDeliveryPlanInput,
+  ) {
+    return this.commerceService.revisePurchaseDeliveryPlan(
+      request.user,
+      id,
+      'request',
+      input,
+    );
   }
 
   @Patch('purchases/orders/:id/delivery-plan')
   @Roles('admin')
-  revisePurchaseOrderDeliveryPlan(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() input: RevisePurchaseDeliveryPlanInput) {
-    return this.commerceService.revisePurchaseDeliveryPlan(request.user, id, 'order', input);
+  @Permissions('purchases.confirm')
+  revisePurchaseOrderDeliveryPlan(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: RevisePurchaseDeliveryPlanInput,
+  ) {
+    return this.commerceService.revisePurchaseDeliveryPlan(
+      request.user,
+      id,
+      'order',
+      input,
+    );
   }
 
   @Post('purchases/requests/:id/reject')
   @Roles('admin')
-  rejectPurchaseRequest(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() input: { reason: string }) {
+  @Permissions('purchases.confirm')
+  rejectPurchaseRequest(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: { reason: string },
+  ) {
     return this.commerceService.rejectPurchaseRequest(request.user, id, input);
   }
 
   @Post('purchases/requests/:id/approve')
   @Roles('admin')
+  @Permissions('purchases.confirm')
   approvePurchaseRequest(
     @Req() request: AuthenticatedRequest,
     @Param('id') requestId: string,
     @Body() body: { orderNumber: string },
   ) {
-    return this.commerceService.approvePurchaseRequest(request.user, requestId, body?.orderNumber);
+    return this.commerceService.approvePurchaseRequest(
+      request.user,
+      requestId,
+      body?.orderNumber,
+    );
   }
 
   @Post('purchases/orders/:id/receive')
   @Roles('admin')
+  @Permissions('purchases.confirm')
   receivePurchaseOrder(
     @Req() request: AuthenticatedRequest,
     @Param('id') purchaseOrderId: string,
     @Body() body: { receiptNumber: string },
   ) {
-    return this.commerceService.receivePurchaseOrder(request.user, purchaseOrderId, body?.receiptNumber);
+    return this.commerceService.receivePurchaseOrder(
+      request.user,
+      purchaseOrderId,
+      body?.receiptNumber,
+    );
   }
 }

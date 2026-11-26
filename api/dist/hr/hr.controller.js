@@ -16,6 +16,7 @@ exports.HrController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const hr_service_1 = require("./hr.service");
 let HrController = class HrController {
     hrService;
@@ -41,7 +42,10 @@ let HrController = class HrController {
         return this.hrService.listEmployees(request.user, { page, pageSize });
     }
     listAttendance(request, status, page, pageSize) {
-        return this.hrService.listAttendance(request.user, status, { page, pageSize });
+        return this.hrService.listAttendance(request.user, status, {
+            page,
+            pageSize,
+        });
     }
     checkIn(request, body) {
         return this.hrService.checkIn(request.user, body);
@@ -69,6 +73,7 @@ exports.HrController = HrController;
 __decorate([
     (0, common_1.Post)('employees/:id/account-binding'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -79,6 +84,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('employees/:id/account-binding/disable'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -89,6 +95,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('employees/:id'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -99,6 +106,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('attendance/:id'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -109,6 +117,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('employees'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -118,6 +127,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('employees'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('page')),
     __param(2, (0, common_1.Query)('pageSize')),
@@ -128,6 +138,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('attendance'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('status')),
     __param(2, (0, common_1.Query)('page')),
@@ -139,6 +150,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('attendance/check-in'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -148,6 +160,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('attendance/check-out'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -157,6 +170,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('leave-requests'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -166,6 +180,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('leave-requests/:id/approve'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -176,6 +191,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('leave-requests/:id/reject'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -186,6 +202,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('leave-requests'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('page')),
     __param(2, (0, common_1.Query)('pageSize')),
@@ -196,6 +213,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('leave-requests/:id/cancel'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('hr.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),

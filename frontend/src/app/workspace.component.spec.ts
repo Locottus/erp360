@@ -45,7 +45,12 @@ describe('Workspace dashboard', () => {
         provideRouter([]),
         {
           provide: SessionService,
-          useValue: { user, company: signal(null), isAuthenticated: () => user() !== null },
+          useValue: {
+            user,
+            company: signal(null),
+            isAuthenticated: () => user() !== null,
+            logout: () => user.set(null),
+          },
         },
       ],
     });
@@ -139,5 +144,42 @@ describe('Workspace dashboard', () => {
     expect(
       fixture.componentInstance.widgets.some((widget) => widget.key === 'portalTokens'),
     ).toBeFalse();
+  });
+
+  it('shows MFA status and completes setup with the first TOTP code', async () => {
+    user.set(admin);
+    const fixture = TestBed.createComponent(WorkspaceComponent);
+    fixture.detectChanges();
+    http.expectOne(`${API_BASE_URL}/dashboard/overview?period=day`).flush(payload);
+    await fixture.whenStable();
+
+    const status = fixture.componentInstance.loadMfaStatus();
+    http.expectOne(`${API_BASE_URL}/auth/mfa/status`).flush({
+      enabled: false,
+      configured: false,
+    });
+    await status;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('MFA disponible pero desactivado');
+
+    const setup = fixture.componentInstance.startMfaSetup();
+    http.expectOne(`${API_BASE_URL}/auth/mfa/setup`).flush({
+      enabled: false,
+      configured: true,
+      secret: 'JBSWY3DPEHPK3PXP',
+      otpauthUri: 'otpauth://totp/ERP360:a@example.test?secret=JBSWY3DPEHPK3PXP',
+    });
+    await setup;
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('JBSWY3DPEHPK3PXP');
+
+    fixture.componentInstance.mfaVerifyCode = '123456';
+    const verify = fixture.componentInstance.verifyMfa();
+    const request = http.expectOne(`${API_BASE_URL}/auth/mfa/verify`);
+    expect(request.request.body).toEqual({ code: '123456' });
+    request.flush({ enabled: true });
+    await verify;
+    fixture.detectChanges();
+    expect(user()).toBeNull();
   });
 });

@@ -150,6 +150,7 @@ export declare class InventoryService {
     private getInventoryCostPolicy;
     private createCostLot;
     private consumeCostLots;
+    private postAdjustmentOutCogs;
     private postSaleDispatchCogs;
     private insertMovement;
     private insertAudit;

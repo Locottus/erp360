@@ -25,6 +25,13 @@ describe('App', () => {
         { provide: SessionService, useValue: {
           user, company: signal<CurrentCompany | null>(null),
           isAuthenticated: computed(() => Boolean(user())), error: signal(''),
+          hasPermission: (permission: string) =>
+            user()?.permissions?.includes('*') ||
+            Boolean(user()?.permissions?.includes(permission)),
+          hasAnyPermission: (...permissions: string[]) =>
+            permissions.some((permission) =>
+              user()?.permissions?.includes('*') ||
+              Boolean(user()?.permissions?.includes(permission))),
         } },
         { provide: SaasService, useValue: { role } },
       ],
@@ -42,7 +49,7 @@ describe('App', () => {
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
     expect(compiled.querySelector('.nav-links')?.textContent).toContain('Inicio');
-    expect(compiled.querySelector('.nav-links')?.textContent).toContain('Portal cliente');
+    expect(compiled.querySelector('.nav-links')?.textContent).toContain('Tienda');
     expect(compiled.querySelector('.nav-links')?.textContent).toContain('Acceso');
   });
 
@@ -51,14 +58,14 @@ describe('App', () => {
     const routes = () => Array.from((fixture.nativeElement as HTMLElement).querySelectorAll<HTMLAnchorElement>('.nav-links a'))
       .map(link => link.getAttribute('href'));
     fixture.detectChanges();
-    expect(routes()).toEqual(['/', '/workspace', '/login', '/operations', '/inventory', '/invoicing',
-      '/store', '/portal', '/ecommerce/admin', '/processes']);
-    user.set({ id: 'test', fullName: 'Test', email: 'test@example.test', companyId: 'c', roles: ['employee'] });
+    expect(routes()).toEqual(['/', '/login', '/store', '/processes']);
+    user.set({ id: 'test', fullName: 'Test', email: 'test@example.test', companyId: 'c', roles: ['employee'], permissions: ['company.read', 'inventory.read'] });
     fixture.detectChanges();
     expect(routes()).toContain('/subscription');
+    expect(routes()).toContain('/inventory');
     expect(routes()).not.toContain('/users');
     expect(routes()).not.toContain('/platform/billing');
-    user.update(value => value ? { ...value, roles: ['admin'] } : null);
+    user.update(value => value ? { ...value, roles: ['admin'], permissions: ['*'] } : null);
     role.set('owner'); fixture.detectChanges();
     expect(routes()).toEqual(['/', '/workspace', '/login', '/operations', '/inventory', '/invoicing',
       '/receiving', '/controls', '/accounting', '/people', '/store', '/portal', '/ecommerce/admin',

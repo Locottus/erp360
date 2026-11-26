@@ -28,6 +28,8 @@ describe('Users restored session lifecycle', () => {
     user.set(admin); fixture.detectChanges();
     http.expectOne(`${API_BASE_URL}/auth/users`).flush([{ id: 'user-1', full_name: 'Demo admin', email: admin.email, is_active: true, roles: ['admin'] }]);
     await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/rbac`).flush({ revision: 0, permissions: [], roles: [], overrides: [] });
+    await fixture.whenStable();
     expect(fixture.componentInstance.users.length).toBe(1);
   });
 
@@ -48,7 +50,10 @@ describe('Users restored session lifecycle', () => {
     const fixture = TestBed.createComponent(UsersComponent); fixture.detectChanges();
     const row = { id: 'target', email: 'target@example.test', full_name: 'Target', is_active: true,
       roles: ['employee'], management_revision: 4 };
-    http.expectOne(`${API_BASE_URL}/auth/users`).flush([row]); await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/users`).flush([row]);
+    await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/rbac`).flush({ revision: 0, permissions: [], roles: [], overrides: [] });
+    await fixture.whenStable();
     const component = fixture.componentInstance; component.edit(row);
     component.form.fullName = 'Reviewed target'; component.reason = 'Reviewed access assignment';
     const pending = component.save();
@@ -62,7 +67,10 @@ describe('Users restored session lifecycle', () => {
   it('does not expose late activation keys to a different session', async () => {
     user.set(admin);
     const fixture = TestBed.createComponent(UsersComponent); fixture.detectChanges();
-    http.expectOne(`${API_BASE_URL}/auth/users`).flush([]); await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/users`).flush([]);
+    await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/rbac`).flush({ revision: 0, permissions: [], roles: [], overrides: [] });
+    await fixture.whenStable();
     const component = fixture.componentInstance;
     component.form = { email: 'new@example.test', fullName: 'New user', roles: ['employee'], isActive: true };
     const pending = component.save();
@@ -70,5 +78,36 @@ describe('Users restored session lifecycle', () => {
     user.set(null); fixture.detectChanges();
     req.flush({ activationToken: 'late-private-key' }); await pending;
     expect(component.secret).toBe(''); expect(component.users).toEqual([]); expect(component.message).toBe('');
+  });
+
+  it('restores MFA with revision and audited reason', async () => {
+    user.set(admin);
+    const fixture = TestBed.createComponent(UsersComponent); fixture.detectChanges();
+    const row = {
+      id: 'target',
+      email: 'target@example.test',
+      full_name: 'Target',
+      is_active: true,
+      roles: ['employee'],
+      management_revision: 6,
+      mfa_enabled: true,
+    };
+    http.expectOne(`${API_BASE_URL}/auth/users`).flush([row]);
+    await fixture.whenStable();
+    http.expectOne(`${API_BASE_URL}/auth/rbac`).flush({ revision: 0, permissions: [], roles: [], overrides: [] });
+    await fixture.whenStable();
+    const component = fixture.componentInstance;
+    component.mfaResetReason = 'Verified loss of MFA device';
+    const pending = component.resetMfa(row);
+    const req = http.expectOne(`${API_BASE_URL}/auth/users/target/reset-mfa`);
+    expect(req.request.body).toEqual({
+      expectedRevision: 6,
+      reason: 'Verified loss of MFA device',
+    });
+    req.flush({ reset: true, revision: 7 });
+    await pending;
+    expect(component.message).toBe('Operación registrada.');
+    expect(row.mfa_enabled).toBeFalse();
+    expect(row.management_revision).toBe(7);
   });
 });

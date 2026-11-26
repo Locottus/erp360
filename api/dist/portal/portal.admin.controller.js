@@ -16,6 +16,7 @@ exports.PortalAdminController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const portal_service_1 = require("./portal.service");
 let PortalAdminController = class PortalAdminController {
     portalService;
@@ -36,6 +37,7 @@ exports.PortalAdminController = PortalAdminController;
 __decorate([
     (0, common_1.Post)('access-tokens'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('portal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -45,6 +47,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('access-tokens'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('portal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('customerId')),
     __metadata("design:type", Function),
@@ -54,6 +57,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('access-tokens/:id/revoke'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('portal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),

@@ -1,5 +1,25 @@
 # Estado del proyecto ERP360 modernizado
 
+## Fundación RBAC: 25 de noviembre de 2026
+
+- Migración `0038_granular_permissions.sql`: 38 permisos y mapeos compatibles
+  para `admin`, `sales`, `purchases` y `employee`.
+- Los permisos se resuelven desde PostgreSQL en cada petición y no quedan
+  congelados dentro del JWT; la revocación afecta la siguiente solicitud.
+- El guard conserva compatibilidad con `@Roles` en endpoints aún no migrados y
+  da precedencia a `@Permissions` cuando la operación declara permisos.
+- Migrados identidad, empresa, maestros, comercio, inventario, contabilidad,
+  fiscal, portal, RRHH y administración eCommerce.
+- La suite completa sobre base RBAC aislada pasa 21/21 suites y 118/118 pruebas;
+  incluye revocación efectiva en la siguiente petición con el mismo JWT.
+- Siguiente paso recomendado: diseñar administración de permisos por empresa,
+  incluyendo overrides auditados, revisión y prevención de pérdida del último
+  administrador, antes de ampliar la UI de seguridad.
+
+- MFA TOTP: API y login ya contienen el factor; `/workspace` incorpora consulta
+  de estado, alta, confirmación con el primer código y desactivación confirmada.
+  Activar o desactivar invalida la sesión para exigir un nuevo inicio de sesión.
+
 ## Evaluación ERP360LIGHT: 25 de noviembre de 2026
 
 - La comparación completa, matriz de brechas y plan priorizado están en

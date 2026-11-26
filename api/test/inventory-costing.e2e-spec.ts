@@ -98,5 +98,44 @@ describe('Inventory cost layers', () => {
       [fifoOrder, productId],
     );
     expect(remaining.rows[0].quantity).toBe('2.0000');
+
+    await post('/inventory/adjustments', {
+      productId,
+      direction: 'out',
+      quantity: 1,
+      locationCode: 'COST',
+      notes: 'Costed manual withdrawal',
+    }).expect(201);
+
+    const adjustment = await db.query<{ unit_cost: string; total_cost: string; cost_posted: boolean; cost_policy: string }>(
+      `SELECT unit_cost::text,total_cost::text,cost_posted,cost_policy
+       FROM inventory_movements
+       WHERE company_id=(SELECT company_id FROM sales_orders WHERE id=$1)
+         AND movement_type='adjustment_out' AND notes='Costed manual withdrawal'
+       ORDER BY created_at DESC LIMIT 1`,
+      [fifoOrder],
+    );
+    expect(adjustment.rows[0]).toEqual({
+      unit_cost: '7.0000',
+      total_cost: '7.0000',
+      cost_posted: true,
+      cost_policy: 'fifo',
+    });
+
+    const adjustmentJournal = await db.query<{ debit: string; credit: string }>(
+      `SELECT SUM(jl.debit)::text AS debit,SUM(jl.credit)::text AS credit
+       FROM accounting_journal_entries je
+       JOIN accounting_journal_lines jl ON jl.journal_entry_id=je.id
+       WHERE je.company_id=(SELECT company_id FROM sales_orders WHERE id=$1)
+         AND je.source_type='inventory_adjustment_out'
+         AND je.source_id=(
+           SELECT id FROM inventory_movements
+           WHERE company_id=(SELECT company_id FROM sales_orders WHERE id=$1)
+             AND movement_type='adjustment_out' AND notes='Costed manual withdrawal'
+           ORDER BY created_at DESC LIMIT 1
+         )`,
+      [fifoOrder],
+    );
+    expect(adjustmentJournal.rows[0]).toEqual({ debit: '7.0000', credit: '7.0000' });
   });
 });

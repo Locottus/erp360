@@ -20,6 +20,7 @@ export declare class AuthController {
             fullName: string;
             companyId: string;
             roles: string[];
+            permissions: string[];
         };
     }>;
     resetPassword(body: {
@@ -30,6 +31,10 @@ export declare class AuthController {
     }>;
     logout(request: AuthenticatedRequest): Promise<{
         revoked: boolean;
+    }>;
+    mfaStatus(request: AuthenticatedRequest): Promise<{
+        enabled: boolean;
+        configured: boolean;
     }>;
     mfaSetup(request: AuthenticatedRequest): Promise<{
         enabled: boolean;
@@ -72,9 +77,44 @@ export declare class AuthController {
         id: string;
         revision: number;
     }>;
+    rbac(request: AuthenticatedRequest): Promise<{
+        revision: number;
+        permissions: {
+            code: string;
+            resource: string;
+            action: string;
+            description: string;
+        }[];
+        roles: {
+            code: string;
+            name: string;
+            description: string;
+        }[];
+        overrides: {
+            permission_code: string;
+            effect: "grant" | "deny";
+        }[];
+    }>;
+    updateRbacOverrides(request: AuthenticatedRequest, body: {
+        expectedRevision: number;
+        reason: string;
+        overrides: Array<{
+            permissionCode: string;
+            effect: 'grant' | 'deny';
+        }>;
+    }): Promise<{
+        revision: number;
+    }>;
     issueReset(request: AuthenticatedRequest, id: string): Promise<{
         resetToken: string;
         expiresInHours: number;
+    }>;
+    resetMfa(request: AuthenticatedRequest, id: string, body: {
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        reset: boolean;
+        revision: number;
     }>;
     revokeSessions(request: AuthenticatedRequest, id: string): Promise<{
         revoked: boolean;
@@ -85,6 +125,7 @@ export declare class AuthController {
         fullName: string;
         companyId: string;
         roles: string[];
+        permissions: string[];
     }>;
     adminCheck(): {
         ok: boolean;

@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const auth_service_1 = require("./auth.service");
 const auth_guard_1 = require("./auth.guard");
 const roles_decorator_1 = require("./roles.decorator");
+const permissions_decorator_1 = require("./permissions.decorator");
 let AuthController = class AuthController {
     authService;
     constructor(authService) {
@@ -34,6 +35,9 @@ let AuthController = class AuthController {
     logout(request) {
         return this.authService.revokeSessions(request.user);
     }
+    mfaStatus(request) {
+        return this.authService.getMfaStatus(request.user);
+    }
     mfaSetup(request) {
         return this.authService.setupMfa(request.user);
     }
@@ -43,15 +47,26 @@ let AuthController = class AuthController {
     mfaDisable(request, body) {
         return this.authService.disableMfa(request.user, body.code);
     }
-    users(request) { return this.authService.listUsers(request.user); }
+    users(request) {
+        return this.authService.listUsers(request.user);
+    }
     createUser(request, body) {
         return this.authService.createUser(request.user, body);
     }
     updateUser(request, id, body) {
         return this.authService.updateUser(request.user, id, body);
     }
+    rbac(request) {
+        return this.authService.getRbacState(request.user);
+    }
+    updateRbacOverrides(request, body) {
+        return this.authService.updateRbacOverrides(request.user, body);
+    }
     issueReset(request, id) {
         return this.authService.issuePasswordReset(request.user, id);
+    }
+    resetMfa(request, id, body) {
+        return this.authService.resetUserMfa(request.user, id, body);
     }
     revokeSessions(request, id) {
         return this.authService.revokeSessions(request.user, id);
@@ -96,6 +111,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "logout", null);
 __decorate([
+    (0, common_1.Get)('mfa/status'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "mfaStatus", null);
+__decorate([
     (0, common_1.Get)('mfa/setup'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     __param(0, (0, common_1.Req)()),
@@ -125,6 +148,7 @@ __decorate([
     (0, common_1.Get)('users'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -134,6 +158,7 @@ __decorate([
     (0, common_1.Post)('users'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -144,6 +169,7 @@ __decorate([
     (0, common_1.Patch)('users/:id'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -152,9 +178,31 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "updateUser", null);
 __decorate([
+    (0, common_1.Get)('rbac'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "rbac", null);
+__decorate([
+    (0, common_1.Patch)('rbac/overrides'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "updateRbacOverrides", null);
+__decorate([
     (0, common_1.Post)('users/:id/reset-password'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -162,9 +210,22 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AuthController.prototype, "issueReset", null);
 __decorate([
+    (0, common_1.Post)('users/:id/reset-mfa'),
+    (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
+    (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.manage'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AuthController.prototype, "resetMfa", null);
+__decorate([
     (0, common_1.Post)('users/:id/revoke-sessions'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.sessions.revoke'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -183,6 +244,7 @@ __decorate([
     (0, common_1.Get)('admin-check'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('identity.users.read'),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)

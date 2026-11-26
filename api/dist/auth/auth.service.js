@@ -23,7 +23,10 @@ let AuthService = class AuthService {
         this.db = db;
     }
     async login(input, correlationId) {
-        if (typeof input.email !== 'string' || typeof input.password !== 'string' || !input.email.trim() || !input.password) {
+        if (typeof input.email !== 'string' ||
+            typeof input.password !== 'string' ||
+            !input.email.trim() ||
+            !input.password) {
             throw new common_1.BadRequestException('Email and password are required.');
         }
         const userResult = await this.db.query(`SELECT u.id, u.company_id, u.email, u.password_hash, u.full_name, u.is_active, u.session_version
@@ -31,7 +34,9 @@ let AuthService = class AuthService {
        WHERE u.email = $1
        LIMIT 1`, [input.email.trim().toLowerCase()]);
         const user = userResult.rows[0];
-        if (!user || !user.is_active || !(0, crypto_util_1.verifyPassword)(input.password, user.password_hash)) {
+        if (!user ||
+            !user.is_active ||
+            !(0, crypto_util_1.verifyPassword)(input.password, user.password_hash)) {
             throw new common_1.UnauthorizedException('Invalid credentials.');
         }
         const mfa = await this.db.query(`SELECT secret_encrypted,enabled,last_used_step::text
@@ -43,7 +48,9 @@ let AuthService = class AuthService {
             const step = this.verifyTotp(secret, input.mfaCode);
             if (!step)
                 throw new common_1.UnauthorizedException('Invalid MFA code.');
-            const lastStep = mfa.rows[0].last_used_step ? Number(mfa.rows[0].last_used_step) : 0;
+            const lastStep = mfa.rows[0].last_used_step
+                ? Number(mfa.rows[0].last_used_step)
+                : 0;
             if (step <= lastStep)
                 throw new common_1.UnauthorizedException('MFA code already used.');
             await this.db.query(`UPDATE user_mfa_totp SET last_used_step=$2,updated_at=NOW() WHERE user_id=$1`, [user.id, step]);
@@ -86,6 +93,7 @@ let AuthService = class AuthService {
                 fullName: user.full_name,
                 companyId: user.company_id,
                 roles: payload.roles,
+                permissions: await this.getEffectivePermissions(user.id, user.company_id),
             },
         };
     }
@@ -106,11 +114,127 @@ let AuthService = class AuthService {
         const result = await this.db.query(`SELECT u.session_version FROM users u
        JOIN companies c ON c.id = u.company_id AND c.is_active = TRUE
        WHERE u.id = $1 AND u.company_id = $2 AND u.is_active = TRUE`, [payload.sub, payload.companyId]);
-        if (!result.rows[0] || result.rows[0].session_version !== (payload.sessionVersion ?? 0)) {
+        if (!result.rows[0] ||
+            result.rows[0].session_version !== (payload.sessionVersion ?? 0)) {
             throw new common_1.UnauthorizedException('Session revoked. Sign in again.');
         }
         const user = await this.getCurrentUser(payload.sub);
-        return { ...payload, roles: user.roles, email: user.email };
+        const permissions = await this.getEffectivePermissions(user.id, user.companyId);
+        return { ...payload, roles: user.roles, permissions, email: user.email };
+    }
+    async getEffectivePermissions(userId, companyId) {
+        const rolePermissions = await this.db.query(`SELECT DISTINCT p.code
+       FROM users u
+       JOIN user_roles ur ON ur.user_id = u.id
+       JOIN role_permissions rp ON rp.role_id = ur.role_id
+       JOIN permissions p ON p.code = rp.permission_code
+       WHERE u.id = $1 AND u.company_id = $2 AND u.is_active = TRUE
+       ORDER BY p.code`, [userId, companyId]);
+        const base = rolePermissions.rows.map((row) => row.code);
+        let effective = new Set(base);
+        if (effective.has('*')) {
+            const catalog = await this.db.query(`SELECT code FROM permissions WHERE code <> '*'`);
+            effective = new Set(catalog.rows.map((row) => row.code));
+        }
+        const overrides = await this.db.query(`SELECT permission_code,effect
+       FROM company_permission_overrides
+       WHERE company_id=$1`, [companyId]);
+        for (const override of overrides.rows) {
+            if (override.permission_code === '*' && override.effect === 'deny') {
+                effective.clear();
+                continue;
+            }
+            if (override.permission_code === '*' && override.effect === 'grant') {
+                effective.add('*');
+                continue;
+            }
+            if (override.effect === 'deny')
+                effective.delete(override.permission_code);
+            else
+                effective.add(override.permission_code);
+        }
+        return [...effective].sort();
+    }
+    async getRbacState(user) {
+        const permissions = await this.db.query(`SELECT code,resource,action,description
+       FROM permissions ORDER BY code`);
+        const roles = await this.db.query(`SELECT code,name,COALESCE(description,'') AS description
+       FROM roles ORDER BY code`);
+        const overrides = await this.db.query(`SELECT permission_code,effect
+       FROM company_permission_overrides
+       WHERE company_id=$1 ORDER BY permission_code`, [user.companyId]);
+        const revision = await this.db.query(`SELECT rbac_revision FROM companies WHERE id=$1`, [user.companyId]);
+        return {
+            revision: revision.rows[0]?.rbac_revision ?? 0,
+            permissions: permissions.rows,
+            roles: roles.rows,
+            overrides: overrides.rows,
+        };
+    }
+    async updateRbacOverrides(user, input) {
+        const revision = (0, management_input_1.expectedRevision)(input.expectedRevision);
+        const reason = (0, management_input_1.changeReason)(input.reason);
+        if (!Array.isArray(input.overrides))
+            throw new common_1.BadRequestException('overrides must be an array.');
+        const normalized = new Map();
+        for (const override of input.overrides) {
+            if (!override ||
+                typeof override.permissionCode !== 'string' ||
+                (override.effect !== 'grant' && override.effect !== 'deny'))
+                throw new common_1.BadRequestException('Invalid permission override.');
+            normalized.set(override.permissionCode, override.effect);
+        }
+        const client = await this.db.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('SELECT id FROM companies WHERE id=$1 FOR UPDATE', [user.companyId]);
+            const current = await client.query('SELECT rbac_revision FROM companies WHERE id=$1', [user.companyId]);
+            if (current.rows[0]?.rbac_revision !== revision)
+                throw new common_1.ConflictException('RBAC configuration changed. Reload before editing.');
+            const before = await client.query('SELECT permission_code,effect FROM company_permission_overrides WHERE company_id=$1', [user.companyId]);
+            if (normalized.size) {
+                const permissionRows = await client.query(`SELECT code FROM permissions WHERE code = ANY($1::text[])`, [[...normalized.keys()]]);
+                const valid = new Set(permissionRows.rows.map((row) => row.code));
+                for (const code of normalized.keys()) {
+                    if (!valid.has(code))
+                        throw new common_1.BadRequestException(`Unknown permission: ${code}`);
+                }
+            }
+            await client.query('DELETE FROM company_permission_overrides WHERE company_id=$1', [user.companyId]);
+            for (const [code, effect] of normalized) {
+                await client.query(`INSERT INTO company_permission_overrides(company_id,permission_code,effect,updated_by)
+           VALUES($1,$2,$3,$4)`, [user.companyId, code, effect, user.sub]);
+            }
+            await client.query('UPDATE companies SET rbac_revision=rbac_revision+1,updated_at=NOW() WHERE id=$1', [user.companyId]);
+            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'rbac.overrides.update','company',$4,$3)`, [
+                user.companyId,
+                user.sub,
+                JSON.stringify({
+                    before: before.rows,
+                    after: [...normalized].map(([permissionCode, effect]) => ({
+                        permissionCode,
+                        effect,
+                    })),
+                    reason,
+                    revision: revision + 1,
+                }),
+                user.companyId,
+            ]);
+            await client.query('COMMIT');
+            return { revision: revision + 1 };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
+    async getMfaStatus(user) {
+        const result = await this.db.query('SELECT enabled FROM user_mfa_totp WHERE user_id=$1', [user.sub]);
+        return { enabled: result.rows[0]?.enabled === true, configured: Boolean(result.rows[0]) };
     }
     async setupMfa(user) {
         const existing = await this.db.query('SELECT enabled FROM user_mfa_totp WHERE user_id=$1', [user.sub]);
@@ -178,8 +302,16 @@ let AuthService = class AuthService {
         const iv = (0, crypto_1.randomBytes)(12);
         const cipher = (0, crypto_1.createCipheriv)('aes-256-gcm', this.mfaKey(), iv);
         cipher.setAAD(Buffer.from(`erp360-mfa-v1:${userId.toLowerCase()}`));
-        const encrypted = Buffer.concat([cipher.update(secret, 'utf8'), cipher.final()]);
-        return ['v1', iv.toString('base64'), cipher.getAuthTag().toString('base64'), encrypted.toString('base64')].join('.');
+        const encrypted = Buffer.concat([
+            cipher.update(secret, 'utf8'),
+            cipher.final(),
+        ]);
+        return [
+            'v1',
+            iv.toString('base64'),
+            cipher.getAuthTag().toString('base64'),
+            encrypted.toString('base64'),
+        ].join('.');
     }
     decryptMfaSecret(value, userId) {
         try {
@@ -189,7 +321,10 @@ let AuthService = class AuthService {
             const decipher = (0, crypto_1.createDecipheriv)('aes-256-gcm', this.mfaKey(), Buffer.from(iv, 'base64'));
             decipher.setAAD(Buffer.from(`erp360-mfa-v1:${userId.toLowerCase()}`));
             decipher.setAuthTag(Buffer.from(tag, 'base64'));
-            return Buffer.concat([decipher.update(Buffer.from(ciphertext, 'base64')), decipher.final()]).toString('utf8');
+            return Buffer.concat([
+                decipher.update(Buffer.from(ciphertext, 'base64')),
+                decipher.final(),
+            ]).toString('utf8');
         }
         catch {
             throw new common_1.UnauthorizedException('No se pudo descifrar el factor MFA. Solicita restablecerlo.');
@@ -251,9 +386,11 @@ let AuthService = class AuthService {
     }
     async listUsers(user) {
         const result = await this.db.query(`SELECT u.id, u.email, u.full_name, u.is_active, u.management_revision,
-              COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles
+             COALESCE(array_agg(r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS roles,
+             COALESCE(m.enabled,FALSE) AS mfa_enabled
        FROM users u LEFT JOIN user_roles ur ON ur.user_id = u.id LEFT JOIN roles r ON r.id = ur.role_id
-       WHERE u.company_id = $1 GROUP BY u.id ORDER BY u.full_name`, [user.companyId]);
+       LEFT JOIN user_mfa_totp m ON m.user_id=u.id
+       WHERE u.company_id = $1 GROUP BY u.id,m.enabled ORDER BY u.full_name`, [user.companyId]);
         return result.rows;
     }
     async createUser(user, input) {
@@ -262,18 +399,32 @@ let AuthService = class AuthService {
         try {
             await client.query('BEGIN');
             const created = await client.query(`INSERT INTO users(company_id, email, full_name, password_hash)
-         VALUES($1,$2,$3,$4) RETURNING id`, [user.companyId, input.email.trim().toLowerCase(), input.fullName.trim(), (0, crypto_util_1.hashPassword)((0, crypto_1.randomBytes)(32).toString('hex'))]);
+         VALUES($1,$2,$3,$4) RETURNING id`, [
+                user.companyId,
+                input.email.trim().toLowerCase(),
+                input.fullName.trim(),
+                (0, crypto_util_1.hashPassword)((0, crypto_1.randomBytes)(32).toString('hex')),
+            ]);
             for (const role of input.roles) {
                 await client.query(`INSERT INTO user_roles(user_id, role_id)
                             SELECT $1,id FROM roles WHERE code = $2`, [created.rows[0].id, role]);
             }
             const token = (0, crypto_1.randomBytes)(32).toString('hex');
             await client.query(`INSERT INTO user_password_resets(company_id,user_id,token_hash,expires_at,created_by)
-         VALUES($1,$2,$3,NOW() + INTERVAL '24 hours',$4)`, [user.companyId, created.rows[0].id, this.hashResetToken(token), user.sub]);
+         VALUES($1,$2,$3,NOW() + INTERVAL '24 hours',$4)`, [
+                user.companyId,
+                created.rows[0].id,
+                this.hashResetToken(token),
+                user.sub,
+            ]);
             await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id)
          VALUES($1,$2,'user.invite','users',$3)`, [user.companyId, user.sub, created.rows[0].id]);
             await client.query('COMMIT');
-            return { id: created.rows[0].id, activationToken: token, expiresInHours: 24 };
+            return {
+                id: created.rows[0].id,
+                activationToken: token,
+                expiresInHours: 24,
+            };
         }
         catch (error) {
             await client.query('ROLLBACK');
@@ -294,7 +445,9 @@ let AuthService = class AuthService {
         const client = await this.db.connect();
         try {
             await client.query('BEGIN');
-            await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [user.companyId]);
+            await client.query('SELECT id FROM companies WHERE id = $1 FOR UPDATE', [
+                user.companyId,
+            ]);
             const target = await client.query('SELECT full_name,is_active,management_revision FROM users WHERE id=$1 AND company_id=$2 FOR UPDATE', [id, user.companyId]);
             if (!target.rows[0])
                 throw new common_1.BadRequestException('User not found in current company.');
@@ -314,13 +467,67 @@ let AuthService = class AuthService {
                 await client.query('INSERT INTO user_roles(user_id,role_id) SELECT $1,id FROM roles WHERE code=$2', [id, role]);
             }
             await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
-         VALUES($1,$2,'user.update','users',$3,$4)`, [user.companyId, user.sub, id, JSON.stringify({
-                    before: { ...target.rows[0], roles: roles.rows.map(row => row.code) },
-                    after: { full_name: input.fullName.trim(), is_active: input.isActive, roles: [...input.roles].sort(), management_revision: revision + 1 },
+         VALUES($1,$2,'user.update','users',$3,$4)`, [
+                user.companyId,
+                user.sub,
+                id,
+                JSON.stringify({
+                    before: {
+                        ...target.rows[0],
+                        roles: roles.rows.map((row) => row.code),
+                    },
+                    after: {
+                        full_name: input.fullName.trim(),
+                        is_active: input.isActive,
+                        roles: [...input.roles].sort(),
+                        management_revision: revision + 1,
+                    },
                     reason,
-                })]);
+                }),
+            ]);
             await client.query('COMMIT');
             return { id, revision: revision + 1 };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
+    async resetUserMfa(user, id, input) {
+        const revision = (0, management_input_1.expectedRevision)(input.expectedRevision);
+        const reason = (0, management_input_1.changeReason)(input.reason);
+        const client = await this.db.connect();
+        try {
+            await client.query('BEGIN');
+            const target = await client.query(`SELECT id, management_revision
+         FROM users
+         WHERE id=$1 AND company_id=$2 AND is_active=TRUE
+         FOR UPDATE`, [id, user.companyId]);
+            if (!target.rows[0])
+                throw new common_1.BadRequestException('Active user not found in current company.');
+            if (target.rows[0].management_revision !== revision)
+                throw new common_1.ConflictException('User changed. Reload before resetting MFA.');
+            const mfa = await client.query('SELECT user_id,enabled FROM user_mfa_totp WHERE user_id=$1 AND enabled=TRUE FOR UPDATE', [id]);
+            if (!mfa.rows[0])
+                throw new common_1.BadRequestException('MFA is not enabled for this user.');
+            await client.query(`UPDATE users
+         SET management_revision=management_revision+1,
+             session_version=session_version+1,
+             updated_at=NOW()
+         WHERE id=$1 AND company_id=$2`, [id, user.companyId]);
+            await client.query('DELETE FROM user_mfa_totp WHERE user_id=$1', [id]);
+            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'user.mfa.reset','users',$3,$4)`, [
+                user.companyId,
+                user.sub,
+                id,
+                JSON.stringify({ enabled: true, reset: true, reason }),
+            ]);
+            await client.query('COMMIT');
+            return { reset: true, revision: revision + 1 };
         }
         catch (error) {
             await client.query('ROLLBACK');
@@ -355,8 +562,11 @@ let AuthService = class AuthService {
         }
     }
     async resetPassword(input) {
-        if (typeof input.token !== 'string' || !/^[a-f0-9]{64}$/.test(input.token) ||
-            typeof input.password !== 'string' || input.password.length < 12 || input.password.length > 256) {
+        if (typeof input.token !== 'string' ||
+            !/^[a-f0-9]{64}$/.test(input.token) ||
+            typeof input.password !== 'string' ||
+            input.password.length < 12 ||
+            input.password.length > 256) {
             throw new common_1.BadRequestException('Use a valid token and a password of 12 to 256 characters.');
         }
         const client = await this.db.connect();
@@ -367,7 +577,11 @@ let AuthService = class AuthService {
             if (!reset.rows[0])
                 throw new common_1.BadRequestException('Reset token is invalid or expired.');
             const updated = await client.query(`UPDATE users SET password_hash=$1,session_version=session_version+1,updated_at=NOW()
-         WHERE id=$2 AND company_id=$3 AND is_active=TRUE RETURNING id`, [(0, crypto_util_1.hashPassword)(input.password), reset.rows[0].user_id, reset.rows[0].company_id]);
+         WHERE id=$2 AND company_id=$3 AND is_active=TRUE RETURNING id`, [
+                (0, crypto_util_1.hashPassword)(input.password),
+                reset.rows[0].user_id,
+                reset.rows[0].company_id,
+            ]);
             if (!updated.rows[0])
                 throw new common_1.BadRequestException('Account is unavailable.');
             await client.query(`UPDATE user_password_resets SET used_at=NOW() WHERE user_id=$1 AND used_at IS NULL`, [reset.rows[0].user_id]);
@@ -385,14 +599,22 @@ let AuthService = class AuthService {
         }
     }
     validateIdentity(input) {
-        if (typeof input.email !== 'string' || input.email.length > 255 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim()) ||
-            typeof input.fullName !== 'string' || !input.fullName.trim() || input.fullName.length > 180 ||
-            !Array.isArray(input.roles) || input.roles.length === 0 || new Set(input.roles).size !== input.roles.length ||
-            input.roles.some(role => !['admin', 'sales', 'purchases', 'employee'].includes(role))) {
+        if (typeof input.email !== 'string' ||
+            input.email.length > 255 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email.trim()) ||
+            typeof input.fullName !== 'string' ||
+            !input.fullName.trim() ||
+            input.fullName.length > 180 ||
+            !Array.isArray(input.roles) ||
+            input.roles.length === 0 ||
+            new Set(input.roles).size !== input.roles.length ||
+            input.roles.some((role) => !['admin', 'sales', 'purchases', 'employee'].includes(role))) {
             throw new common_1.BadRequestException('Valid name, email and recognized unique roles are required.');
         }
     }
-    hashResetToken(token) { return (0, crypto_1.createHash)('sha256').update(token).digest('hex'); }
+    hashResetToken(token) {
+        return (0, crypto_1.createHash)('sha256').update(token).digest('hex');
+    }
     async auditIdentity(user, event, id) {
         await this.db.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id)
        VALUES($1,$2,$3,'users',$4)`, [user.companyId, user.sub, event, id]);
@@ -410,26 +632,37 @@ let AuthService = class AuthService {
        FROM user_roles ur
        JOIN roles r ON r.id = ur.role_id
        WHERE ur.user_id = $1`, [user.id]);
+        const permissions = await this.getEffectivePermissions(user.id, user.company_id);
         return {
             id: user.id,
             email: user.email,
             fullName: user.full_name,
             companyId: user.company_id,
             roles: rolesResult.rows.map((row) => row.code),
+            permissions,
         };
     }
     async bootstrapAdmin(input, correlationId) {
-        if (process.env.BOOTSTRAP_ENABLED !== 'true' && process.env.NODE_ENV !== 'test') {
+        if (process.env.BOOTSTRAP_ENABLED !== 'true' &&
+            process.env.NODE_ENV !== 'test') {
             throw new common_1.ForbiddenException('Company registration is disabled. Contact your administrator.');
         }
-        if (!input || !input.email || !input.password || !input.companyCode ||
-            typeof input.companyName !== 'string' || !input.companyName.trim() ||
-            typeof input.fullName !== 'string' || !input.fullName.trim()) {
+        if (!input ||
+            !input.email ||
+            !input.password ||
+            !input.companyCode ||
+            typeof input.companyName !== 'string' ||
+            !input.companyName.trim() ||
+            typeof input.fullName !== 'string' ||
+            !input.fullName.trim()) {
             throw new common_1.BadRequestException('Missing required fields for bootstrap admin.');
         }
-        if (typeof input.password !== 'string' || input.password.length < 12 ||
-            typeof input.email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ||
-            typeof input.companyCode !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(input.companyCode)) {
+        if (typeof input.password !== 'string' ||
+            input.password.length < 12 ||
+            typeof input.email !== 'string' ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email) ||
+            typeof input.companyCode !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,32}$/.test(input.companyCode)) {
             throw new common_1.BadRequestException('Use a valid email, company code and a password of at least 12 characters.');
         }
         const client = await this.db.connect();

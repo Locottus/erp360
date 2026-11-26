@@ -24,7 +24,31 @@ type FinancialStatements = {
   basis: string;
   balanceSheet: { asOfDate: string; assets: number; liabilities: number; equity: number;
     accumulatedNetIncome: number; totalLiabilitiesAndEquity: number; balancesMatch: boolean };
-  incomeStatement: { fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number };
+  incomeStatement: {
+    fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number;
+    comparative: { fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number };
+  };
+};
+type InventoryCostIntegrity = {
+  capturedAt: string;
+  dispatchMovements: number;
+  dispatchWithSnapshot: number;
+  dispatchWithoutSnapshot: number;
+  dispatchWithNegativeCost: number;
+  dispatchQuantityMismatch: number;
+  lotQuantityNegative: number;
+  complete: boolean;
+};
+type BankSuggestion = {
+  line_id: string;
+  reference: string;
+  counterpart_reference: string | null;
+  amount: string;
+  statement_reference: string;
+  bank_account_code: string;
+  payment_id: string;
+  payment_reference: string;
+  match_type: 'exact_reference' | 'exact_counterpart' | 'exact_amount';
 };
 
 @Component({
@@ -96,12 +120,22 @@ type FinancialStatements = {
         <article class="surface-card"><h2>Conciliación manual de extractos</h2>
           <p>Empareja una línea con un pago existente o registra una diferencia con motivo. La importación nunca altera los pagos.</p>
           <button type="button" class="btn btn-secondary" (click)="loadBankLines()" [disabled]="busy">Actualizar líneas bancarias</button>
+          <button type="button" class="btn btn-secondary" (click)="loadBankSuggestions()" [disabled]="busy">Buscar emparejamientos</button>
+          @if (bankSuggestions.length) {
+            <p>Sugerencias exactas sin conciliación automática:</p>
+            <ul>
+              @for (suggestion of bankSuggestions; track suggestion.line_id) {
+                <li>{{ suggestion.statement_reference }} · {{ suggestion.reference }} · {{ suggestion.amount }}
+                  → pago {{ suggestion.payment_reference }} · {{ suggestion.match_type }}</li>
+              }
+            </ul>
+          }
           <div class="table-scroll"><table class="table-list"><caption>Hasta 1000 líneas importadas, por fecha y referencia</caption>
             <thead><tr><th>Extracto / referencia</th><th>Fecha / contraparte</th><th>Importe</th><th>Estado</th><th>Acción</th></tr></thead>
             <tbody>@for (line of bankLines; track line.id) { <tr><th scope="row">{{ line.statement_reference }}<br>{{ line.reference }}</th>
               <td>{{ line.booked_at | date:'short' }}<br>{{ line.counterpart_reference }}</td>
               <td>{{ line.line_type }} · {{ line.amount }}</td><td>{{ line.reconciliation_status }}</td>
-              <td>@if (line.reconciliation_status !== 'reconciled') {
+              <td>@if (line.reconciliation_status === 'pending') {
                 <form class="form-grid" #reconcileForm="ngForm" (ngSubmit)="reconcile(line)">
                   <label>Resultado<select [name]="'reconcile-status-' + line.id" [(ngModel)]="reconciliation[line.id].status" required>
                     <option value="matched">Emparejado</option><option value="reconciled">Reconciliado</option><option value="difference">Diferencia</option>
@@ -115,7 +149,13 @@ type FinancialStatements = {
                   <label>Motivo<input [name]="'reason-' + line.id" [(ngModel)]="reconciliation[line.id].reason" minlength="10" maxlength="1000" required /></label>
                   <button type="submit" class="btn btn-secondary" [disabled]="busy || reconcileForm.invalid">Guardar con auditoría</button>
                 </form>
-              } @else { Reconciliado }</td></tr>
+              } @else {
+                <label>Motivo de reversión<input [name]="'reverse-reason-' + line.id"
+                  [(ngModel)]="reconciliation[line.id].reason" minlength="10" maxlength="1000" required /></label>
+                <button type="button" class="btn btn-secondary"
+                  [disabled]="busy || reconciliation[line.id].reason.trim().length < 10"
+                  (click)="reverse(line)">Revertir conciliación</button>
+              }</td></tr>
             } @empty { <tr><td colspan="5">No hay líneas bancarias importadas.</td></tr> }</tbody>
           </table></div>
         </article>
@@ -132,6 +172,23 @@ type FinancialStatements = {
               · Resultado acumulado {{ report.balanceSheet.accumulatedNetIncome }} · Ecuación {{ report.balanceSheet.balancesMatch ? 'cuadrada' : 'no cuadrada' }}</p>
             <h3>Resultados del {{ report.incomeStatement.fromDate }} al {{ report.incomeStatement.toDate }}</h3>
             <p>Ingresos {{ report.incomeStatement.revenue }} · Gastos {{ report.incomeStatement.expenses }} · Resultado {{ report.incomeStatement.netIncome }}</p>
+            <h3>Comparativo inmediato</h3>
+            <p>{{ report.incomeStatement.comparative.fromDate }} a {{ report.incomeStatement.comparative.toDate }}
+              · Ingresos {{ report.incomeStatement.comparative.revenue }}
+              · Gastos {{ report.incomeStatement.comparative.expenses }}
+              · Resultado {{ report.incomeStatement.comparative.netIncome }}</p>
+          }
+        </article>
+        <article class="surface-card"><h2>Integridad de costo de inventario</h2>
+          <p>Verifica snapshots de despacho y lotes valorizados sin corregir ni ocultar diferencias.</p>
+          <button type="button" class="btn btn-secondary" (click)="loadInventoryCostIntegrity()" [disabled]="busy">
+            Revisar integridad de costo
+          </button>
+          @if (inventoryCostIntegrity; as report) {
+            <p role="status">{{ report.complete ? 'Integridad completa.' : 'Se encontraron diferencias que requieren revisión.' }}</p>
+            <p>Despachos {{ report.dispatchMovements }} · con snapshot {{ report.dispatchWithSnapshot }}
+              · sin snapshot {{ report.dispatchWithoutSnapshot }} · cantidades incompatibles {{ report.dispatchQuantityMismatch }}
+              · costos negativos {{ report.dispatchWithNegativeCost }} · lotes negativos {{ report.lotQuantityNegative }}</p>
           }
         </article>
       }
@@ -145,9 +202,11 @@ export class AccountingComponent {
   ledger: Ledger | null = null;
   bankAccounts: BankAccount[] = [];
   bankLines: BankLine[] = [];
+  bankSuggestions: BankSuggestion[] = [];
   reconciliation: Record<string, { status: 'matched' | 'reconciled' | 'difference'; reason: string;
     matchedPaymentId: string; differenceAmount: number | null }> = {};
   financialStatements: FinancialStatements | null = null;
+  inventoryCostIntegrity: InventoryCostIntegrity | null = null;
   statementFileName = '';
   statement = { bankAccountId: '', statementReference: '', statementDate: new Date().toISOString().slice(0, 10),
     openingBalance: '0', closingBalance: '0', csv: '' };
@@ -162,7 +221,9 @@ export class AccountingComponent {
       untracked(() => {
         const today = new Date().toISOString().slice(0, 10);
         this.accounts = []; this.ledger = null; this.bankAccounts = []; this.bankLines = [];
+        this.bankSuggestions = [];
         this.reconciliation = {}; this.financialStatements = null;
+        this.inventoryCostIntegrity = null;
         this.statement = { bankAccountId: '', statementReference: '', statementDate: new Date().toISOString().slice(0, 10),
           openingBalance: '0', closingBalance: '0', csv: '' };
         this.statementFileName = '';
@@ -237,6 +298,31 @@ export class AccountingComponent {
       status: 'matched', reason: '', matchedPaymentId: '', differenceAmount: null,
     };
   }
+  async loadBankSuggestions() {
+    if (this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = '';
+    try {
+      const suggestions = await firstValueFrom(this.http.get<BankSuggestion[]>(
+        `${API_BASE_URL}/accounting/bank-reconciliation-suggestions`));
+      if (identity === this.session.user()) this.bankSuggestions = suggestions;
+    } catch {
+      if (identity === this.session.user()) this.error = 'No se pudieron calcular sugerencias bancarias.';
+    } finally {
+      if (identity === this.session.user()) this.busy = false;
+    }
+  }
+  async reverse(line: BankLine) {
+    const input = this.reconciliation[line.id];
+    await this.perform(async () => {
+      await firstValueFrom(this.http.post(
+        `${API_BASE_URL}/accounting/bank-reconciliation-lines/${line.id}/reverse`,
+        { reason: input.reason },
+      ));
+      this.message = 'Conciliación revertida con auditoría.';
+      await this.loadBankData();
+    });
+  }
   async reconcile(line: BankLine) {
     const input = this.reconciliation[line.id];
     if (input.status !== 'difference' && !input.matchedPaymentId.trim()) {
@@ -250,6 +336,20 @@ export class AccountingComponent {
       this.message = 'Estado bancario actualizado con motivo y auditoría.';
       await this.loadBankData();
     });
+  }
+  async loadInventoryCostIntegrity() {
+    if (this.busy || !this.isAdmin) return;
+    const identity = this.session.user();
+    this.busy = true; this.error = '';
+    try {
+      const report = await firstValueFrom(this.http.get<InventoryCostIntegrity>(
+        `${API_BASE_URL}/accounting/reports/inventory-cost-integrity`));
+      if (identity === this.session.user()) this.inventoryCostIntegrity = report;
+    } catch {
+      if (identity === this.session.user()) this.error = 'No se pudo revisar la integridad de costo.';
+    } finally {
+      if (identity === this.session.user()) this.busy = false;
+    }
   }
   async loadFinancialStatements() {
     if (this.statementReport.fromDate > this.statementReport.toDate) {

@@ -23,6 +23,44 @@ Respaldar y validar antes de migrar; no volver a inicializar datos existentes.
 El directorio padre contiene Odoo como referencia de lógica, no es la aplicación
 que se está ejecutando.
 
+### Continuación pendiente: completar administración RBAC
+
+La fundación de permisos granulares quedó implementada en la migración 0038.
+Antes de continuar con caja chica o activos fijos:
+
+1. Definir overrides de permisos por empresa sin modificar los defaults globales
+   de los roles.
+2. Exponer lectura del catálogo RBAC y actualización auditable de asignaciones
+   con revisión/motivo.
+3. Impedir retirar a la empresa su último administrador efectivo.
+4. Añadir UI administrativa y reflejar permisos efectivos en navegación/formularios,
+   sin confiar en la UI como control de seguridad.
+5. Migrar endpoints restantes que solo tienen `@Roles` o autorización manual.
+6. Mantener CI pendiente por decisión vigente; ejecutar manualmente la suite
+   aislada hasta que se apruebe automatización.
+
+Avance: overrides por empresa, revisión, motivo, catálogo y UI administrativa
+ya están implementados en el incremento 0039.
+
+Validación completada: las pruebas e2e aisladas cubren override de
+otorgamiento/denegación, revisión obsoleta, revocación por rol y bloqueo del
+último administrador. Falta automatizar CI por decisión vigente.
+
+La navegación Angular y las rutas protegidas ya usan permisos efectivos
+entregados por `/auth/me` y login. La autorización HTTP sigue siendo la autoridad.
+
+### Cierre operacional 25 de noviembre de 2026
+
+1. Respaldada la base `erp360` y validadas las migraciones 0037–0039 sobre una
+   copia restaurada. Las tres migraciones fueron aplicadas y registradas en el
+   ledger de la base operativa.
+2. P0-02 dispone de pruebas e2e para FIFO/promedio, despacho con COGS,
+   devolución parcial y linaje histórico de costo.
+3. P0-04 dispone de importación CSV, sugerencias exactas y reversión bancaria
+   auditada. Verificada la transición diferencia → reversión → pendiente.
+
+La capa de datos no usa ORM; conserva SQL PostgreSQL mediante `pg`/`Pool`.
+
 ### Continuación más reciente: contabilidad operativa y planes de compra
 
 Implementados y validados en base aislada: FIFO/promedio ponderado con linaje
@@ -492,9 +530,9 @@ de la lógica ni una certificación de paridad con Odoo.
 
 | Área | Siguiente trabajo |
 |---|---|
-| Identidad y empresa | MFA, recuperación segura y permisos por recurso; mantener aislamiento tenant y revocación en HTTP/RPC. |
+| Identidad y empresa | MFA TOTP con alta, verificación y baja visual completadas; Administradores pueden restablecer MFA con revisión, motivo y revocación de sesión. Sigue pendiente la recuperación autoservicio robusta. Mantener aislamiento tenant y revocación en HTTP/RPC. |
 | Maestros y ventas | Lecturas de clientes/ventas/PDF/RPC para admin o sales y proveedores/compras para admin o purchases; falta alcance por vendedor y créditos/retornos parciales. |
-| Compras e inventario | Recepción parcial con devengo, remanentes, valoración aprobada y trazabilidad histórica. |
+| Compras e inventario | Recepción parcial con devengo, remanentes, valoración aprobada y trazabilidad histórica. Ajustes manuales de salida tienen costo persistido y asiento COGS balanceado; entradas siguen requiriendo costo explícito y no crean asiento oficial hasta definir cuenta de diferencia. |
 | Contabilidad y fiscal | Balance y documentos fiscales requieren admin; falta rol contable independiente, conciliación, estados financieros y homologación externa. |
 | Portal y tienda | Permisos y privacidad, expiración de reservas, cuenta verificada, pagos y envíos reales. |
 | Personas | Roles RRHH, acceso a datos propios vinculado a cuenta, paginación y zona laboral aprobada. |

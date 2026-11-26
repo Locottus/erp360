@@ -9,9 +9,16 @@ import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { ROLES_KEY } from './roles.decorator';
+import { PERMISSIONS_KEY } from './permissions.decorator';
 
 type RequestWithUser = Request & {
-  user?: { sub: string; email: string; companyId: string; roles: string[] };
+  user?: {
+    sub: string;
+    email: string;
+    companyId: string;
+    roles: string[];
+    permissions?: string[];
+  };
 };
 
 @Injectable()
@@ -35,13 +42,30 @@ export class AuthGuard implements CanActivate {
 
     request.user = await this.authService.authenticateAccessToken(token);
 
-    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
+    const requiredPermissions = this.reflector.getAllAndOverride<string[]>(
+      PERMISSIONS_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (requiredPermissions && requiredPermissions.length > 0) {
+      const permissions = new Set(request.user.permissions ?? []);
+      const allowed =
+        permissions.has('*') ||
+        requiredPermissions.every((permission) => permissions.has(permission));
+      if (!allowed) {
+        throw new ForbiddenException('Insufficient permissions.');
+      }
+      return true;
+    }
+
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(
+      ROLES_KEY,
+      [context.getHandler(), context.getClass()],
+    );
     if (requiredRoles && requiredRoles.length > 0) {
       const userRoles = request.user.roles || [];
-      const hasRequiredRole = requiredRoles.some((role) => userRoles.includes(role));
+      const hasRequiredRole = requiredRoles.some((role) =>
+        userRoles.includes(role),
+      );
       if (!hasRequiredRole) {
         throw new ForbiddenException('Insufficient role permissions.');
       }

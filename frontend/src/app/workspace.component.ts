@@ -78,6 +78,53 @@ const labels: Record<keyof Summary, string> = {
           }
         </article>
 
+        <article class="surface-card" aria-labelledby="mfa-title">
+          <div class="header-with-action">
+            <div>
+              <h2 id="mfa-title"><i class="bi bi-shield-lock" aria-hidden="true"></i> Seguridad MFA</h2>
+              <p>Protege tu inicio de sesión con un código TOTP de 6 dígitos.</p>
+            </div>
+            @if (mfaEnabled() !== null) {
+              <span class="status" [class.status-success]="mfaEnabled()" [class.status-error]="!mfaEnabled()">
+                {{ mfaEnabled() ? 'Activado' : 'Desactivado' }}
+              </span>
+            }
+          </div>
+          @if (mfaMessage()) {
+            <p class="status" [class.status-success]="mfaSuccess()" [class.status-error]="!mfaSuccess()" role="status">{{ mfaMessage() }}</p>
+          }
+          <div class="quick-actions">
+            <button type="button" class="btn btn-secondary" (click)="loadMfaStatus()" [disabled]="mfaLoading()">
+              Consultar estado
+            </button>
+            @if (mfaEnabled() === false) {
+              <button type="button" class="btn btn-primary" (click)="startMfaSetup()" [disabled]="mfaLoading()">
+                Configurar MFA
+              </button>
+            }
+            @if (mfaEnabled() === true) {
+              <form class="form-grid" #disableMfaForm="ngForm" (ngSubmit)="disableMfa()">
+                <label for="mfa-disable-code">Código actual</label>
+                <input id="mfa-disable-code" name="disableCode" [(ngModel)]="mfaDisableCode" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required />
+                <button type="submit" class="btn btn-danger" [disabled]="mfaLoading() || disableMfaForm.invalid">Desactivar MFA</button>
+              </form>
+            }
+          </div>
+          @if (mfaSetupSecret()) {
+            <div class="surface-card">
+              <h3>1. Agrega la clave a tu autenticador</h3>
+              <p class="muted">Escanea el URI si tu aplicación lo admite o introduce manualmente esta clave:</p>
+              <code>{{ mfaSetupSecret() }}</code>
+              <p class="muted"><strong>URI:</strong> {{ mfaSetupUri() }}</p>
+              <form class="form-grid" #verifyMfaForm="ngForm" (ngSubmit)="verifyMfa()">
+                <label for="mfa-verify-code">2. Introduce el código de 6 dígitos</label>
+                <input id="mfa-verify-code" name="verifyCode" [(ngModel)]="mfaVerifyCode" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required />
+                <button type="submit" class="btn btn-primary" [disabled]="mfaLoading() || verifyMfaForm.invalid">Activar MFA</button>
+              </form>
+            </div>
+          }
+        </article>
+
         @if (error()) {
           <div class="surface-card" role="alert">
             <p class="status status-error">{{ error() }}</p>
@@ -241,6 +288,14 @@ export class WorkspaceComponent implements OnDestroy {
   readonly loading = signal(false);
   readonly error = signal('');
   readonly updatedAt = signal<Date | null>(null);
+  readonly mfaEnabled = signal<boolean | null>(null);
+  readonly mfaLoading = signal(false);
+  readonly mfaMessage = signal('');
+  readonly mfaSuccess = signal(false);
+  readonly mfaSetupSecret = signal('');
+  readonly mfaSetupUri = signal('');
+  mfaVerifyCode = '';
+  mfaDisableCode = '';
   readonly skeletonSlots = [1, 2, 3, 4, 5, 6];
   private requestId = 0;
 
@@ -315,6 +370,113 @@ export class WorkspaceComponent implements OnDestroy {
     }
   }
 
+  async loadMfaStatus() {
+    if (!this.session.isAuthenticated() || this.mfaLoading()) return;
+    this.mfaLoading.set(true);
+    this.mfaMessage.set('');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ enabled: boolean; configured: boolean }>(`${API_BASE_URL}/auth/mfa/status`),
+      );
+      this.mfaEnabled.set(response.enabled);
+      this.mfaSuccess.set(true);
+      this.mfaMessage.set(response.enabled ? 'MFA activo en esta cuenta.' : 'MFA disponible pero desactivado.');
+    } catch (error) {
+      this.mfaSuccess.set(false);
+      this.mfaMessage.set(
+        error instanceof HttpErrorResponse && error.status === 401
+          ? 'La sesión expiró. Inicia sesión de nuevo.'
+          : 'No se pudo consultar el estado MFA.',
+      );
+    } finally {
+      this.mfaLoading.set(false);
+    }
+  }
+
+  async startMfaSetup() {
+    if (!this.session.isAuthenticated() || this.mfaLoading()) return;
+    this.mfaLoading.set(true);
+    this.mfaMessage.set('');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ enabled: boolean; configured: boolean; secret?: string; otpauthUri?: string }>(
+          `${API_BASE_URL}/auth/mfa/setup`,
+        ),
+      );
+      this.mfaEnabled.set(response.enabled);
+      if (response.enabled) {
+        this.mfaSuccess.set(true);
+        this.mfaMessage.set('MFA ya está activo en esta cuenta.');
+      } else if (response.secret && response.otpauthUri) {
+        this.mfaSetupSecret.set(response.secret);
+        this.mfaSetupUri.set(response.otpauthUri);
+        this.mfaSuccess.set(true);
+        this.mfaMessage.set('Introduce el primer código generado para activar MFA.');
+      }
+    } catch (error) {
+      this.mfaSuccess.set(false);
+      this.mfaMessage.set(
+        error instanceof HttpErrorResponse && error.status === 503
+          ? 'El servidor no tiene configurada una clave válida para cifrar MFA.'
+          : 'No se pudo iniciar la configuración MFA.',
+      );
+    } finally {
+      this.mfaLoading.set(false);
+    }
+  }
+
+  async verifyMfa() {
+    if (!this.session.isAuthenticated() || this.mfaLoading() || !/^\d{6}$/.test(this.mfaVerifyCode)) return;
+    this.mfaLoading.set(true);
+    this.mfaMessage.set('');
+    try {
+      await firstValueFrom(
+        this.http.post<{ enabled: boolean }>(`${API_BASE_URL}/auth/mfa/verify`, { code: this.mfaVerifyCode }),
+      );
+      this.mfaEnabled.set(true);
+      this.mfaSetupSecret.set('');
+      this.mfaSetupUri.set('');
+      this.mfaVerifyCode = '';
+      this.mfaSuccess.set(true);
+      this.mfaMessage.set('MFA activado. Inicia sesión nuevamente para continuar.');
+      this.session.logout();
+    } catch (error) {
+      this.mfaSuccess.set(false);
+      this.mfaMessage.set(
+        error instanceof HttpErrorResponse && error.status === 401
+          ? 'El código MFA no es válido o ya fue usado.'
+          : 'No se pudo activar MFA.',
+      );
+    } finally {
+      this.mfaLoading.set(false);
+    }
+  }
+
+  async disableMfa() {
+    if (!this.session.isAuthenticated() || this.mfaLoading() || !/^\d{6}$/.test(this.mfaDisableCode)) return;
+    this.mfaLoading.set(true);
+    this.mfaMessage.set('');
+    try {
+      await firstValueFrom(
+        this.http.post<{ enabled: boolean }>(`${API_BASE_URL}/auth/mfa/disable`, { code: this.mfaDisableCode }),
+      );
+      this.mfaEnabled.set(false);
+      this.mfaDisableCode = '';
+      this.mfaSuccess.set(true);
+      this.mfaMessage.set('MFA desactivado. Inicia sesión nuevamente para continuar.');
+      this.session.logout();
+    } catch (error) {
+      this.mfaSuccess.set(false);
+      this.mfaMessage.set(
+        error instanceof HttpErrorResponse && error.status === 401
+          ? 'El código MFA no es válido.'
+          : 'No se pudo desactivar MFA.',
+      );
+    } finally {
+      this.mfaLoading.set(false);
+    }
+  }
+
   ngOnDestroy() {
     this.reset();
   }
@@ -325,5 +487,13 @@ export class WorkspaceComponent implements OnDestroy {
     this.updatedAt.set(null);
     this.error.set('');
     this.loading.set(false);
+    this.mfaEnabled.set(null);
+    this.mfaLoading.set(false);
+    this.mfaMessage.set('');
+    this.mfaSuccess.set(false);
+    this.mfaSetupSecret.set('');
+    this.mfaSetupUri.set('');
+    this.mfaVerifyCode = '';
+    this.mfaDisableCode = '';
   }
 }

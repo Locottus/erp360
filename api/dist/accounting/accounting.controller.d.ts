@@ -53,10 +53,18 @@ export declare class AccountingController {
             revenue: number;
             expenses: number;
             netIncome: number;
+            comparative: {
+                fromDate: string;
+                toDate: string;
+                revenue: number;
+                expenses: number;
+                netIncome: number;
+            };
         };
     }>;
     bankAccounts(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     bankReconciliationLines(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
+    bankReconciliationSuggestions(request: AuthenticatedRequest): Promise<import("pg").QueryResultRow[]>;
     reconcileBankLine(request: AuthenticatedRequest, id: string, input: {
         matchedPaymentId?: string;
         status: 'matched' | 'reconciled' | 'difference';
@@ -67,6 +75,13 @@ export declare class AccountingController {
         status: string;
         matchedPaymentId: string | null;
         differenceAmount: number | null | undefined;
+    }>;
+    reverseBankLine(request: AuthenticatedRequest, id: string, input: {
+        reason: string;
+    }): Promise<{
+        id: string;
+        status: string;
+        matchedPaymentId: null;
     }>;
     upsertBankAccount(request: AuthenticatedRequest, input: {
         code: string;
@@ -197,6 +212,16 @@ export declare class AccountingController {
             totalCredit: number;
             isBalanced: boolean;
         };
+    }>;
+    getInventoryCostIntegrity(request: AuthenticatedRequest): Promise<{
+        capturedAt: string;
+        dispatchMovements: number;
+        dispatchWithSnapshot: number;
+        dispatchWithoutSnapshot: number;
+        dispatchWithNegativeCost: number;
+        dispatchQuantityMismatch: number;
+        lotQuantityNegative: number;
+        complete: boolean;
     }>;
     closePeriod(request: AuthenticatedRequest, body: ClosePeriodInput): Promise<{
         id: string;

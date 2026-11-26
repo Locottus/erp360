@@ -18,6 +18,7 @@ const crypto_1 = require("crypto");
 const database_service_1 = require("../common/database.service");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const accounting_service_1 = require("./accounting.service");
 let AccountingController = class AccountingController {
     accountingService;
@@ -28,7 +29,13 @@ let AccountingController = class AccountingController {
         return this.accountingService.listAccounts(request.user);
     }
     generalLedger(request, accountCode, fromDate, toDate, page, pageSize) {
-        return this.accountingService.generalLedger(request.user, { accountCode, fromDate, toDate, page, pageSize });
+        return this.accountingService.generalLedger(request.user, {
+            accountCode,
+            fromDate,
+            toDate,
+            page,
+            pageSize,
+        });
     }
     financialStatements(request, asOfDate, fromDate, toDate) {
         return this.accountingService.getFinancialStatements(request.user, asOfDate, fromDate, toDate);
@@ -39,8 +46,14 @@ let AccountingController = class AccountingController {
     bankReconciliationLines(request) {
         return this.accountingService.listBankReconciliationLines(request.user);
     }
+    bankReconciliationSuggestions(request) {
+        return this.accountingService.listBankReconciliationSuggestions(request.user);
+    }
     reconcileBankLine(request, id, input) {
         return this.accountingService.reconcileBankLine(request.user, id, input);
+    }
+    reverseBankLine(request, id, input) {
+        return this.accountingService.reverseBankLine(request.user, id, input);
     }
     upsertBankAccount(request, input) {
         return this.accountingService.upsertBankAccount(request.user, input);
@@ -57,14 +70,18 @@ let AccountingController = class AccountingController {
     creditableInvoiceLines(request, id) {
         return this.accountingService.creditableInvoiceLines(request.user, id);
     }
-    credits(request) { return this.accountingService.listCredits(request.user); }
+    credits(request) {
+        return this.accountingService.listCredits(request.user);
+    }
     refund(request, id, input) {
         return this.accountingService.refundCredit(request.user, id, input);
     }
     returnCreditedStock(request, id, input) {
         return this.accountingService.returnCreditedStock(request.user, id, input);
     }
-    payables(request) { return this.accountingService.listPayables(request.user); }
+    payables(request) {
+        return this.accountingService.listPayables(request.user);
+    }
     supplierRefunds(request, id) {
         return this.accountingService.supplierRefundHistory(request.user, id);
     }
@@ -74,7 +91,9 @@ let AccountingController = class AccountingController {
     paySupplier(request, id, input) {
         return this.accountingService.paySupplier(request.user, id, input);
     }
-    periods(request) { return this.accountingService.listPeriods(request.user); }
+    periods(request) {
+        return this.accountingService.listPeriods(request.user);
+    }
     reopen(request, input) {
         return this.accountingService.reopenPeriod(request.user, input);
     }
@@ -93,6 +112,9 @@ let AccountingController = class AccountingController {
     getTrialBalance(request, fromDate, toDate) {
         return this.accountingService.getTrialBalance(request.user, fromDate, toDate);
     }
+    getInventoryCostIntegrity(request) {
+        return this.accountingService.getInventoryCostIntegrity(request.user);
+    }
     closePeriod(request, body) {
         return this.accountingService.closePeriod(request.user, body);
     }
@@ -101,6 +123,7 @@ exports.AccountingController = AccountingController;
 __decorate([
     (0, common_1.Get)('accounts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -109,6 +132,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('reports/general-ledger'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('accountCode')),
     __param(2, (0, common_1.Query)('fromDate')),
@@ -122,6 +146,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('reports/financial-statements'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('asOfDate')),
     __param(2, (0, common_1.Query)('fromDate')),
@@ -133,6 +158,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('bank-accounts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -141,14 +167,25 @@ __decorate([
 __decorate([
     (0, common_1.Get)('bank-reconciliation-lines'),
     (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "bankReconciliationLines", null);
 __decorate([
+    (0, common_1.Get)('bank-reconciliation-suggestions'),
+    (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "bankReconciliationSuggestions", null);
+__decorate([
     (0, common_1.Post)('bank-reconciliation-lines/:id/reconcile'),
     (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.reconcile'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -157,8 +194,20 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "reconcileBankLine", null);
 __decorate([
+    (0, common_1.Post)('bank-reconciliation-lines/:id/reverse'),
+    (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.reconcile'),
+    __param(0, (0, common_1.Req)()),
+    __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
+    __param(2, (0, common_1.Body)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object, String, Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "reverseBankLine", null);
+__decorate([
     (0, common_1.Post)('bank-accounts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -168,6 +217,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('bank-accounts/:id/statements/import'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -178,6 +228,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/returns'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -188,6 +239,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales-invoices/:id/credit'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -198,6 +250,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales-invoices/:id/creditable-lines'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -207,6 +260,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('credits'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -215,6 +269,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('credits/:id/refunds'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -225,6 +280,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('credits/:id/stock-return'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -235,6 +291,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('payables'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -243,6 +300,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchase-orders/:id/refunds'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -252,6 +310,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/refunds'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -262,6 +321,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/payments'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -272,6 +332,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('periods'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -280,6 +341,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('periods/reopen'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.period.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -289,6 +351,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('bootstrap-accounts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -297,6 +360,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales-invoices/:id/post'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -306,6 +370,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales-invoices/:id/payments'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -316,6 +381,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchase-orders/:id/post'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -325,6 +391,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('reports/trial-balance'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('fromDate')),
     __param(2, (0, common_1.Query)('toDate')),
@@ -333,8 +400,18 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], AccountingController.prototype, "getTrialBalance", null);
 __decorate([
+    (0, common_1.Get)('reports/inventory-cost-integrity'),
+    (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
+    __param(0, (0, common_1.Req)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", void 0)
+], AccountingController.prototype, "getInventoryCostIntegrity", null);
+__decorate([
     (0, common_1.Post)('periods/close'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.period.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -356,7 +433,8 @@ let PaymentWebhookController = class PaymentWebhookController {
         if (!/^[a-z0-9_-]{1,64}$/.test(providerCode)) {
             throw new common_1.BadRequestException('Invalid payment provider.');
         }
-        const companyCode = (companyCodeHeader ?? (typeof body.companyCode === 'string' ? body.companyCode : '')).trim();
+        const companyCode = (companyCodeHeader ??
+            (typeof body.companyCode === 'string' ? body.companyCode : '')).trim();
         if (!companyCode)
             throw new common_1.BadRequestException('x-company-code is required.');
         const company = await this.db.query('SELECT id FROM companies WHERE code=$1 AND is_active=TRUE', [companyCode]);
@@ -364,10 +442,14 @@ let PaymentWebhookController = class PaymentWebhookController {
             throw new common_1.BadRequestException('Active company not found.');
         const eventId = typeof body.eventId === 'string'
             ? body.eventId
-            : typeof body.id === 'string' ? body.id : '';
+            : typeof body.id === 'string'
+                ? body.id
+                : '';
         const eventType = typeof body.eventType === 'string'
             ? body.eventType
-            : typeof body.type === 'string' ? body.type : 'unknown';
+            : typeof body.type === 'string'
+                ? body.type
+                : 'unknown';
         if (!eventId || eventId.length > 128)
             throw new common_1.BadRequestException('eventId is required.');
         let signatureValid = false;
@@ -375,22 +457,42 @@ let PaymentWebhookController = class PaymentWebhookController {
         const secret = secretMap[providerCode];
         if (secret && signature) {
             const payload = JSON.stringify(body);
-            const expected = (0, crypto_1.createHmac)('sha256', secret).update(payload, 'utf8').digest();
+            const expected = (0, crypto_1.createHmac)('sha256', secret)
+                .update(payload, 'utf8')
+                .digest();
             const supplied = Buffer.from(signature.replace(/^sha256=/i, '').trim(), 'hex');
-            signatureValid = supplied.length === expected.length &&
-                (0, crypto_1.timingSafeEqual)(supplied, expected);
+            signatureValid =
+                supplied.length === expected.length &&
+                    (0, crypto_1.timingSafeEqual)(supplied, expected);
         }
         const insert = await this.db.query(`INSERT INTO payment_gateway_events
          (company_id,provider,event_id,event_type,signature_valid,payload,processed)
        VALUES($1,$2,$3,$4,$5,$6,FALSE)
        ON CONFLICT(provider,event_id) DO NOTHING
-       RETURNING id`, [company.rows[0].id, providerCode, eventId, eventType, signatureValid, JSON.stringify(body)]);
+       RETURNING id`, [
+            company.rows[0].id,
+            providerCode,
+            eventId,
+            eventType,
+            signatureValid,
+            JSON.stringify(body),
+        ]);
         if (!insert.rows[0])
             return { received: true, duplicate: true, signatureValid };
         if (!signatureValid) {
-            return { received: true, duplicate: false, signatureValid: false, message: 'Evento retenido para revisión; no se aplicó ningún pago.' };
+            return {
+                received: true,
+                duplicate: false,
+                signatureValid: false,
+                message: 'Evento retenido para revisión; no se aplicó ningún pago.',
+            };
         }
-        return { received: true, duplicate: false, signatureValid: true, message: 'Evento recibido. El procesamiento contable automático requiere una conciliación autorizada.' };
+        return {
+            received: true,
+            duplicate: false,
+            signatureValid: true,
+            message: 'Evento recibido. El procesamiento contable automático requiere una conciliación autorizada.',
+        };
     }
     readSecretMap() {
         try {

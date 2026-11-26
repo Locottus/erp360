@@ -5,7 +5,13 @@ import { AssistantDiagnosticsService, providerDiagnostic } from './assistant-dia
 
 describe('Purchase order diagnostics', () => {
   const id = '12345678-1234-1234-1234-123456789abc';
-  const user: AuthTokenPayload = { sub: 'user', companyId: 'company', email: 'user@example.test', roles: ['admin'] };
+  const user: AuthTokenPayload = {
+    sub: 'user',
+    companyId: 'company',
+    email: 'user@example.test',
+    roles: ['admin'],
+    permissions: ['*'],
+  };
   const target = { kind: 'purchase-order', id };
   const row = { status: 'received', has_lines: true, has_legacy: false, pending_lines: 1,
     over_received_lines: 0, overdue: false, posted: false };
@@ -46,7 +52,12 @@ describe('Purchase order diagnostics', () => {
   });
 
   it('rejects unauthorized users and a missing order without disclosing other tenants', async () => {
-    await expect(service.inspect({ ...user, roles: ['purchases'] }, target)).rejects.toMatchObject({ status: 403 });
+    await expect(
+      service.inspect(
+        { ...user, roles: ['employee'], permissions: ['company.read'] },
+        target,
+      ),
+    ).rejects.toMatchObject({ status: 403 });
     expect(connect).not.toHaveBeenCalled();
     query.mockResolvedValue({ rows: [] });
     await expect(service.inspect(user, target)).rejects.toMatchObject({ status: 404 });

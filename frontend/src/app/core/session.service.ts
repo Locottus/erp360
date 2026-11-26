@@ -11,6 +11,7 @@ type LoginResponse = {
     fullName: string;
     companyId: string;
     roles: string[];
+    permissions?: string[];
   };
 };
 
@@ -20,6 +21,7 @@ export type AuthUser = {
   fullName: string;
   companyId: string;
   roles: string[];
+  permissions?: string[];
 };
 
 export type CurrentCompany = {
@@ -48,6 +50,15 @@ export class SessionService {
   private readonly token = signal<string | null>(null);
   private revision = 0;
   readonly isAuthenticated = computed(() => Boolean(this.token()) && Boolean(this.user()));
+
+  hasPermission(permission: string) {
+    const permissions = this.user()?.permissions ?? [];
+    return permissions.includes('*') || permissions.includes(permission);
+  }
+
+  hasAnyPermission(...required: string[]) {
+    return required.some((permission) => this.hasPermission(permission));
+  }
 
   constructor(private readonly http: HttpClient) {
     localStorage.removeItem(TOKEN_STORAGE_KEY);

@@ -961,7 +961,7 @@ export class InventoryService {
         [input.quantity, user.companyId, location, input.productId],
       );
 
-      await this.insertMovement(
+      const movement = await this.insertMovement(
         client,
         user,
         input.productId,
@@ -976,6 +976,16 @@ export class InventoryService {
         input.direction === 'in' ? 'explicit' : costPolicy.policy,
         cost.source,
       );
+      if (input.direction === 'out') {
+        await this.postAdjustmentOutCogs(
+          client,
+          user,
+          movement.id,
+          cost.totalCost,
+          costPolicy.policy,
+          costPolicy.revision,
+        );
+      }
       if (input.direction === 'in') {
         await this.createCostLot(client, user.companyId, input.productId, location, input.quantity,
           input.unitCost!, 'manual_adjustment');
@@ -1388,6 +1398,61 @@ export class InventoryService {
       source: policy === 'fifo' ? 'fifo_cost_lots' : 'weighted_average_cost_lots',
       allocations,
     };
+  }
+
+  private async postAdjustmentOutCogs(
+    client: DbClient,
+    user: AuthUser,
+    movementId: string,
+    cogsTotal: number,
+    costPolicy: 'weighted_average' | 'fifo',
+    costRevision: number,
+  ) {
+    const existing = await client.query(
+      `SELECT id FROM accounting_journal_entries
+       WHERE company_id=$1 AND source_type='inventory_adjustment_out' AND source_id=$2 LIMIT 1`,
+      [user.companyId, movementId],
+    );
+    if (existing.rows[0]) {
+      await client.query(
+        'UPDATE inventory_movements SET cost_posted=TRUE WHERE id=$1 AND company_id=$2',
+        [movementId, user.companyId],
+      );
+      return;
+    }
+
+    if (cogsTotal > 0) {
+      const accounts = await client.query<{ id: string; code: string }>(
+        `SELECT id,code FROM accounting_accounts WHERE company_id=$1 AND code IN ('1200','5100')`,
+        [user.companyId],
+      );
+      const inventory = accounts.rows.find(row => row.code === '1200');
+      const cogs = accounts.rows.find(row => row.code === '5100');
+      if (!inventory || !cogs) {
+        throw new BadRequestException('Contabilidad no tiene cuentas 1200 Inventario y 5100 Costo de ventas. Ejecuta bootstrap de cuentas.');
+      }
+      const entryNumber = await nextDocumentNumber(client, user.companyId, 'AUTO-JE');
+      const entry = await client.query<{ id: string }>(
+        `INSERT INTO accounting_journal_entries(company_id,entry_number,entry_date,source_type,source_id,description,created_by)
+         VALUES($1,$2,CURRENT_DATE,'inventory_adjustment_out',$3,$4,$5) RETURNING id`,
+        [user.companyId, entryNumber, movementId, `Costo de salida manual ${movementId}`, user.sub],
+      );
+      await client.query(
+        `INSERT INTO accounting_journal_lines(journal_entry_id,account_id,line_description,debit,credit)
+         VALUES($1,$2,'Costo por ajuste manual de salida',$3,0),($1,$4,'Salida de inventario por ajuste manual',0,$3)`,
+        [entry.rows[0].id, cogs.id, cogsTotal.toFixed(4), inventory.id],
+      );
+      await this.insertAudit(client, user, 'inventory.adjustment.cogs.post', movementId, {
+        journal_entry_id: entry.rows[0].id,
+        cogs_total: cogsTotal,
+        cost_policy: costPolicy,
+        cost_revision: costRevision,
+      });
+    }
+    await client.query(
+      'UPDATE inventory_movements SET cost_posted=TRUE WHERE id=$1 AND company_id=$2',
+      [movementId, user.companyId],
+    );
   }
 
   private async postSaleDispatchCogs(

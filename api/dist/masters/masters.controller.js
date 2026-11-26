@@ -16,6 +16,7 @@ exports.MastersController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const masters_service_1 = require("./masters.service");
 let MastersController = class MastersController {
     mastersService;
@@ -57,6 +58,7 @@ exports.MastersController = MastersController;
 __decorate([
     (0, common_1.Patch)(':kind/:id'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.update'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('kind')),
     __param(2, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
@@ -68,6 +70,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)(':kind/import'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.import'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('kind')),
     __param(2, (0, common_1.Body)()),
@@ -78,6 +81,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('customers'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('masters.customers.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -86,6 +90,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('customers'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.customers.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -94,6 +99,7 @@ __decorate([
 ], MastersController.prototype, "createCustomer", null);
 __decorate([
     (0, common_1.Get)('products'),
+    (0, permissions_decorator_1.Permissions)('masters.products.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -102,6 +108,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('products'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.products.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -111,6 +118,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('suppliers'),
     (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    (0, permissions_decorator_1.Permissions)('masters.suppliers.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -119,6 +127,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('suppliers'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.suppliers.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -127,6 +136,7 @@ __decorate([
 ], MastersController.prototype, "createSupplier", null);
 __decorate([
     (0, common_1.Get)('tax-rates'),
+    (0, permissions_decorator_1.Permissions)('masters.tax-rates.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -135,6 +145,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('tax-rates'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('masters.tax-rates.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),

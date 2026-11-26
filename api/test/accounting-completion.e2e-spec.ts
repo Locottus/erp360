@@ -71,6 +71,28 @@ describe('Operational accounting completion', () => {
       [first.body.id],
     );
     expect(lines.rows[0]).toEqual({ count: '2', statuses: ['pending', 'pending'] });
+
+    const line = await db.query<{ id: string }>(
+      'SELECT id FROM bank_statement_lines WHERE statement_id=$1 ORDER BY reference LIMIT 1',
+      [first.body.id],
+    );
+    await post(`/accounting/bank-reconciliation-lines/${line.rows[0].id}/reconcile`, {
+      status: 'difference',
+      differenceAmount: 1,
+      reason: 'Difference confirmed for isolated bank validation',
+    }).expect(201);
+    await post(`/accounting/bank-reconciliation-lines/${line.rows[0].id}/reverse`, {
+      reason: 'Controlled reversal after isolated validation',
+    }).expect(201);
+    const reversed = await db.query<{ reconciliation_status: string; reconciliation_reason: string }>(
+      `SELECT reconciliation_status,reconciliation_reason
+       FROM bank_statement_lines WHERE id=$1`,
+      [line.rows[0].id],
+    );
+    expect(reversed.rows[0]).toEqual({
+      reconciliation_status: 'pending',
+      reconciliation_reason: 'Controlled reversal after isolated validation',
+    });
   });
 
   it('creates cumulative partial credits and restores only credited physical quantities with COGS', async () => {

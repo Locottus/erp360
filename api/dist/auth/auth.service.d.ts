@@ -13,10 +13,44 @@ export declare class AuthService {
             fullName: string;
             companyId: string;
             roles: string[];
+            permissions: string[];
         };
     }>;
     verifyAccessToken(token: string): AuthTokenPayload;
     authenticateAccessToken(token: string): Promise<AuthTokenPayload>;
+    getEffectivePermissions(userId: string, companyId: string): Promise<string[]>;
+    getRbacState(user: AuthTokenPayload): Promise<{
+        revision: number;
+        permissions: {
+            code: string;
+            resource: string;
+            action: string;
+            description: string;
+        }[];
+        roles: {
+            code: string;
+            name: string;
+            description: string;
+        }[];
+        overrides: {
+            permission_code: string;
+            effect: "grant" | "deny";
+        }[];
+    }>;
+    updateRbacOverrides(user: AuthTokenPayload, input: {
+        expectedRevision: number;
+        reason: string;
+        overrides: Array<{
+            permissionCode: string;
+            effect: 'grant' | 'deny';
+        }>;
+    }): Promise<{
+        revision: number;
+    }>;
+    getMfaStatus(user: AuthTokenPayload): Promise<{
+        enabled: boolean;
+        configured: boolean;
+    }>;
     setupMfa(user: AuthTokenPayload): Promise<{
         enabled: boolean;
         configured: boolean;
@@ -63,6 +97,13 @@ export declare class AuthService {
         id: string;
         revision: number;
     }>;
+    resetUserMfa(user: AuthTokenPayload, id: string, input: {
+        expectedRevision: number;
+        reason: string;
+    }): Promise<{
+        reset: boolean;
+        revision: number;
+    }>;
     issuePasswordReset(user: AuthTokenPayload, id: string): Promise<{
         resetToken: string;
         expiresInHours: number;
@@ -82,6 +123,7 @@ export declare class AuthService {
         fullName: string;
         companyId: string;
         roles: string[];
+        permissions: string[];
     }>;
     bootstrapAdmin(input: BootstrapAdminInput, correlationId?: string): Promise<{
         userId: string;

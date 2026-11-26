@@ -95,7 +95,7 @@ export class AuthConsoleComponent {
       await this.router.navigateByUrl('/workspace');
     } catch (error) {
       this.error = error instanceof HttpErrorResponse && error.status === 401
-        ? 'Correo o contraseña incorrectos.' : 'No se pudo acceder. Comprueba la conexión o intenta más tarde.';
+        ? 'Correo, contraseña o código MFA incorrectos.' : 'No se pudo acceder. Comprueba la conexión o intenta más tarde.';
     } finally { this.loading = false; }
   }
 

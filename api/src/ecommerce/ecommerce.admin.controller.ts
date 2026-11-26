@@ -1,22 +1,43 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { Roles } from '../auth/roles.decorator';
+import { Permissions } from '../auth/permissions.decorator';
 import type { AuthenticatedRequest } from '../auth/authenticated-request.type';
-import type { CreateCategoryInput, PublishListingInput, UpsertStorefrontSettingsInput } from './ecommerce.types';
+import type {
+  CreateCategoryInput,
+  PublishListingInput,
+  UpsertStorefrontSettingsInput,
+} from './ecommerce.types';
 import { EcommerceService } from './ecommerce.service';
 
 @Controller('ecommerce/admin')
 @UseGuards(AuthGuard)
 @Roles('admin')
+@Permissions('ecommerce.manage')
 export class EcommerceAdminController {
   constructor(private readonly ecommerceService: EcommerceService) {}
 
   @Get('fulfillments')
-  fulfillments(@Req() request: AuthenticatedRequest) { return this.ecommerceService.listFulfillments(request.user); }
+  fulfillments(@Req() request: AuthenticatedRequest) {
+    return this.ecommerceService.listFulfillments(request.user);
+  }
 
   @Patch('fulfillments/:id')
-  fulfillment(@Req() request: AuthenticatedRequest, @Param('id', ParseUUIDPipe) id: string,
-    @Body() input: Parameters<EcommerceService['updateFulfillment']>[2]) {
+  fulfillment(
+    @Req() request: AuthenticatedRequest,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() input: Parameters<EcommerceService['updateFulfillment']>[2],
+  ) {
     return this.ecommerceService.updateFulfillment(request.user, id, input);
   }
 
@@ -31,12 +52,18 @@ export class EcommerceAdminController {
   }
 
   @Post('settings')
-  upsertSettings(@Req() request: AuthenticatedRequest, @Body() body: UpsertStorefrontSettingsInput) {
+  upsertSettings(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: UpsertStorefrontSettingsInput,
+  ) {
     return this.ecommerceService.upsertAdminSettings(request.user, body);
   }
 
   @Post('categories')
-  createCategory(@Req() request: AuthenticatedRequest, @Body() body: CreateCategoryInput) {
+  createCategory(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: CreateCategoryInput,
+  ) {
     return this.ecommerceService.createCategory(request.user, body);
   }
 
@@ -46,7 +73,10 @@ export class EcommerceAdminController {
   }
 
   @Post('listings')
-  publishListing(@Req() request: AuthenticatedRequest, @Body() body: PublishListingInput) {
+  publishListing(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: PublishListingInput,
+  ) {
     return this.ecommerceService.publishListing(request.user, body);
   }
 
@@ -61,7 +91,10 @@ export class EcommerceAdminController {
   }
 
   @Post('subscribers/:id/unsubscribe')
-  unsubscribe(@Req() request: AuthenticatedRequest, @Param('id') subscriberId: string) {
+  unsubscribe(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') subscriberId: string,
+  ) {
     return this.ecommerceService.unsubscribe(request.user, subscriberId);
   }
 }

@@ -2,13 +2,27 @@
 
 ## Estado de avance actual
 - **P0-06 (multimoneda):** base operativa implementada en empresa, tasas y pagos contables (cliente/proveedor) con monto documental + monto base.
+- **P0-01 (despliegue de migraciones):** respaldada la base operativa y
+  validadas las migraciones 0037–0039 sobre copia restaurada. Aplicadas y
+  registradas en el ledger de `erp360`.
 - **P0-02 (valoración/costo):** base de costo implementada con política de
   empresa, snapshots por despacho y asiento COGS balanceado. Falta completar
-  lotes FIFO consumidos y pruebas contables masivas.
+  lotes FIFO consumidos y pruebas contables masivas. Los ajustes manuales de
+  salida consumen las capas y publican COGS balanceado una sola vez por movimiento.
+  Los ajustes manuales de entrada conservan costo explícito y crean capa; no crean
+  asiento automático adicional hasta aprobar una cuenta oficial de diferencias.
+  Añadido reporte de
+  integridad de snapshots, cantidades y lotes negativos.
 - **P0-04 (bancos):** existe conciliación de líneas, vínculo a pago y diferencias
-  auditadas. Falta importar extractos reales y matching masivo.
+  auditadas e importación CSV. Añadido matching semiautomático por importe,
+  referencia y contraparte. Añadida reversión controlada con motivo, auditoría
+  y restauración del pago a `registered` cuando no queda otra línea vinculada.
+  **P0-05 (estados financieros):** activos, pasivos, patrimonio, resultados y
+  comparativo inmediato del resultado están disponibles como reporte operativo.
 - **Identidad:** MFA TOTP implementado en API y campo de código en login.
-  Falta flujo visual de alta/restablecimiento y recuperación robusta.
+  Alta, verificación y baja MFA disponibles visualmente en `/workspace`.
+  Administradores pueden restablecer MFA desde Usuarios con revisión/motivo
+  auditado y revocación de sesión. Falta recuperación autoservicio robusta.
 
 ## Pendientes inmediatos
 1. **P0-02 · Costo de ventas definitivo**

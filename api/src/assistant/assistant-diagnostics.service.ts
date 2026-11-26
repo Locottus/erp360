@@ -23,10 +23,21 @@ export class AssistantDiagnosticsService {
 
   async inspect(user: AuthTokenPayload, input: unknown): Promise<DiagnosticReport> {
     const target = diagnosticTarget(input);
-    const allowed = target.kind === 'purchase-order' ? ['admin']
-      : target.kind === 'purchase-request' ? ['admin', 'purchases'] : ['admin', 'sales'];
-    if (target.kind !== 'stock' && target.kind !== 'screen' && !allowed.some(role => user.roles.includes(role))) {
-      throw new ForbiddenException('Tu rol no permite consultar este tipo de documento.');
+    const permissions = new Set(user.permissions ?? []);
+    const hasPermission = (permission: string) =>
+      permissions.has('*') || permissions.has(permission);
+    const required =
+      target.kind === 'purchase-order' || target.kind === 'purchase-request'
+        ? 'purchases.read'
+        : target.kind === 'sales-order'
+          ? 'sales.read'
+          : 'inventory.read';
+    if (
+      target.kind !== 'stock' &&
+      target.kind !== 'screen' &&
+      !hasPermission(required)
+    ) {
+      throw new ForbiddenException('Tu permiso no permite consultar este tipo de documento.');
     }
     const client = await this.db.connect();
     const report: DiagnosticReport = {
@@ -41,7 +52,9 @@ export class AssistantDiagnosticsService {
       await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
       await client.query("SET LOCAL statement_timeout = '3000ms'");
       this.evidence(report, 'Permisos de la sesión verificados por el servidor', {
-        canExecuteOperationalWrites: user.roles.includes('admin'),
+        canExecuteOperationalWrites:
+          (user.permissions ?? []).includes('*') ||
+          (user.permissions ?? []).includes('accounting.post'),
       });
       if (target.kind === 'screen') await this.screen(client, user, target, report);
       else if (target.kind === 'purchase-request') await this.purchase(client, user, target, report);
@@ -82,19 +95,39 @@ export class AssistantDiagnosticsService {
   private async screen(client: PoolClient, user: AuthTokenPayload,
     target: Extract<DiagnosticTarget, { kind: 'screen' }>, report: DiagnosticReport) {
     const area = diagnosticArea(target), knowledge = diagnosticKnowledge[area];
-    if (knowledge.roles.length && !knowledge.roles.some(role => user.roles.includes(role))) {
-      throw new ForbiddenException('Tu rol no permite consultar los datos de esta área.');
+    const permissions = new Set(user.permissions ?? []);
+    const hasPermission = (permission: string) =>
+      permissions.has('*') || permissions.has(permission);
+    const areaPermissions: Partial<Record<string, string>> = {
+      sales: 'sales.read',
+      purchases: 'purchases.read',
+      receiving: 'purchases.confirm',
+      controls: 'inventory.write',
+      accounting: 'accounting.read',
+      people: 'hr.read',
+      users: 'identity.users.read',
+      ecommerce: 'ecommerce.manage',
+      portal: 'portal.manage',
+      fiscal: 'fiscal.read',
+    };
+    const required = areaPermissions[area];
+    if (required && !hasPermission(required)) {
+      throw new ForbiddenException('Tu permiso no permite consultar los datos de esta área.');
     }
     if (area === 'platform') {
       const membership = await client.query(`SELECT o.role FROM platform_saas_operators o
         JOIN users u ON u.id=o.user_id AND u.is_active WHERE o.user_id=$1 AND o.enabled`, [user.sub]);
       if (!membership.rows.length) throw new ForbiddenException('Se requiere membresía SaaS activa.');
     }
-    const admin = user.roles.includes('admin');
+    const admin = permissions.has('*');
     let dataId: string | undefined;
     if (knowledge.query) {
       const parameterCount = knowledge.query.includes('$3') ? 3 : knowledge.query.includes('$2') ? 2 : 1;
-      const params = [user.companyId, admin || user.roles.includes('sales'), admin || user.roles.includes('purchases')];
+      const params = [
+        user.companyId,
+        admin || permissions.has('sales.read'),
+        admin || permissions.has('purchases.read'),
+      ];
       const result = await client.query<Facts>(knowledge.query, params.slice(0, parameterCount));
       if (!result.rows[0]) throw new NotFoundException('No hay contexto de empresa disponible.');
       dataId = this.evidence(report, `Resumen autorizado de ${area}`, result.rows[0]);

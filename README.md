@@ -134,6 +134,10 @@ La migración `0035_operational_readiness.sql` añade política de costo empresa
 snapshots COGS, conciliación bancaria inicial, MFA TOTP cifrado y retención
 idempotente de webhooks de pagos. La homologación fiscal y los cobros externos
 siguen sin proveedor ni credenciales de producción.
+El flujo MFA puede consultarse, activarse y desactivarse desde `/workspace`;
+activar o desactivar el factor exige iniciar sesión nuevamente.
+Los administradores pueden restablecer MFA de una cuenta desde `/users` con
+motivo y revisión auditados.
 La migración `0036_remaining_operational_foundations.sql` añade ledger de
 migraciones, bases de entitlements/outbox SaaS, almacenes autorizados,
 expiración de reservas y vínculo empleado/cuenta. Las integraciones externas

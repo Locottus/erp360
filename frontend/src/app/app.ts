@@ -13,32 +13,33 @@ type NavigationLink = {
   label: string;
   icon: string;
   visibility?: 'admin' | 'authenticated' | 'saas';
+  permissions?: string[];
 };
 
 const navigationGroups: { label: string; links: NavigationLink[] }[] = [
   { label: 'Tu espacio', links: [
     { route: '/', label: 'Inicio', icon: 'house-door' },
-    { route: '/workspace', label: 'Dashboard', icon: 'speedometer2' },
+    { route: '/workspace', label: 'Dashboard', icon: 'speedometer2', permissions: ['inventory.read', 'sales.read', 'purchases.read'] },
     { route: '/login', label: 'Acceso', icon: 'person-lock' },
   ] },
   { label: 'Operación', links: [
-    { route: '/operations', label: 'Operaciones', icon: 'kanban' },
-    { route: '/inventory', label: 'Inventario', icon: 'box-seam' },
-    { route: '/invoicing', label: 'Facturación', icon: 'receipt' },
-    { route: '/receiving', label: 'Recepciones', icon: 'box-arrow-in-down', visibility: 'admin' },
-    { route: '/controls', label: 'Control operativo', icon: 'arrow-left-right', visibility: 'admin' },
-    { route: '/accounting', label: 'Contabilidad', icon: 'journal-text', visibility: 'admin' },
-    { route: '/people', label: 'Personas', icon: 'person-badge', visibility: 'admin' },
+    { route: '/operations', label: 'Operaciones', icon: 'kanban', permissions: ['sales.read', 'purchases.read', 'inventory.read'] },
+    { route: '/inventory', label: 'Inventario', icon: 'box-seam', permissions: ['inventory.read'] },
+    { route: '/invoicing', label: 'Facturación', icon: 'receipt', permissions: ['sales.read', 'accounting.read'] },
+    { route: '/receiving', label: 'Recepciones', icon: 'box-arrow-in-down', permissions: ['purchases.confirm', 'purchases.read'] },
+    { route: '/controls', label: 'Control operativo', icon: 'arrow-left-right', permissions: ['inventory.write', 'inventory.confirm'] },
+    { route: '/accounting', label: 'Contabilidad', icon: 'journal-text', permissions: ['accounting.read'] },
+    { route: '/people', label: 'Personas', icon: 'person-badge', permissions: ['hr.read', 'hr.manage'] },
   ] },
   { label: 'Canales digitales', links: [
     { route: '/store', label: 'Tienda', icon: 'bag' },
-    { route: '/portal', label: 'Portal cliente', icon: 'person-vcard' },
-    { route: '/ecommerce/admin', label: 'Diseñar tienda', icon: 'palette' },
+    { route: '/portal', label: 'Portal cliente', icon: 'person-vcard', permissions: ['portal.manage'] },
+    { route: '/ecommerce/admin', label: 'Diseñar tienda', icon: 'palette', permissions: ['ecommerce.manage'] },
   ] },
   { label: 'Administración', links: [
-    { route: '/company', label: 'Mi empresa', icon: 'building', visibility: 'admin' },
-    { route: '/users', label: 'Usuarios', icon: 'people', visibility: 'admin' },
-    { route: '/catalogs', label: 'Catálogos', icon: 'collection', visibility: 'admin' },
+    { route: '/company', label: 'Mi empresa', icon: 'building', permissions: ['company.read'] },
+    { route: '/users', label: 'Usuarios', icon: 'people', permissions: ['identity.users.read'] },
+    { route: '/catalogs', label: 'Catálogos', icon: 'collection', permissions: ['masters.customers.read', 'masters.products.read', 'masters.suppliers.read', 'masters.tax-rates.read'] },
     { route: '/subscription', label: 'Mi suscripción', icon: 'card-checklist', visibility: 'authenticated' },
     { route: '/platform/billing', label: 'Administración SaaS', icon: 'buildings', visibility: 'saas' },
     { route: '/processes', label: 'Procesos', icon: 'signpost-split' },
@@ -67,10 +68,12 @@ export class App {
   readonly menuOpen = signal(false);
   readonly visibleNavigationGroups = computed(() => navigationGroups.map(group => ({
     ...group,
-    links: group.links.filter(link => !link.visibility ||
-      (link.visibility === 'admin' && this.session.user()?.roles.includes('admin')) ||
-      (link.visibility === 'authenticated' && this.session.isAuthenticated()) ||
-      (link.visibility === 'saas' && Boolean(this.saas.role()))),
+    links: group.links.filter(link =>
+      (!link.permissions || this.session.hasAnyPermission(...link.permissions)) &&
+      (!link.visibility ||
+        (link.visibility === 'admin' && this.session.user()?.roles.includes('admin')) ||
+        (link.visibility === 'authenticated' && this.session.isAuthenticated()) ||
+        (link.visibility === 'saas' && Boolean(this.saas.role())))),
   })).filter(group => group.links.length));
   readonly assistantDestinations = computed(() => this.visibleNavigationGroups().flatMap(group => group.links));
   readonly assistantOpenRequest = signal(0);

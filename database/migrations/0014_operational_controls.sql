@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS inventory_operations(
 );
 ALTER TABLE inventory_movements DROP CONSTRAINT IF EXISTS inventory_movements_movement_type_check;
 ALTER TABLE inventory_movements ADD CONSTRAINT inventory_movements_movement_type_check CHECK (
-    movement_type IN ('purchase_receipt','sale_reservation','sale_dispatch','reservation_release',
+    movement_type IN ('purchase_receipt','supplier_return','sale_reservation','sale_dispatch','reservation_release',
                      'adjustment_in','adjustment_out','transfer_in','transfer_out','count_in','count_out')
 );
 CREATE TABLE IF NOT EXISTS accounting_supplier_payments(

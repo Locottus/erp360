@@ -5,6 +5,7 @@ import type { SaasRole } from '../saas/saas-inputs';
 import { SaasOperatorGuard } from '../saas/saas-operator.guard';
 import { AssistantService } from './assistant.service';
 import { AssistantDiagnosticsService } from './assistant-diagnostics.service';
+import { Permissions } from '../auth/permissions.decorator';
 
 type OperatorRequest = AuthenticatedRequest & { saasRole: SaasRole };
 const operator = (request: OperatorRequest) => ({ ...request.user, saasRole: request.saasRole });
@@ -14,20 +15,24 @@ const operator = (request: OperatorRequest) => ({ ...request.user, saasRole: req
 export class AssistantController {
   constructor(private readonly assistant: AssistantService, private readonly diagnostics: AssistantDiagnosticsService) {}
   @Post('diagnostics')
+  @Permissions('assistant.use')
   @Header('Cache-Control', 'no-store')
   diagnose(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
     return this.diagnostics.inspect(request.user, body);
   }
   @Get('usage')
+  @Permissions('assistant.use')
   @Header('Cache-Control', 'no-store')
   usage(@Req() request: AuthenticatedRequest) { return this.assistant.usage(request.user); }
   @Post('chat')
+  @Permissions('assistant.use')
   @Header('Cache-Control', 'no-store')
   chat(@Req() request: AuthenticatedRequest, @Body() body: unknown) { return this.assistant.chat(request.user, body); }
 }
 
 @Controller('assistant/admin')
 @UseGuards(AuthGuard, SaasOperatorGuard)
+@Permissions('assistant.manage')
 export class AssistantOperatorController {
   constructor(private readonly assistant: AssistantService) {}
   @Get('service-types')

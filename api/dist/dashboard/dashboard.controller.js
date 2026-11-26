@@ -16,6 +16,7 @@ exports.DashboardController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const dashboard_service_1 = require("./dashboard.service");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 let DashboardController = class DashboardController {
     dashboard;
     constructor(dashboard) {
@@ -28,6 +29,7 @@ let DashboardController = class DashboardController {
 exports.DashboardController = DashboardController;
 __decorate([
     (0, common_1.Get)('overview'),
+    (0, permissions_decorator_1.Permissions)('inventory.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('period')),
     __metadata("design:type", Function),

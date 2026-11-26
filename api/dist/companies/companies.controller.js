@@ -17,6 +17,7 @@ const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const companies_service_1 = require("./companies.service");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 let CompaniesController = class CompaniesController {
     companiesService;
     constructor(companiesService) {
@@ -47,6 +48,7 @@ let CompaniesController = class CompaniesController {
 exports.CompaniesController = CompaniesController;
 __decorate([
     (0, common_1.Get)('current'),
+    (0, permissions_decorator_1.Permissions)('company.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -55,6 +57,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('current'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('company.update'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -64,6 +67,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('cost-policy'),
     (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -72,6 +76,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('cost-policy'),
     (0, roles_decorator_1.Roles)('admin', 'accountant'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -81,6 +86,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('currency-rates'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -89,6 +95,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('currency-rates'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.post'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -97,6 +104,7 @@ __decorate([
 ], CompaniesController.prototype, "setExchangeRate", null);
 __decorate([
     (0, common_1.Get)(':id'),
+    (0, permissions_decorator_1.Permissions)('company.read'),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Req)()),
     __metadata("design:type", Function),

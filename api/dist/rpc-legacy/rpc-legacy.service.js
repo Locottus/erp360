@@ -63,6 +63,10 @@ let RpcLegacyService = class RpcLegacyService {
     }
     async dispatch(auth, model, method, payload) {
         if (model === 'res.company' && method === 'current') {
+            const permissions = new Set(auth.permissions ?? []);
+            if (!permissions.has('*') && !permissions.has('company.read')) {
+                throw new common_1.ForbiddenException('Insufficient permissions.');
+            }
             const company = await this.db.query(`SELECT id, code, name, tax_id, is_active
          FROM companies
          WHERE id = $1
@@ -70,8 +74,9 @@ let RpcLegacyService = class RpcLegacyService {
             return company.rows[0] ?? null;
         }
         if (model === 'hr.employee' && method === 'search_read') {
-            if (!auth.roles.includes('admin')) {
-                throw new common_1.ForbiddenException('Insufficient role permissions.');
+            const permissions = new Set(auth.permissions ?? []);
+            if (!permissions.has('*') && !permissions.has('hr.read')) {
+                throw new common_1.ForbiddenException('Insufficient permissions.');
             }
             const employees = await this.db.query(`SELECT id, employee_code, full_name, email, job_title, hire_date, status
          FROM hr_employees
@@ -80,8 +85,9 @@ let RpcLegacyService = class RpcLegacyService {
             return employees.rows;
         }
         if (model === 'sale.order' && method === 'search_read') {
-            if (!auth.roles.some((role) => ['admin', 'sales'].includes(role))) {
-                throw new common_1.ForbiddenException('Insufficient role permissions.');
+            const permissions = new Set(auth.permissions ?? []);
+            if (!permissions.has('*') && !permissions.has('sales.read')) {
+                throw new common_1.ForbiddenException('Insufficient permissions.');
             }
             const limitRaw = payload['limit'];
             const parsedLimit = Number(limitRaw);

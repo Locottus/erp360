@@ -14,6 +14,7 @@ const common_1 = require("@nestjs/common");
 const core_1 = require("@nestjs/core");
 const auth_service_1 = require("./auth.service");
 const roles_decorator_1 = require("./roles.decorator");
+const permissions_decorator_1 = require("./permissions.decorator");
 let AuthGuard = class AuthGuard {
     authService;
     reflector;
@@ -32,10 +33,17 @@ let AuthGuard = class AuthGuard {
             throw new common_1.UnauthorizedException('Missing Bearer token.');
         }
         request.user = await this.authService.authenticateAccessToken(token);
-        const requiredRoles = this.reflector.getAllAndOverride(roles_decorator_1.ROLES_KEY, [
-            context.getHandler(),
-            context.getClass(),
-        ]);
+        const requiredPermissions = this.reflector.getAllAndOverride(permissions_decorator_1.PERMISSIONS_KEY, [context.getHandler(), context.getClass()]);
+        if (requiredPermissions && requiredPermissions.length > 0) {
+            const permissions = new Set(request.user.permissions ?? []);
+            const allowed = permissions.has('*') ||
+                requiredPermissions.every((permission) => permissions.has(permission));
+            if (!allowed) {
+                throw new common_1.ForbiddenException('Insufficient permissions.');
+            }
+            return true;
+        }
+        const requiredRoles = this.reflector.getAllAndOverride(roles_decorator_1.ROLES_KEY, [context.getHandler(), context.getClass()]);
         if (requiredRoles && requiredRoles.length > 0) {
             const userRoles = request.user.roles || [];
             const hasRequiredRole = requiredRoles.some((role) => userRoles.includes(role));

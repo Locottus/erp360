@@ -18,6 +18,7 @@ const auth_guard_1 = require("../auth/auth.guard");
 const saas_operator_guard_1 = require("../saas/saas-operator.guard");
 const assistant_service_1 = require("./assistant.service");
 const assistant_diagnostics_service_1 = require("./assistant-diagnostics.service");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const operator = (request) => ({ ...request.user, saasRole: request.saasRole });
 let AssistantController = class AssistantController {
     assistant;
@@ -35,6 +36,7 @@ let AssistantController = class AssistantController {
 exports.AssistantController = AssistantController;
 __decorate([
     (0, common_1.Post)('diagnostics'),
+    (0, permissions_decorator_1.Permissions)('assistant.use'),
     (0, common_1.Header)('Cache-Control', 'no-store'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
@@ -44,6 +46,7 @@ __decorate([
 ], AssistantController.prototype, "diagnose", null);
 __decorate([
     (0, common_1.Get)('usage'),
+    (0, permissions_decorator_1.Permissions)('assistant.use'),
     (0, common_1.Header)('Cache-Control', 'no-store'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
@@ -52,6 +55,7 @@ __decorate([
 ], AssistantController.prototype, "usage", null);
 __decorate([
     (0, common_1.Post)('chat'),
+    (0, permissions_decorator_1.Permissions)('assistant.use'),
     (0, common_1.Header)('Cache-Control', 'no-store'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
@@ -165,6 +169,7 @@ __decorate([
 exports.AssistantOperatorController = AssistantOperatorController = __decorate([
     (0, common_1.Controller)('assistant/admin'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard, saas_operator_guard_1.SaasOperatorGuard),
+    (0, permissions_decorator_1.Permissions)('assistant.manage'),
     __metadata("design:paramtypes", [assistant_service_1.AssistantService])
 ], AssistantOperatorController);
 //# sourceMappingURL=assistant.controller.js.map

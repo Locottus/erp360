@@ -16,6 +16,7 @@ exports.FiscalController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const fiscal_service_1 = require("./fiscal.service");
 let FiscalController = class FiscalController {
     fiscalService;
@@ -42,6 +43,7 @@ exports.FiscalController = FiscalController;
 __decorate([
     (0, common_1.Post)('providers/config'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('fiscal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -51,6 +53,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('invoices/:id/documents'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('fiscal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -61,6 +64,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('documents/:id/submit'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('fiscal.manage'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -70,6 +74,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('documents/:id'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('fiscal.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __metadata("design:type", Function),
@@ -79,6 +84,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('documents'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('fiscal.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('countryCode')),
     __metadata("design:type", Function),

@@ -7,6 +7,14 @@ export declare class AccountingService {
     listAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     listBankAccounts(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
     listBankReconciliationLines(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    listBankReconciliationSuggestions(user: AuthUser): Promise<import("pg").QueryResultRow[]>;
+    reverseBankLine(user: AuthUser, lineId: string, input: {
+        reason: string;
+    }): Promise<{
+        id: string;
+        status: string;
+        matchedPaymentId: null;
+    }>;
     reconcileBankLine(user: AuthUser, lineId: string, input: {
         matchedPaymentId?: string;
         status: 'matched' | 'reconciled' | 'difference';
@@ -43,6 +51,16 @@ export declare class AccountingService {
         importedLines: number;
         replayed: boolean;
     }>;
+    getInventoryCostIntegrity(user: AuthUser): Promise<{
+        capturedAt: string;
+        dispatchMovements: number;
+        dispatchWithSnapshot: number;
+        dispatchWithoutSnapshot: number;
+        dispatchWithNegativeCost: number;
+        dispatchQuantityMismatch: number;
+        lotQuantityNegative: number;
+        complete: boolean;
+    }>;
     getFinancialStatements(user: AuthUser, asOfDate?: string, fromDate?: string, toDate?: string): Promise<{
         basis: string;
         balanceSheet: {
@@ -60,6 +78,13 @@ export declare class AccountingService {
             revenue: number;
             expenses: number;
             netIncome: number;
+            comparative: {
+                fromDate: string;
+                toDate: string;
+                revenue: number;
+                expenses: number;
+                netIncome: number;
+            };
         };
     }>;
     generalLedger(user: AuthUser, options: {

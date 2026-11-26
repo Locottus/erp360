@@ -16,6 +16,7 @@ exports.InventoryController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const inventory_service_1 = require("./inventory.service");
 let InventoryController = class InventoryController {
     inventoryService;
@@ -74,10 +75,19 @@ let InventoryController = class InventoryController {
         return this.inventoryService.listStockBalances(request.user, locationCode);
     }
     listMovements(request, productId, locationCode, page, pageSize) {
-        return this.inventoryService.listMovements(request.user, { productId, locationCode, page, pageSize });
+        return this.inventoryService.listMovements(request.user, {
+            productId,
+            locationCode,
+            page,
+            pageSize,
+        });
     }
     valuationAndCogs(request, fromDate, toDate, locationCode) {
-        return this.inventoryService.valuationAndCogs(request.user, { fromDate, toDate, locationCode });
+        return this.inventoryService.valuationAndCogs(request.user, {
+            fromDate,
+            toDate,
+            locationCode,
+        });
     }
     listSalesOrdersForFulfillment(request) {
         return this.inventoryService.listSalesOrdersForFulfillment(request.user);
@@ -87,6 +97,7 @@ exports.InventoryController = InventoryController;
 __decorate([
     (0, common_1.Get)('warehouses'),
     (0, roles_decorator_1.Roles)('admin', 'inventory'),
+    (0, permissions_decorator_1.Permissions)('inventory.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -95,6 +106,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('warehouses'),
     (0, roles_decorator_1.Roles)('admin', 'inventory'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -104,6 +116,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('replenishment'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.replenishment.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('locationCode')),
     __metadata("design:type", Function),
@@ -113,6 +126,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('replenishment/:productId/purchase-commitments'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.replenishment.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -122,6 +136,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('replenishment/:productId/purchase-planning'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.replenishment.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -131,6 +146,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('replenishment/:productId/purchase-planning.csv'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.replenishment.read'),
     (0, common_1.Header)('Content-Type', 'text/csv; charset=utf-8'),
     (0, common_1.Header)('Content-Disposition', 'attachment; filename="purchase-planning.csv"'),
     (0, common_1.Header)('Cache-Control', 'no-store'),
@@ -143,6 +159,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('replenishment/:productId/proposals'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -153,6 +170,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('replenishment/:productId'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('productId', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -163,6 +181,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchases/orders/:id/receipts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -172,6 +191,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/orders/:id/receipts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -182,6 +202,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('transfers'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -191,6 +212,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('counts'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -200,6 +222,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/orders/:id/receive'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -210,6 +233,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales/orders/:id/reserve'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -220,6 +244,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales/orders/:id/dispatch'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -230,6 +255,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('adjustments'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('inventory.write'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -238,6 +264,7 @@ __decorate([
 ], InventoryController.prototype, "createAdjustment", null);
 __decorate([
     (0, common_1.Get)('stock'),
+    (0, permissions_decorator_1.Permissions)('inventory.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('locationCode')),
     __metadata("design:type", Function),
@@ -246,6 +273,7 @@ __decorate([
 ], InventoryController.prototype, "listStock", null);
 __decorate([
     (0, common_1.Get)('movements'),
+    (0, permissions_decorator_1.Permissions)('inventory.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('productId')),
     __param(2, (0, common_1.Query)('locationCode')),
@@ -258,6 +286,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('reports/valuation-cogs'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('accounting.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Query)('fromDate')),
     __param(2, (0, common_1.Query)('toDate')),
@@ -269,6 +298,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales-orders'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('sales.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),

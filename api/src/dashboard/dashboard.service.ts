@@ -34,9 +34,10 @@ export class DashboardService {
     if (period !== 'day' && period !== 'week' && period !== 'month') {
       throw new BadRequestException('period must be day, week or month.');
     }
-    const admin = user.roles.includes('admin');
-    const sales = admin || user.roles.includes('sales');
-    const purchases = admin || user.roles.includes('purchases');
+    const permissions = new Set(user.permissions ?? []);
+    const admin = permissions.has('*');
+    const sales = admin || permissions.has('sales.read');
+    const purchases = admin || permissions.has('purchases.read');
     const { unit, buckets } = periods[period];
     const [summary, series] = await Promise.all([
       this.db.query<SummaryRow>(

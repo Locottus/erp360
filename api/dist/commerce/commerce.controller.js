@@ -16,6 +16,7 @@ exports.CommerceController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const commerce_service_1 = require("./commerce.service");
 let CommerceController = class CommerceController {
     commerceService;
@@ -29,7 +30,10 @@ let CommerceController = class CommerceController {
         return this.commerceService.cancelOrder(request.user, id, 'purchase', input.reason);
     }
     async invoicePdf(request, id) {
-        return new common_1.StreamableFile(await this.commerceService.invoicePdf(request.user, id), { type: 'application/pdf', disposition: 'attachment; filename="factura-comercial.pdf"' });
+        return new common_1.StreamableFile(await this.commerceService.invoicePdf(request.user, id), {
+            type: 'application/pdf',
+            disposition: 'attachment; filename="factura-comercial.pdf"',
+        });
     }
     createQuotation(request, body) {
         return this.commerceService.createQuotation(request.user, body);
@@ -87,6 +91,7 @@ exports.CommerceController = CommerceController;
 __decorate([
     (0, common_1.Post)('sales/orders/:id/cancel'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('sales.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -97,6 +102,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/orders/:id/cancel'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -107,6 +113,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales/invoices/:id/pdf'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('sales.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -116,6 +123,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales/quotations'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('sales.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -125,6 +133,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales/quotations'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('sales.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -133,6 +142,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales/orders'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('sales.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -141,6 +151,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('sales/invoices'),
     (0, roles_decorator_1.Roles)('admin', 'sales'),
+    (0, permissions_decorator_1.Permissions)('sales.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -149,6 +160,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales/quotations/:id/confirm'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('sales.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -159,6 +171,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('sales/quotations/:id/validity'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('sales.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -169,6 +182,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('sales/orders/:id/invoice'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('sales.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -179,6 +193,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/requests'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.create'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -188,6 +203,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchases/requests'),
     (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    (0, permissions_decorator_1.Permissions)('purchases.read'),
     __param(0, (0, common_1.Req)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [Object]),
@@ -196,6 +212,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchases/requests/:id'),
     (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    (0, permissions_decorator_1.Permissions)('purchases.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -205,6 +222,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchases/requests/:id/delivery-plan'),
     (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    (0, permissions_decorator_1.Permissions)('purchases.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -214,6 +232,7 @@ __decorate([
 __decorate([
     (0, common_1.Get)('purchases/orders/:id/delivery-plan'),
     (0, roles_decorator_1.Roles)('admin', 'purchases'),
+    (0, permissions_decorator_1.Permissions)('purchases.read'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __metadata("design:type", Function),
@@ -223,6 +242,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('purchases/requests/:id/delivery-plan'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -233,6 +253,7 @@ __decorate([
 __decorate([
     (0, common_1.Patch)('purchases/orders/:id/delivery-plan'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -243,6 +264,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/requests/:id/reject'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id', common_1.ParseUUIDPipe)),
     __param(2, (0, common_1.Body)()),
@@ -253,6 +275,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/requests/:id/approve'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),
@@ -263,6 +286,7 @@ __decorate([
 __decorate([
     (0, common_1.Post)('purchases/orders/:id/receive'),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('purchases.confirm'),
     __param(0, (0, common_1.Req)()),
     __param(1, (0, common_1.Param)('id')),
     __param(2, (0, common_1.Body)()),

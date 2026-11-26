@@ -16,13 +16,16 @@ exports.EcommerceAdminController = void 0;
 const common_1 = require("@nestjs/common");
 const auth_guard_1 = require("../auth/auth.guard");
 const roles_decorator_1 = require("../auth/roles.decorator");
+const permissions_decorator_1 = require("../auth/permissions.decorator");
 const ecommerce_service_1 = require("./ecommerce.service");
 let EcommerceAdminController = class EcommerceAdminController {
     ecommerceService;
     constructor(ecommerceService) {
         this.ecommerceService = ecommerceService;
     }
-    fulfillments(request) { return this.ecommerceService.listFulfillments(request.user); }
+    fulfillments(request) {
+        return this.ecommerceService.listFulfillments(request.user);
+    }
     fulfillment(request, id, input) {
         return this.ecommerceService.updateFulfillment(request.user, id, input);
     }
@@ -142,6 +145,7 @@ exports.EcommerceAdminController = EcommerceAdminController = __decorate([
     (0, common_1.Controller)('ecommerce/admin'),
     (0, common_1.UseGuards)(auth_guard_1.AuthGuard),
     (0, roles_decorator_1.Roles)('admin'),
+    (0, permissions_decorator_1.Permissions)('ecommerce.manage'),
     __metadata("design:paramtypes", [ecommerce_service_1.EcommerceService])
 ], EcommerceAdminController);
 //# sourceMappingURL=ecommerce.admin.controller.js.map

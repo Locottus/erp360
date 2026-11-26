@@ -43,7 +43,12 @@ export class RpcLegacyService {
     if (!token || !model || !method) {
       throw new BadRequestException('object.execute_kw requires token, model and method.');
     }
-    let auth: { sub: string; companyId: string; roles: string[] };
+    let auth: {
+      sub: string;
+      companyId: string;
+      roles: string[];
+      permissions?: string[];
+    };
     try {
       auth = await this.authService.authenticateAccessToken(token);
     } catch {
@@ -53,12 +58,16 @@ export class RpcLegacyService {
   }
 
   private async dispatch(
-    auth: { sub: string; companyId: string; roles: string[] },
+    auth: { sub: string; companyId: string; roles: string[]; permissions?: string[] },
     model: string,
     method: string,
     payload: Record<string, unknown>,
   ) {
     if (model === 'res.company' && method === 'current') {
+      const permissions = new Set(auth.permissions ?? []);
+      if (!permissions.has('*') && !permissions.has('company.read')) {
+        throw new ForbiddenException('Insufficient permissions.');
+      }
       const company = await this.db.query(
         `SELECT id, code, name, tax_id, is_active
          FROM companies
@@ -70,8 +79,9 @@ export class RpcLegacyService {
     }
 
     if (model === 'hr.employee' && method === 'search_read') {
-      if (!auth.roles.includes('admin')) {
-        throw new ForbiddenException('Insufficient role permissions.');
+      const permissions = new Set(auth.permissions ?? []);
+      if (!permissions.has('*') && !permissions.has('hr.read')) {
+        throw new ForbiddenException('Insufficient permissions.');
       }
       const employees = await this.db.query(
         `SELECT id, employee_code, full_name, email, job_title, hire_date, status
@@ -84,8 +94,9 @@ export class RpcLegacyService {
     }
 
     if (model === 'sale.order' && method === 'search_read') {
-      if (!auth.roles.some((role) => ['admin', 'sales'].includes(role))) {
-        throw new ForbiddenException('Insufficient role permissions.');
+      const permissions = new Set(auth.permissions ?? []);
+      if (!permissions.has('*') && !permissions.has('sales.read')) {
+        throw new ForbiddenException('Insufficient permissions.');
       }
       const limitRaw = payload['limit'];
       const parsedLimit = Number(limitRaw);

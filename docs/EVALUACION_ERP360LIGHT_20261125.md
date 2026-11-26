@@ -58,9 +58,10 @@ No aporta:
 
 - 38 migraciones aplicadas desde cero en PostgreSQL 16 aislado: 93 tablas.
 - Segunda ejecución del migrador: idempotente.
-- API: 19 suites unitarias, 47 pruebas; build correcto.
+- API: 19 suites unitarias, 49 pruebas; build correcto.
 - Frontend: 103 pruebas; build correcto.
-- E2E: 21 suites y 117 pruebas contra una base aislada.
+- E2E: 21 suites y 118 pruebas contra una base aislada, incluida revocación
+  efectiva con el mismo JWT.
 - Compose construyó API y frontend; smoke test con 200 en API, proxy Nginx y HTML.
 - `npm audit --omit=dev`: 0 vulnerabilidades conocidas en API y frontend.
 
@@ -68,7 +69,7 @@ No aporta:
 
 | Área propuesta por Light | Estado en Modernizado | Evaluación |
 |---|---|---|
-| Identidad, empresa y sesión | Implementado con JWT Bearer | Funcional; diverge de cookie opaca/CSRF propuesta por Light. JWT sigue en `sessionStorage`, pendiente de decisión arquitectónica. |
+| Identidad, empresa y sesión | Implementado con JWT Bearer en `sessionStorage` | Decisión aprobada para continuar: conservar JWT en `sessionStorage`. Mantener revocación server-side, expiración, rotación y controles XSS/CSP. |
 | Artículos | Implementado como productos con SKU, precio y catálogos | Cobertura superior; no existe compatibilidad nominal con `/articles`. No renombrar sin consumidor aprobado. |
 | Almacenes y existencias | Implementado | Cobertura superior, incluidos reservas, transferencias y política de costo. |
 | Movimientos y documentos | Implementado | Flujos propios más amplios; las claves de idempotencia deben verificarse módulo por módulo antes de adoptar el contrato Light. |
@@ -91,9 +92,11 @@ No aporta:
 
 1. **Mantener bloqueados fiscal real, nómina real, pagos externos y
    restauraciones sobre datos reales.** Validación externa y aprobación competente.
-2. **Decidir la arquitectura de sesión.** El contrato Light propone cookie
-   `HttpOnly` + CSRF; Modernizado usa JWT en `sessionStorage`. La migración cambia
-   autenticación, proxies y clientes; requiere decisión explícita.
+2. **Conservar la arquitectura de sesión vigente.** Mantener JWT Bearer en
+   `sessionStorage`, revocación por `session_version`, expiración de ocho horas,
+   rotación de claves y límites de configuración. No introducir cookies o CSRF
+   en esta iteración. El riesgo XSS continúa mitigándose con autorización en
+   servidor, CSP, sanitización Angular y minimización de datos.
 3. **No ejecutar migraciones contra bases existentes sin ledger verificado.**
    El script endurecido falla ante un esquema legacy sin historial, y compara el
    SHA-256 de migraciones aplicadas.
@@ -109,13 +112,15 @@ No aporta:
    movimientos autorizados y auditoría.
 2. Implementar activos fijos únicamente con política contable aprobada,
    depreciación de ensayo y asientos separados/revisables.
-3. Añadir permisos granulares por empresa y acción. Conservar compatibilidad con
-   los roles existentes durante la transición.
+3. Añadir permisos granulares por empresa y acción, con RBAC compatible con los
+   roles existentes. Seguir el estándar de menor privilegio, denegación por
+   defecto, separación de lectura/escritura/confirmación/administración y
+   auditoría de cambios de privilegio.
 4. Completar alertas basadas en datos sintéticos, distinguiendo error de ausencia.
 5. Reducir progresivamente la deuda de lint. La configuración actual informa
    errores masivos de formato y tipo; no ejecutar un `--fix` global sin revisión.
-6. Ejecutar las pruebas e2e completas en CI con una base PostgreSQL vacía y
-   migrada por cada ejecución.
+6. CI automatizado: **pendiente por decisión explícita**. Cuando se habilite,
+   ejecutará pruebas e2e completas con una base PostgreSQL vacía y migrada.
 7. Añadir pruebas contractuales solo para consumidores o capacidades que
    realmente necesiten rutas compatibles con Light.
 
@@ -132,12 +137,41 @@ No aporta:
 | Fase | Resultado verificable | Dependencias |
 |---|---|---|
 | 0. Línea base | Builds, pruebas, migraciones desde cero, Docker y matriz de brechas | Completada en esta evaluación |
-| 1. Seguridad | Secretos fuertes, sesión decidida, permisos granulares, CSRF si aplica | Aprobación arquitectónica |
+| 1. Seguridad | Secretos fuertes, JWT Bearer aprobado y permisos RBAC granulares | Aprobación completada |
 | 2. Paridad esencial | Caja chica, activos, alertas y contratos faltantes | Fase 1 |
-| 3. Integridad operativa | CI e2e aislado, lint incremental, backup/restore periódicos y métricas | Fases 0–1 |
+| 3. Integridad operativa | Lint incremental, backup/restore periódicos y métricas; CI queda pendiente | Fases 0–1 |
 | 4. Compatibilidad | Adaptadores o rutas para consumidores aprobados de Light; sin reemplazar API existente por defecto | Inventario real de clientes/integraciones |
 | 5. Homologación | Fiscal, pagos, nómina y estados certificados por especialistas | Proveedor, normativa y ambiente de prueba |
 | 6. Producción | HTTPS, proxy, observabilidad, RPO/RTO, privacidad y aceptación de negocio | Fases 1–5 |
+
+### Estándar para permisos granulares
+
+Implementar permisos como combinación de **recurso + acción** (`sales.read`,
+`sales.create`, `sales.confirm`, `accounting.close`, etc.), agrupados por roles
+compatibles. Las decisiones de autorización se calculan siempre en el servidor
+para la empresa activa:
+
+- denegación por defecto;
+- `admin` conserva compatibilidad, sin convertir la interfaz en la barrera de
+  seguridad;
+- permisos separados para leer, crear, editar, confirmar, revertir y administrar;
+- asignación de permisos auditable por empresa;
+- revocación efectiva en la siguiente solicitud;
+- ningún permiso se infiere del JWT sin consultar pertenencias y estado actuales;
+- migración inicial que mapea los cuatro roles vigentes a permisos explícitos;
+- pruebas directas para rol insuficiente, recurso de otra empresa y revocación.
+
+El primer incremento aprobado es la fundación RBAC; su persistencia, guard
+reutilizable, mapeo de endpoints existentes y pruebas preceden a caja chica o
+activos.
+
+**Estado 25 de noviembre:** la fundación está implementada en la migración
+`0038_granular_permissions.sql`, con 38 permisos, resolución viva por usuario
+y empresa, compatibilidad con `@Roles` y precedencia de `@Permissions` en
+identidad, empresa, maestros, comercio, inventario, contabilidad, fiscal,
+portal, RRHH y eCommerce. Quedan pendientes los overrides administrables por
+empresa, su UI auditada y los endpoints aún basados únicamente en roles o
+controles internos.
 
 ## 7. Mejoras aplicadas durante la evaluación
 
@@ -150,6 +184,8 @@ No aporta:
   predeterminado. El frontend sirve `/api` mediante Nginx hacia la API.
 - Se actualizaron fixtures e2e que no inicializaban las cuentas 1200/5100 antes
   del despacho y una expectativa SaaS obsoleta.
+- La fundación RBAC resolvió permisos desde PostgreSQL en cada petición,
+  conservando JWT sin lista congelada de privilegios.
 - Se mantuvieron los bloqueos de emisión fiscal, pagos, nómina y otras
   operaciones externas.
 

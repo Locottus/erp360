@@ -88,6 +88,106 @@ let AccountingService = class AccountingService {
        LIMIT 1000`, [user.companyId]);
         return result.rows;
     }
+    async listBankReconciliationSuggestions(user) {
+        const result = await this.db.query(`WITH pending_lines AS (
+         SELECT l.id,l.reference,l.counterpart_reference,l.amount::text,l.line_type,l.booked_at,
+                s.statement_reference,b.code AS bank_account_code
+         FROM bank_statement_lines l
+         JOIN bank_account_statements s ON s.id=l.statement_id
+         JOIN bank_accounts b ON b.id=s.bank_account_id
+         WHERE s.company_id=$1
+           AND l.reconciliation_status IN ('pending','matched')
+           AND l.line_type='credit'
+       )
+       SELECT pl.id AS line_id,pl.reference,pl.counterpart_reference,pl.amount,
+              pl.line_type,pl.booked_at,pl.statement_reference,pl.bank_account_code,
+              p.id AS payment_id,p.payment_reference,p.payment_date,
+              CASE
+                WHEN p.payment_reference=pl.reference THEN 'exact_reference'
+                WHEN p.payment_reference=COALESCE(pl.counterpart_reference,'') THEN 'exact_counterpart'
+                ELSE 'exact_amount'
+              END AS match_type
+       FROM pending_lines pl
+       JOIN accounting_payments p
+         ON p.company_id=$1
+        AND p.amount=pl.amount::numeric
+       WHERE pl.counterpart_reference IS NOT NULL
+          OR p.payment_reference=pl.reference
+       ORDER BY pl.booked_at DESC,p.created_at DESC
+       LIMIT 500`, [user.companyId]);
+        await this.insertAuditDirect(user, 'accounting.bank_reconciliation.suggestions', user.companyId, { suggestions: result.rows.length });
+        return result.rows;
+    }
+    async reverseBankLine(user, lineId, input) {
+        if (!input ||
+            typeof input.reason !== 'string' ||
+            input.reason.trim().length < 10 ||
+            input.reason.length > 1000) {
+            throw new common_1.BadRequestException('reason must contain 10 to 1000 characters.');
+        }
+        const client = await this.db.connect();
+        try {
+            await client.query('BEGIN');
+            const line = await client.query(`SELECT l.id,l.reconciliation_status,l.matched_payment_id
+         FROM bank_statement_lines l
+         JOIN bank_account_statements s ON s.id=l.statement_id
+         WHERE l.id=$1 AND s.company_id=$2
+         FOR UPDATE OF l`, [lineId, user.companyId]);
+            if (!line.rows[0]) {
+                throw new common_1.NotFoundException('Bank statement line not found.');
+            }
+            if (line.rows[0].reconciliation_status === 'pending') {
+                throw new common_1.ConflictException('This bank line is already pending.');
+            }
+            const matchedPaymentId = line.rows[0].matched_payment_id;
+            await client.query(`UPDATE bank_statement_lines SET
+           reconciliation_status='pending',
+           matched_payment_id=NULL,
+           difference_amount=NULL,
+           reconciled_at=NULL,
+           reconciled_by=NULL,
+           reconciliation_reason=$2
+         WHERE id=$1`, [lineId, input.reason.trim()]);
+            if (matchedPaymentId) {
+                const other = await client.query(`SELECT COUNT(*)::text AS count
+           FROM bank_statement_lines l
+           JOIN bank_account_statements s ON s.id=l.statement_id
+           WHERE s.company_id=$1
+             AND l.matched_payment_id=$2
+             AND l.id<>$3
+             AND l.reconciliation_status IN ('matched','reconciled')`, [user.companyId, matchedPaymentId, lineId]);
+                if (Number(other.rows[0].count) === 0) {
+                    await client.query(`UPDATE accounting_payments SET status='registered'
+             WHERE id=$1 AND company_id=$2`, [matchedPaymentId, user.companyId]);
+                }
+            }
+            await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
+         VALUES($1,$2,'accounting.bank_line.reverse','bank_statement_lines',$3,$4)`, [
+                user.companyId,
+                user.sub,
+                lineId,
+                JSON.stringify({
+                    before_status: line.rows[0].reconciliation_status,
+                    after_status: 'pending',
+                    matched_payment_id: matchedPaymentId,
+                    reason: input.reason.trim(),
+                }),
+            ]);
+            await client.query('COMMIT');
+            return {
+                id: lineId,
+                status: 'pending',
+                matchedPaymentId: null,
+            };
+        }
+        catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        }
+        finally {
+            client.release();
+        }
+    }
     async reconcileBankLine(user, lineId, input) {
         if (!input || !['matched', 'reconciled', 'difference'].includes(input.status)) {
             throw new common_1.BadRequestException('status must be matched, reconciled or difference.');
@@ -125,25 +225,44 @@ let AccountingService = class AccountingService {
                 matchedPaymentId = input.matchedPaymentId;
                 await client.query(`UPDATE accounting_payments SET status='reconciled' WHERE id=$1 AND company_id=$2`, [matchedPaymentId, user.companyId]);
             }
-            const updated = await client.query(`UPDATE bank_statement_lines SET
-           reconciliation_status=$2,
-           matched_payment_id=$3,
-           difference_amount=$4,
-           reconciled_at=CASE WHEN $2='reconciled' THEN NOW() ELSE NULL END,
-           reconciled_by=CASE WHEN $2='reconciled' THEN $5 ELSE NULL END,
-           reconciliation_reason=$6
-         WHERE id=$1
-         RETURNING reconciliation_status`, [lineId, input.status, matchedPaymentId,
-                input.status === 'difference' ? input.differenceAmount : null,
-                user.sub, input.reason.trim()]);
+            const updated = input.status === 'difference'
+                ? await client.query(`UPDATE bank_statement_lines SET
+                 reconciliation_status=$2::varchar,
+                 matched_payment_id=NULL,
+                 difference_amount=$3::numeric,
+                 reconciled_at=NULL,
+                 reconciled_by=NULL,
+                 reconciliation_reason=$4
+               WHERE id=$1
+               RETURNING reconciliation_status`, [
+                    lineId,
+                    input.status,
+                    input.differenceAmount,
+                    input.reason.trim(),
+                ])
+                : await client.query(`UPDATE bank_statement_lines SET
+                 reconciliation_status=$2::varchar,
+                 matched_payment_id=$3::uuid,
+                 difference_amount=NULL,
+                 reconciled_at=CASE WHEN $2::text='reconciled' THEN NOW() ELSE NULL END,
+                 reconciled_by=CASE WHEN $2::text='reconciled' THEN $4::uuid ELSE NULL END,
+                 reconciliation_reason=$5
+               WHERE id=$1
+               RETURNING reconciliation_status`, [
+                    lineId,
+                    input.status,
+                    matchedPaymentId,
+                    user.sub,
+                    input.reason.trim(),
+                ]);
             await client.query(`INSERT INTO audit_log(company_id,actor_user_id,event_name,entity_name,entity_id,payload)
-         VALUES($1,$2,'accounting.bank_line.reconcile','bank_statement_lines',$3,$4)`, [user.companyId, user.sub, lineId, JSON.stringify({
+         VALUES($1,$2,'accounting.bank_line.reconcile','bank_statement_lines',$4,$3::jsonb)`, [user.companyId, user.sub, JSON.stringify({
                     before_status: line.rows[0].reconciliation_status,
                     after_status: updated.rows[0].reconciliation_status,
                     matched_payment_id: matchedPaymentId,
                     difference_amount: input.differenceAmount ?? null,
                     reason: input.reason.trim(),
-                })]);
+                }), lineId]);
             await client.query('COMMIT');
             return {
                 id: lineId,
@@ -298,11 +417,56 @@ let AccountingService = class AccountingService {
             client.release();
         }
     }
+    async getInventoryCostIntegrity(user) {
+        const result = await this.db.query(`WITH dispatches AS (
+         SELECT m.id,m.quantity::text,m.unit_cost,m.total_cost,
+                dc.id AS dispatch_cost_id,dc.quantity AS dispatch_quantity,
+                dc.unit_cost AS dispatch_unit_cost,dc.total_cost AS dispatch_total_cost
+         FROM inventory_movements m
+         LEFT JOIN inventory_dispatch_costs dc
+           ON dc.inventory_movement_id=m.id AND dc.company_id=m.company_id
+         WHERE m.company_id=$1 AND m.movement_type='sale_dispatch'
+       )
+       SELECT
+         (SELECT COUNT(*)::text FROM dispatches) AS dispatch_movements,
+         (SELECT COUNT(*)::text FROM dispatches WHERE dispatch_cost_id IS NOT NULL) AS dispatch_with_snapshot,
+         (SELECT COUNT(*)::text FROM dispatches WHERE dispatch_cost_id IS NULL) AS dispatch_without_snapshot,
+         (SELECT COUNT(*)::text FROM dispatches
+          WHERE dispatch_unit_cost<0 OR dispatch_total_cost<0 OR unit_cost<0 OR total_cost<0) AS dispatch_with_negative_cost,
+         (SELECT COUNT(*)::text FROM dispatches
+          WHERE dispatch_cost_id IS NOT NULL
+            AND ABS(dispatch_quantity-quantity::numeric)>0.00005) AS dispatch_quantity_mismatch,
+         (SELECT COUNT(*)::text FROM inventory_cost_lots
+          WHERE company_id=$1 AND quantity_remaining<0) AS lot_quantity_negative`, [user.companyId]);
+        const row = result.rows[0];
+        const report = {
+            capturedAt: new Date().toISOString(),
+            dispatchMovements: Number(row.dispatch_movements),
+            dispatchWithSnapshot: Number(row.dispatch_with_snapshot),
+            dispatchWithoutSnapshot: Number(row.dispatch_without_snapshot),
+            dispatchWithNegativeCost: Number(row.dispatch_with_negative_cost),
+            dispatchQuantityMismatch: Number(row.dispatch_quantity_mismatch),
+            lotQuantityNegative: Number(row.lot_quantity_negative),
+            complete: Number(row.dispatch_without_snapshot) === 0 &&
+                Number(row.dispatch_with_negative_cost) === 0 &&
+                Number(row.dispatch_quantity_mismatch) === 0 &&
+                Number(row.lot_quantity_negative) === 0,
+        };
+        await this.insertAuditDirect(user, 'accounting.inventory_cost.integrity_report', user.companyId, report);
+        return report;
+    }
     async getFinancialStatements(user, asOfDate, fromDate, toDate) {
         const reportTo = (0, iso_date_1.requiredDate)(toDate ?? asOfDate ?? new Date().toISOString().slice(0, 10), 'toDate');
         const reportFrom = (0, iso_date_1.requiredDate)(fromDate ?? `${reportTo.slice(0, 4)}-01-01`, 'fromDate');
         if (reportFrom > reportTo)
             throw new common_1.BadRequestException('fromDate must not be later than toDate.');
+        const currentFrom = new Date(`${reportFrom}T00:00:00Z`);
+        const currentTo = new Date(`${reportTo}T00:00:00Z`);
+        const periodDays = Math.round((currentTo.getTime() - currentFrom.getTime()) / 86400000) + 1;
+        const previousTo = new Date(currentFrom.getTime() - 86400000);
+        const previousFrom = new Date(previousTo.getTime() - (periodDays - 1) * 86400000);
+        const previousToDate = previousTo.toISOString().slice(0, 10);
+        const previousFromDate = previousFrom.toISOString().slice(0, 10);
         const result = await this.db.query(`SELECT a.account_type,
               COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date<=$2::date THEN
                 CASE a.account_type
@@ -317,13 +481,20 @@ let AccountingService = class AccountingService {
                   WHEN 'revenue' THEN jl.credit-jl.debit
                   WHEN 'expense' THEN jl.debit-jl.credit
                   ELSE 0 END ELSE 0 END),0)::text AS period_balance
+              ,COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date BETWEEN $5::date AND $4::date THEN
+                CASE a.account_type
+                  WHEN 'revenue' THEN jl.credit-jl.debit
+                  WHEN 'expense' THEN jl.debit-jl.credit
+                  ELSE 0 END ELSE 0 END),0)::text AS previous_period_balance
        FROM accounting_accounts a
        LEFT JOIN accounting_journal_lines jl ON jl.account_id=a.id
        LEFT JOIN accounting_journal_entries je ON je.id=jl.journal_entry_id AND je.company_id=a.company_id
        WHERE a.company_id=$1
-       GROUP BY a.account_type`, [user.companyId, reportTo, reportFrom]);
+       GROUP BY a.account_type`, [user.companyId, reportTo, reportFrom, previousToDate, previousFromDate]);
         const balances = Object.fromEntries(result.rows.map(row => [row.account_type, {
-                balance: Number(row.balance), period: Number(row.period_balance),
+                balance: Number(row.balance),
+                period: Number(row.period_balance),
+                previousPeriod: Number(row.previous_period_balance),
             }]));
         const assets = balances.asset?.balance ?? 0;
         const liabilities = balances.liability?.balance ?? 0;
@@ -332,6 +503,9 @@ let AccountingService = class AccountingService {
         const equity = bookedEquity + accumulatedNetIncome;
         const revenue = balances.revenue?.period ?? 0;
         const expenses = balances.expense?.period ?? 0;
+        const previousRevenue = balances.revenue?.previousPeriod ?? 0;
+        const previousExpenses = balances.expense?.previousPeriod ?? 0;
+        const previousNetIncome = previousRevenue - previousExpenses;
         const totalLiabilitiesAndEquity = liabilities + equity;
         const balanceSheet = {
             asOfDate: reportTo,
@@ -348,6 +522,13 @@ let AccountingService = class AccountingService {
             revenue,
             expenses,
             netIncome: revenue - expenses,
+            comparative: {
+                fromDate: previousFromDate,
+                toDate: previousToDate,
+                revenue: previousRevenue,
+                expenses: previousExpenses,
+                netIncome: previousNetIncome,
+            },
         };
         await this.insertAuditDirect(user, 'accounting.report.financial_statements', user.companyId, {
             from_date: reportFrom,

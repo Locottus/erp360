@@ -5,5 +5,6 @@ export type AuthenticatedRequest = Request & {
         email: string;
         companyId: string;
         roles: string[];
+        permissions?: string[];
     };
 };
