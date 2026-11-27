@@ -15,6 +15,8 @@ import { EcommerceModule } from './ecommerce/ecommerce.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { SaasModule } from './saas/saas.module';
 import { AssistantModule } from './assistant/assistant.module';
+import { PettyCashModule } from './petty-cash/petty-cash.module';
+import { FixedAssetsModule } from './fixed-assets/fixed-assets.module';
 import { HealthService } from './health.service';
 
 @Module({
@@ -33,6 +35,8 @@ import { HealthService } from './health.service';
     DashboardModule,
     SaasModule,
     AssistantModule,
+    PettyCashModule,
+    FixedAssetsModule,
   ],
   controllers: [AppController],
   providers: [AppService, HealthService],

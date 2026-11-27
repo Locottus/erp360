@@ -902,7 +902,7 @@ export class AuthService {
       input.roles.length === 0 ||
       new Set(input.roles).size !== input.roles.length ||
       input.roles.some(
-        (role) => !['admin', 'sales', 'purchases', 'employee'].includes(role),
+        (role) => !['admin', 'accountant', 'sales', 'purchases', 'employee'].includes(role),
       )
     ) {
       throw new BadRequestException(

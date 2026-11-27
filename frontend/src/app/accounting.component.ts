@@ -23,7 +23,9 @@ type BankLine = {
 type FinancialStatements = {
   basis: string;
   balanceSheet: { asOfDate: string; assets: number; liabilities: number; equity: number;
-    accumulatedNetIncome: number; totalLiabilitiesAndEquity: number; balancesMatch: boolean };
+    accumulatedNetIncome: number; totalLiabilitiesAndEquity: number; balancesMatch: boolean;
+    accounts: Record<'assets' | 'liabilities' | 'equity', { accountCode: string; accountName: string; balance: number; previousBalance: number }[]>;
+    comparative: { asOfDate: string; assets: number; liabilities: number; equity: number; balancesMatch: boolean } };
   incomeStatement: {
     fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number;
     comparative: { fromDate: string; toDate: string; revenue: number; expenses: number; netIncome: number };
@@ -170,6 +172,17 @@ type BankSuggestion = {
             <h3>Situación financiera al {{ report.balanceSheet.asOfDate }}</h3>
             <p>Activos {{ report.balanceSheet.assets }} · Pasivos {{ report.balanceSheet.liabilities }} · Patrimonio {{ report.balanceSheet.equity }}
               · Resultado acumulado {{ report.balanceSheet.accumulatedNetIncome }} · Ecuación {{ report.balanceSheet.balancesMatch ? 'cuadrada' : 'no cuadrada' }}</p>
+            <p>Comparativo al {{ report.balanceSheet.comparative.asOfDate }}: Activos {{ report.balanceSheet.comparative.assets }}
+              · Pasivos {{ report.balanceSheet.comparative.liabilities }} · Patrimonio {{ report.balanceSheet.comparative.equity }}</p>
+            <div class="table-wrap"><table class="data-table"><caption>Detalle por cuenta</caption>
+              <thead><tr><th>Cuenta</th><th>Nombre</th><th>Saldo</th><th>Saldo comparativo</th></tr></thead>
+              <tbody>
+                @for (group of statementGroups; track group.key) {
+                  @for (row of report.balanceSheet.accounts[group.key]; track row.accountCode) {
+                    <tr><td>{{ row.accountCode }}</td><td>{{ group.label }} · {{ row.accountName }}</td><td>{{ row.balance }}</td><td>{{ row.previousBalance }}</td></tr>
+                  }
+                }
+              </tbody></table></div>
             <h3>Resultados del {{ report.incomeStatement.fromDate }} al {{ report.incomeStatement.toDate }}</h3>
             <p>Ingresos {{ report.incomeStatement.revenue }} · Gastos {{ report.incomeStatement.expenses }} · Resultado {{ report.incomeStatement.netIncome }}</p>
             <h3>Comparativo inmediato</h3>
@@ -206,6 +219,9 @@ export class AccountingComponent {
   reconciliation: Record<string, { status: 'matched' | 'reconciled' | 'difference'; reason: string;
     matchedPaymentId: string; differenceAmount: number | null }> = {};
   financialStatements: FinancialStatements | null = null;
+  readonly statementGroups = [
+    { key: 'assets', label: 'Activo' }, { key: 'liabilities', label: 'Pasivo' }, { key: 'equity', label: 'Patrimonio' },
+  ] as const;
   inventoryCostIntegrity: InventoryCostIntegrity | null = null;
   statementFileName = '';
   statement = { bankAccountId: '', statementReference: '', statementDate: new Date().toISOString().slice(0, 10),

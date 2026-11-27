@@ -69,9 +69,32 @@ export class AccountingService {
 
   async listAccounts(user: AuthUser) {
     const result = await this.db.query(
-      `SELECT code AS account_code,name AS account_name,account_type,is_active,is_system
+      `SELECT id,code AS account_code,name AS account_name,account_type,is_active,is_system
        FROM accounting_accounts WHERE company_id=$1 ORDER BY code`, [user.companyId]);
     return result.rows;
+  }
+
+  async createAccount(user: AuthUser, input: { code?: unknown; name?: unknown; accountType?: unknown }) {
+    const code = typeof input?.code === 'string' ? input.code.trim().toUpperCase() : '';
+    const name = typeof input?.name === 'string' ? input.name.trim() : '';
+    if (!/^[A-Z0-9][A-Z0-9._-]{0,31}$/.test(code)) {
+      throw new BadRequestException('code must contain 1 to 32 letters, digits, . _ or -.');
+    }
+    if (name.length < 3 || name.length > 128) throw new BadRequestException('name must contain 3 to 128 characters.');
+    if (typeof input.accountType !== 'string' ||
+        !['asset', 'liability', 'equity', 'revenue', 'expense'].includes(input.accountType)) {
+      throw new BadRequestException('accountType is not supported.');
+    }
+    const inserted = await this.db.query<{ id: string }>(
+      `INSERT INTO accounting_accounts (company_id, code, name, account_type)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (company_id, code) DO NOTHING RETURNING id`,
+      [user.companyId, code, name, input.accountType],
+    );
+    if (!inserted.rows[0]) throw new ConflictException('An account with this code already exists.');
+    await this.insertAuditDirect(user, 'accounting.account.created', inserted.rows[0].id, {
+      code, name, account_type: input.accountType,
+    });
+    return { id: inserted.rows[0].id, code, name, accountType: input.accountType };
   }
 
   async listBankAccounts(user: AuthUser) {
@@ -561,6 +584,7 @@ export class AccountingService {
       balance: string;
       period_balance: string;
       previous_period_balance: string;
+      previous_balance: string;
     }>(
       `SELECT a.account_type,
               COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date<=$2::date THEN
@@ -581,6 +605,14 @@ export class AccountingService {
                   WHEN 'revenue' THEN jl.credit-jl.debit
                   WHEN 'expense' THEN jl.debit-jl.credit
                   ELSE 0 END ELSE 0 END),0)::text AS previous_period_balance
+              ,COALESCE(SUM(CASE WHEN je.status='posted' AND je.entry_date<=$4::date THEN
+                CASE a.account_type
+                  WHEN 'asset' THEN jl.debit-jl.credit
+                  WHEN 'liability' THEN jl.credit-jl.debit
+                  WHEN 'equity' THEN jl.credit-jl.debit
+                  WHEN 'revenue' THEN jl.credit-jl.debit
+                  WHEN 'expense' THEN jl.debit-jl.credit
+                  ELSE 0 END ELSE 0 END),0)::text AS previous_balance
        FROM accounting_accounts a
        LEFT JOIN accounting_journal_lines jl ON jl.account_id=a.id
        LEFT JOIN accounting_journal_entries je ON je.id=jl.journal_entry_id AND je.company_id=a.company_id
@@ -592,7 +624,30 @@ export class AccountingService {
       balance: Number(row.balance),
       period: Number(row.period_balance),
       previousPeriod: Number(row.previous_period_balance),
+      previousBalance: Number(row.previous_balance),
     }]));
+    const accountDetail = await this.db.query<{
+      account_code: string; account_name: string; account_type: string; balance: string; previous_balance: string;
+    }>(
+      `SELECT a.code AS account_code,a.name AS account_name,a.account_type,
+              COALESCE(SUM(CASE WHEN je.entry_date<=$2::date THEN
+                CASE WHEN a.account_type='asset' THEN jl.debit-jl.credit ELSE jl.credit-jl.debit END ELSE 0 END),0)::text AS balance,
+              COALESCE(SUM(CASE WHEN je.entry_date<=$3::date THEN
+                CASE WHEN a.account_type='asset' THEN jl.debit-jl.credit ELSE jl.credit-jl.debit END ELSE 0 END),0)::text AS previous_balance
+       FROM accounting_accounts a
+       JOIN accounting_journal_lines jl ON jl.account_id=a.id
+       JOIN accounting_journal_entries je ON je.id=jl.journal_entry_id AND je.company_id=a.company_id AND je.status='posted'
+       WHERE a.company_id=$1 AND a.account_type IN ('asset','liability','equity')
+       GROUP BY a.code,a.name,a.account_type
+       HAVING COALESCE(SUM(CASE WHEN je.entry_date<=$2::date THEN jl.debit-jl.credit ELSE 0 END),0)<>0
+           OR COALESCE(SUM(CASE WHEN je.entry_date<=$3::date THEN jl.debit-jl.credit ELSE 0 END),0)<>0
+       ORDER BY a.account_type,a.code`,
+      [user.companyId, reportTo, previousToDate],
+    );
+    const section = (type: string) => accountDetail.rows.filter(row => row.account_type === type).map(row => ({
+      accountCode: row.account_code, accountName: row.account_name,
+      balance: Number(row.balance), previousBalance: Number(row.previous_balance),
+    }));
     const assets = balances.asset?.balance ?? 0;
     const liabilities = balances.liability?.balance ?? 0;
     const bookedEquity = balances.equity?.balance ?? 0;
@@ -604,6 +659,10 @@ export class AccountingService {
     const previousExpenses = balances.expense?.previousPeriod ?? 0;
     const previousNetIncome = previousRevenue - previousExpenses;
     const totalLiabilitiesAndEquity = liabilities + equity;
+    const previousAssets = balances.asset?.previousBalance ?? 0;
+    const previousLiabilities = balances.liability?.previousBalance ?? 0;
+    const previousAccumulatedNetIncome = (balances.revenue?.previousBalance ?? 0) - (balances.expense?.previousBalance ?? 0);
+    const previousEquity = (balances.equity?.previousBalance ?? 0) + previousAccumulatedNetIncome;
     const balanceSheet = {
       asOfDate: reportTo,
       assets,
@@ -612,6 +671,16 @@ export class AccountingService {
       accumulatedNetIncome,
       totalLiabilitiesAndEquity,
       balancesMatch: Math.abs(assets - totalLiabilitiesAndEquity) < 0.0001,
+      accounts: { assets: section('asset'), liabilities: section('liability'), equity: section('equity') },
+      comparative: {
+        asOfDate: previousToDate,
+        assets: previousAssets,
+        liabilities: previousLiabilities,
+        equity: previousEquity,
+        accumulatedNetIncome: previousAccumulatedNetIncome,
+        totalLiabilitiesAndEquity: previousLiabilities + previousEquity,
+        balancesMatch: Math.abs(previousAssets - (previousLiabilities + previousEquity)) < 0.0001,
+      },
     };
     const incomeStatement = {
       fromDate: reportFrom,

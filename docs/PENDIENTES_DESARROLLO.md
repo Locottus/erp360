@@ -23,10 +23,53 @@ Respaldar y validar antes de migrar; no volver a inicializar datos existentes.
 El directorio padre contiene Odoo como referencia de lógica, no es la aplicación
 que se está ejecutando.
 
-### Continuación pendiente: completar administración RBAC
+### Cierre de RBAC, caja chica y activos fijos: 27 de noviembre de 2026
+
+RBAC queda cerrado: todo endpoint autenticado de empresa declara `@Permissions`
+(verificado por `permission-coverage.spec.ts`, que también exige que cada código
+exista en las migraciones). Excepción deliberada: los controladores `saas`
+usan `SaasOperatorGuard` porque son autoridad de plataforma, no de empresa.
+Los endpoints públicos, de autenticación, storefront y webhook no usan permisos.
+
+Migración `0040_petty_cash_fixed_assets.sql`: 7 permisos nuevos
+(`petty_cash.read/manage/disburse/approve`, `fixed_assets.read/manage/depreciate`,
+total 45), tablas de caja chica y de activos fijos. Solo el administrador los
+recibe por defecto; otros roles requieren override por empresa.
+
+- Caja chica (`/petty-cash`): fondos, vales con llave de idempotencia, aprobación
+  independiente sobre `self_approval_limit` (0 por defecto), saldo proyectado,
+  reposición, arqueo con diferencia para revisión y cierre. Genera asientos
+  `petty_cash_voucher` y movimientos de fondo.
+- Activos fijos (`/fixed-assets`): categorías, altas, activación, depreciación
+  lineal mensual en borrador, contabilización por período vencido, anulación de
+  borradores y baja con fecha, producto de venta y resultado (API y UI). Las
+  líneas contabilizadas se revierten con contraasiento fechado hoy
+  (`POST depreciation/lines/:id/reverse`, migración 0041), en orden inverso; el
+  asiento original no se borra y el período puede regenerarse.
+- Nuevo `POST /accounting/accounts` (admin) para crear cuentas; el listado de
+  cuentas ahora incluye `id`.
+- UI Angular: `/petty-cash` y `/fixed-assets`, navegación, ayuda y pruebas.
+
+Validación en base aislada `erp360_cashassets_20261127` (migraciones 0001–0040):
+API 21 suites/84 pruebas unitarias; e2e nuevo 3/3; frontend 107/107 y `ng build`.
+Los e2e `dashboard` y `assistant` (11 pruebas) ya fallaban antes de estos cambios
+por fixtures desactualizados (permisos RBAC en el mock de `dashboard`; override
+`assistant.manage` para el operador en `assistant`). Corregidos: e2e completo
+22 suites/125 pruebas en verde sobre base aislada. Las migraciones 0040, 0041 y 0042 se aplicaron
+a la base operativa `erp360` con respaldo previo; el ledger se conciliró
+registrando 0032–0034, cuyos objetos ya existían. CI sigue pendiente por decisión
+vigente. Los informes siguen siendo operativos, no certificados.
+
+Cierre de sesión (27-nov-2026): RBAC por defecto de `accountant` (0042, permisos
+`fixed_assets.dispose`/`reverse` separados), P0-03 verificado, y balance con detalle
+por cuenta y comparativo (P0-05 parcial). Pendientes: clasificación corriente/no
+corriente y flujo de efectivo, P0-02 FIFO consumido, fiscal/pagos reales, recuperación
+MFA, políticas de compras y causa raíz del desfase del ledger.
+
+### Continuación pendiente: completar administración RBAC (cerrada): completar administración RBAC (cerrada)
 
 La fundación de permisos granulares quedó implementada en la migración 0038.
-Antes de continuar con caja chica o activos fijos:
+Antes de continuar con caja chica o activos fijos (ya completado):
 
 1. Definir overrides de permisos por empresa sin modificar los defaults globales
    de los roles.

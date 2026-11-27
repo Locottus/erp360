@@ -353,6 +353,15 @@ describe('Users, company, replenishment and exact general ledger', () => {
 
     const statements = (await get('/accounting/reports/financial-statements').query({ asOfDate: '2025-02-15' }).expect(200)).body;
     expect(statements.balanceSheet).toMatchObject({ assets: 250, liabilities: 0, equity: 250, balancesMatch: true });
+    expect(statements.balanceSheet.accounts.assets).toEqual(expect.arrayContaining([expect.objectContaining({ balance: 10000000000250, previousBalance: 0 })]));
+    expect(statements.balanceSheet.accounts.equity).toEqual(expect.arrayContaining([expect.objectContaining({ balance: 250, previousBalance: 0 })]));
+    expect(statements.balanceSheet.accounts.liabilities).toEqual([]);
+    expect(statements.balanceSheet.comparative).toMatchObject({
+      asOfDate: '2024-12-31', assets: 0, liabilities: 0, equity: 0, balancesMatch: true,
+    });
+    const later = (await get('/accounting/reports/financial-statements')
+      .query({ fromDate: '2025-03-01', toDate: '2025-03-31' }).expect(200)).body;
+    expect(later.balanceSheet.comparative).toMatchObject({ asOfDate: '2025-02-28', assets: 250, equity: 250, balancesMatch: true });
     expect(statements.incomeStatement).toMatchObject({ revenue: 0, expenses: 0, netIncome: 0 });
   });
 });

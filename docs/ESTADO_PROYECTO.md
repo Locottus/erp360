@@ -1,5 +1,26 @@
 # Estado del proyecto ERP360 modernizado
 
+## Caja chica, activos fijos y RBAC: 27 de noviembre de 2026
+
+- Migraciones `0040`, `0041` y `0042` (47 permisos en total), aplicadas a `erp360` con respaldo.
+- RBAC por defecto (0042): `accountant` consulta caja chica y activos, registra vales,
+  crea categorías/activos y genera/contabiliza depreciación. Aprobar, reponer, abrir,
+  arquear y cerrar caja chica, dar de baja (`fixed_assets.dispose`) y revertir
+  (`fixed_assets.reverse`) quedan para admin u overrides por empresa. El rol `accountant`
+  ya es asignable desde la invitación de usuarios.
+- Módulos `/petty-cash` y `/fixed-assets` en API y Angular con asientos
+  contables, idempotencia y aprobación independiente.
+- RBAC cerrado: cobertura verificada por prueba; los controladores `saas`
+  usan `SaasOperatorGuard` por diseño. Detalle en `PENDIENTES_DESARROLLO.md`.
+- Pruebas: e2e API 22 suites/125, unitarias API 84, frontend 107 y `ng build`, en base
+  aislada. Los 11 e2e que fallaban (`dashboard`, `assistant`) se corrigieron (fixtures).
+- P0-03 (devoluciones parciales con costo histórico) verificado como implementado.
+- P0-05: el balance añade detalle por cuenta y comparativo al período anterior
+  (`balanceSheet.accounts` y `balanceSheet.comparative`); sigue siendo operativo, no
+  certificado. Faltan clasificación corriente/no corriente y flujo de efectivo.
+- Pendiente: P0-02 (FIFO consumido), fiscal y pagos reales, recuperación MFA,
+  políticas de compras y causa raíz del desfase del ledger. CI sigue pendiente por decisión.
+
 ## Fundación RBAC: 25 de noviembre de 2026
 
 - Migración `0038_granular_permissions.sql`: 38 permisos y mapeos compatibles

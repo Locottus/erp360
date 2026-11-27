@@ -19,6 +19,16 @@
   y restauración del pago a `registered` cuando no queda otra línea vinculada.
   **P0-05 (estados financieros):** activos, pasivos, patrimonio, resultados y
   comparativo inmediato del resultado están disponibles como reporte operativo.
+- **P0-03 (créditos y retornos parciales):** implementado. La devolución física
+  repone existencias a las capas de costo del despacho original (costo histórico),
+  admite devoluciones parciales por línea de nota de crédito, publica el asiento
+  de reversión de costo de ventas y limita los reembolsos al saldo. Cubierto por
+  e2e `operational-controls` y `accounting-completion`.
+- **P0-05 (estados financieros):** además de los totales, el balance incluye
+  detalle por cuenta (activo, pasivo, patrimonio) y comparativo al cierre del
+  período anterior equivalente; el estado de resultados conserva su comparativo.
+  Sigue siendo reporte operativo (`basis: operational_unreviewed`), no certificado;
+  no incluye flujo de efectivo ni clasificación corriente/no corriente.
 - **Identidad:** MFA TOTP implementado en API y campo de código en login.
   Alta, verificación y baja MFA disponibles visualmente en `/workspace`.
   Administradores pueden restablecer MFA desde Usuarios con revisión/motivo
@@ -31,18 +41,15 @@
    - Registrar asiento automático de COGS contra inventario en el momento definido por política.
    - Cubrir ajustes de inventario (`adjustment_in/out`) con costo explícito y trazabilidad.
 
-2. **P0-03 · Créditos y retornos parciales**
-   - Aplicar costo histórico del despacho original en devoluciones de cliente.
-   - Integrar ajustes de costo en nota de crédito parcial y su asiento contable.
-   - Homologar reglas para devoluciones parciales combinadas con pagos/reembolsos.
+2. **P0-03 · Créditos y retornos parciales** — cerrado (ver estado de avance).
 
 3. **P0-04 · Conciliación bancaria real**
    - Importación de extractos (archivo/API) y matching semiautomático.
    - Estados de conciliación por movimiento (pendiente, conciliado, diferencia).
    - Evidencia de conciliación y reversión controlada.
 
-4. **P0-05 · Estados financieros**
-   - Definir estructura final de estados (clasificación, periodos, comparativos).
+4. **P0-05 · Estados financieros** (parcial: detalle y comparativo del balance hechos)
+   - Falta clasificación corriente/no corriente y flujo de efectivo (requieren decisión del plan de cuentas).
    - Consolidar criterios de cierre y reapertura con validaciones de integridad.
    - Diferenciar reportes operativos vs reportes legales/certificados.
 

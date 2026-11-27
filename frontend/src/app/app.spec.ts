@@ -68,7 +68,7 @@ describe('App', () => {
     user.update(value => value ? { ...value, roles: ['admin'], permissions: ['*'] } : null);
     role.set('owner'); fixture.detectChanges();
     expect(routes()).toEqual(['/', '/workspace', '/login', '/operations', '/inventory', '/invoicing',
-      '/receiving', '/controls', '/accounting', '/people', '/store', '/portal', '/ecommerce/admin',
+      '/receiving', '/controls', '/accounting', '/petty-cash', '/fixed-assets', '/people', '/store', '/portal', '/ecommerce/admin',
       '/company', '/users', '/catalogs', '/subscription', '/platform/billing', '/processes']);
     user.set(null); role.set(null); fixture.detectChanges();
     expect(routes()).not.toContain('/users');

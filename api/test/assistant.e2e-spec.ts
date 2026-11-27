@@ -51,6 +51,9 @@ describe('Assistant tenant services and monthly quotas', () => {
     await post('/auth/reset-password', { token: invited.body.activationToken, password }).expect(201);
     buyerToken = (await post('/auth/login', { email, password }).expect(201)).body.access_token;
     await db.query(`INSERT INTO platform_saas_operators(user_id,role,created_by,updated_by) VALUES($1,'billing',$2,$2)`, [buyerId, ownerId]);
+    await db.query(`INSERT INTO company_permission_overrides(company_id,permission_code,effect,updated_by)
+      VALUES($1,'assistant.manage','grant',$2)`, [companyId, ownerId]);
+    buyerToken = (await post('/auth/login', { email, password }).expect(201)).body.access_token;
     await post('/assistant/admin/service-types', { code, name: 'Synthetic AI service', monthlyTokens: 10000, maxOutputTokens: 128,
       enabled: true, expectedRevision: 0, reason: 'Synthetic fixture for quota tests' }).expect(201);
     for (const user of [ownerId, buyerId]) await post(`/assistant/admin/companies/${companyId}/users/${user}/service`,
@@ -98,6 +101,7 @@ describe('Assistant tenant services and monthly quotas', () => {
         await db.query('DELETE FROM audit_log WHERE company_id=ANY($1::uuid[])', [companyIds]);
         await db.query('DELETE FROM user_password_resets WHERE company_id=ANY($1::uuid[])', [companyIds]);
         await db.query('DELETE FROM platform_saas_operators WHERE user_id IN (SELECT id FROM users WHERE company_id=ANY($1::uuid[]))', [companyIds]);
+        await db.query('DELETE FROM company_permission_overrides WHERE company_id=ANY($1::uuid[])', [companyIds]);
         await db.query('DELETE FROM users WHERE company_id=ANY($1::uuid[])', [companyIds]);
         await db.query('DELETE FROM companies WHERE id=ANY($1::uuid[])', [companyIds]);
         await db.query('DELETE FROM assistant_service_types WHERE code=$1', [code]);

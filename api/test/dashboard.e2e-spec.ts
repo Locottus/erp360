@@ -62,6 +62,11 @@ describe('Dashboard temporal (e2e)', () => {
           email: 'dashboard@example.test',
           companyId,
           roles: [role],
+          permissions: {
+            admin: ['*'],
+            sales: ['inventory.read', 'sales.read'],
+            purchases: ['inventory.read', 'purchases.read'],
+          }[role] ?? ['inventory.read'],
         }),
       })
       .compile();

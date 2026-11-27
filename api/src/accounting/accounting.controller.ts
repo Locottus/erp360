@@ -35,6 +35,13 @@ export class AccountingController {
     return this.accountingService.listAccounts(request.user);
   }
 
+  @Post('accounts')
+  @Roles('admin')
+  @Permissions('accounting.post')
+  createAccount(@Req() request: AuthenticatedRequest, @Body() input: { code?: unknown; name?: unknown; accountType?: unknown }) {
+    return this.accountingService.createAccount(request.user, input);
+  }
+
   @Get('reports/general-ledger')
   @Roles('admin')
   @Permissions('accounting.read')

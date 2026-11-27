@@ -96,7 +96,7 @@ type RbacPermission = { code: string; resource: string; action: string; descript
 export class UsersComponent {
   private readonly http = inject(HttpClient);
   private readonly session = inject(SessionService);
-  readonly availableRoles = [{ code: 'admin', label: 'Administrador' }, { code: 'sales', label: 'Ventas' },
+  readonly availableRoles = [{ code: 'admin', label: 'Administrador' }, { code: 'accountant', label: 'Contabilidad' }, { code: 'sales', label: 'Ventas' },
     { code: 'purchases', label: 'Compras' }, { code: 'employee', label: 'Consulta' }];
   users: User[] = [];
   rbacPermissions: RbacPermission[] = [];

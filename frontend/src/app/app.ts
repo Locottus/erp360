@@ -29,6 +29,8 @@ const navigationGroups: { label: string; links: NavigationLink[] }[] = [
     { route: '/receiving', label: 'Recepciones', icon: 'box-arrow-in-down', permissions: ['purchases.confirm', 'purchases.read'] },
     { route: '/controls', label: 'Control operativo', icon: 'arrow-left-right', permissions: ['inventory.write', 'inventory.confirm'] },
     { route: '/accounting', label: 'Contabilidad', icon: 'journal-text', permissions: ['accounting.read'] },
+    { route: '/petty-cash', label: 'Caja chica', icon: 'cash-coin', permissions: ['petty_cash.read'] },
+    { route: '/fixed-assets', label: 'Activos fijos', icon: 'pc-display', permissions: ['fixed_assets.read'] },
     { route: '/people', label: 'Personas', icon: 'person-badge', permissions: ['hr.read', 'hr.manage'] },
   ] },
   { label: 'Canales digitales', links: [
